@@ -145,6 +145,81 @@ contacts, and cycles indefinitely — but it's real mains wiring, so only take
 that on if you're comfortable with it and feeding it from a GFCI outlet. You
 want the tank on a GFCI regardless.
 
+### Full wiring diagram
+
+All three sensors need 3V3 and GND, which is six wires converging on two
+pins. Land power on a small bus (screw-terminal breakout, Qwiic/Grove hub
+used purely for power, or a scrap of perfboard) and run only the signal
+wires back to the GPIOs.
+
+Total sensor draw is under 10 mA, so the board's own regulator powers
+everything. No external supply.
+
+**Power — one pair of wires from the board, fanned out:**
+
+```
+   ESP32-C6-LCD-1.47
+   ┌─────────────┐
+   │             │        ┌──────────── 3V3 RAIL ────────────┐
+   │        3V3 ●┼────────┤                                  │
+   │             │        │      │            │           │  │
+   │        GND ●┼───┐    │     VCC          VCC         VCC │
+   │             │   │    │   DS18B20        TDS        BH1750
+   └─────────────┘   │    │     GND          GND         GND │
+                     │    │      │            │           │  │
+                     └────┤                                  │
+                          └──────────── GND RAIL ────────────┘
+                                             │
+                                             └──── Relay IN- (both ch.)
+```
+
+**Signal — one wire each, straight to its GPIO:**
+
+```
+   ESP32-C6-LCD-1.47
+   ┌─────────────┐
+   │             │
+   │      GPIO18 ●──────────┬──────────────► DS18B20  DQ   (yellow)
+   │             │          │
+   │             │         ┌┴┐
+   │             │         │ │ 4.7k  pull-up, at the BOARD end
+   │             │         └┬┘        not out at the probe
+   │        3V3 ─┼──────────┘
+   │             │
+   │       GPIO1 ●─────────────────────────► TDS       A    (analog)
+   │             │
+   │      GPIO19 ●─────────────────────────► BH1750    SDA
+   │      GPIO20 ●─────────────────────────► BH1750    SCL
+   │             │                           BH1750    ADDR → leave open
+   │             │
+   │      GPIO23 ●─────────────────────────► D-1584TL  CH1 IN+  (heater)
+   │      GPIO10 ●─────────────────────────► D-1584TL  CH2 IN+  (fan)
+   │             │
+   └─────────────┘
+```
+
+**Every wire, in one table:**
+
+| From (ESP32-C6) | To | Notes |
+|---|---|---|
+| 3V3 | bus → DS18B20 red, TDS VCC, BH1750 VCC | TDS at 3.3 V, **never 5 V** |
+| GND | bus → DS18B20 black, TDS GND, BH1750 GND, relay IN− ×2 | one common ground |
+| GPIO18 | DS18B20 yellow (DQ) | + 4.7 kΩ from DQ to 3V3 |
+| GPIO1 | TDS "A" | ADC-capable pin |
+| GPIO19 | BH1750 SDA | |
+| GPIO20 | BH1750 SCL | |
+| GPIO23 | D-1584TL channel 1 IN+ | heater |
+| GPIO10 | D-1584TL channel 2 IN+ | fan |
+
+Not wired: BH1750 `ADDR` (leave floating for address 0x23), and the relay
+module's mains side — it has its own NEMA 5-15P cord.
+
+**Routing matters for one wire in particular.** The TDS line is a
+high-impedance analog signal; run it alongside the relay module's power cord
+and it will pick up 60 Hz hum. Keep those separated. If the BH1750 sits more
+than roughly a foot from the board, add a 100 nF cap across its VCC/GND at
+the sensor end.
+
 ---
 
 ## Flashing
