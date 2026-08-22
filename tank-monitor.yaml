@@ -1,0 +1,494 @@
+substitutions:
+  device_name: tank-monitor
+  friendly_name: Tank Monitor
+  # --- Calibration ---
+  # Target water temperature, in Celsius. 24.0 C = 75.2 F.
+  target_temp: "24.0"
+  # K-value for the TDS probe. 1.0 is the factory default.
+  # Calibrate with a known solution (e.g. 707ppm / 1413us-cm standard).
+  tds_k_factor: "1.0"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-c6-devkitc-1
+  variant: esp32c6
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+logger:
+  level: INFO
+
+# SNTP, not Home Assistant -- the learned light schedule needs a wall clock
+# that keeps working when HA is down.
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: !secret timezone
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Fallback AP so the device is recoverable if Wi-Fi drops
+  ap:
+    ssid: "${device_name} setup"
+    password: !secret fallback_ap_password
+
+captive_portal:
+
+# OTA + a local web page for eyeballing live values
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+web_server:
+  port: 80
+  version: 3
+
+mqtt:
+  broker: !secret mqtt_broker
+  port: 1883
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  discovery: true
+  discovery_prefix: homeassistant
+  topic_prefix: ${device_name}
+  birth_message:
+    topic: ${device_name}/status
+    payload: online
+  will_message:
+    topic: ${device_name}/status
+    payload: offline
+
+# On-board 1.47" 172x320 ST7789V panel. `mipi_spi` rather than the plain
+# st7789v driver: with a 90 degree rotation the older driver needs a full
+# framebuffer and the C6 (512KB SRAM, no PSRAM) runs out of memory.
+spi:
+  clk_pin: GPIO7
+  mosi_pin: GPIO6
+
+display:
+  - platform: mipi_spi
+    id: tank_display
+    # Board preset -- supplies cs/dc/reset pins, 34px offset and colour
+    # inversion for this exact panel.
+    model: WAVESHARE-ESP32-C6-LCD-1.47
+    rotation: 90
+    update_interval: 1s
+    pages:
+      - id: page_main
+        lambda: |-
+          it.fill(Color::BLACK);
+          const auto white = Color(255, 255, 255);
+          const auto grey = Color(130, 130, 130);
+          const auto amber = Color(255, 170, 0);
+          const auto cyan = Color(0, 200, 255);
+          const auto red = Color(255, 60, 60);
+
+          // Big current temperature, in F
+          if (!isnan(id(water_temp).state)) {
+            it.printf(8, 4, id(font_big), white, "%.1f", id(water_temp).state * 9.0f / 5.0f + 32.0f);
+            it.print(120, 18, id(font_small), grey, "F");
+          } else {
+            it.print(8, 4, id(font_big), red, "--.-");
+          }
+
+          // Target, to the right of it
+          it.printf(180, 8, id(font_small), grey, "target");
+          it.printf(180, 24, id(font_med), cyan, "%.1f F",
+                    id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f);
+
+          // Heater duty as a bar
+          const float duty = id(controller).get_heater_duty();
+          it.print(8, 66, id(font_small), grey, "heater");
+          it.rectangle(70, 66, 180, 14, grey);
+          if (duty > 0.0f)
+            it.filled_rectangle(70, 66, (int) (180.0f * duty / 100.0f), 14, amber);
+          it.printf(258, 66, id(font_small), amber, "%.0f%%", duty);
+
+          // Fan duty
+          const float fan = id(controller).get_fan_duty();
+          it.print(8, 88, id(font_small), grey, "fan");
+          it.rectangle(70, 88, 180, 14, grey);
+          if (fan > 0.0f)
+            it.filled_rectangle(70, 88, (int) (180.0f * fan / 100.0f), 14, cyan);
+          it.printf(258, 88, id(font_small), cyan, "%.0f%%", fan);
+
+          // TDS and light
+          if (!isnan(id(tds).state))
+            it.printf(8, 114, id(font_small), white, "TDS %.0f ppm", id(tds).state);
+          if (!isnan(id(tank_lux).state))
+            it.printf(180, 114, id(font_small), white, "%.0f lx", id(tank_lux).state);
+
+          // Status line
+          if (id(controller).is_safety_tripped())
+            it.print(8, 140, id(font_med), red, "PROBE FAULT");
+          else
+            it.printf(8, 140, id(font_med), grey, "%s", id(controller).get_state_text());
+
+font:
+  - file: "gfonts://Roboto"
+    id: font_small
+    size: 14
+  - file: "gfonts://Roboto"
+    id: font_med
+    size: 20
+  - file: "gfonts://Roboto@700"
+    id: font_big
+    size: 56
+    glyphs: "0123456789.-"
+
+i2c:
+  sda: GPIO19
+  scl: GPIO20
+  scan: true
+
+# ---------------------------------------------------------------
+# DS18B20 temperature probe -- data on GPIO4, 4.7k pull-up to 3.3V
+# ---------------------------------------------------------------
+one_wire:
+  - platform: gpio
+    pin: GPIO18
+
+# ---------------------------------------------------------------
+# Heater and fan, driven through a CZH-Labs D-1584TL 2-channel relay
+# outlet module (optocoupled inputs, active high -- no `inverted:` needed).
+#
+# Time-proportional rather than on/off: over each 15 minute window the
+# heater is on for `duty` of the window. This is what removes the 3 degF
+# hysteresis swing -- the heater delivers 30% power instead of slamming
+# between 0% and 100%.
+#
+# 15 min rather than 5 is set by relay wear, not by control quality: these
+# are mechanical contacts, and 5 min windows would burn ~288 cycles/day.
+# Swap in an SSR and this can drop back to 300s.
+# ---------------------------------------------------------------
+output:
+  - platform: slow_pwm
+    id: heater_output
+    pin: GPIO23
+    period: 900s
+    restart_cycle_on_state_change: false
+
+  - platform: ledc
+    id: backlight_output
+    pin: GPIO22
+
+  - platform: slow_pwm
+    id: fan_output
+    pin: GPIO10
+    period: 900s
+    restart_cycle_on_state_change: false
+
+tank_controller:
+  id: controller
+  temperature: water_temp
+  illuminance: tank_lux
+  heater: heater_output
+  fan: fan_output
+  time_id: sntp_time
+  setpoint: ${target_temp}
+  # Hard cutouts. Outside these the model is ignored entirely.
+  min_temperature: 21.0
+  max_temperature: 27.0
+  # Bright aquarium light at the sensor, in lux. Used to normalise.
+  full_scale_lux: 3000
+  # How aggressively to close a temperature error. Longer = gentler.
+  # Kept well above the 15 min actuator window so the controller isn't
+  # demanding changes faster than the relay can actually resolve them.
+  response_time: 30min
+  update_interval: 30s
+
+number:
+  - platform: template
+    name: "Target Temperature"
+    id: target_temperature
+    icon: "mdi:thermostat"
+    unit_of_measurement: "°C"
+    min_value: 21.0
+    max_value: 27.0
+    step: 0.1
+    optimistic: true
+    restore_value: false
+    initial_value: ${target_temp}
+    entity_category: config
+    set_action:
+      - tank_controller.set_setpoint:
+          id: controller
+          setpoint: !lambda "return x;"
+
+light:
+  - platform: monochromatic
+    name: "Display Backlight"
+    output: backlight_output
+    restore_mode: ALWAYS_ON
+    default_transition_length: 250ms
+
+switch:
+  - platform: template
+    name: "Adaptive Learning"
+    icon: "mdi:brain"
+    lambda: "return id(controller).get_learning_enabled();"
+    entity_category: config
+    turn_on_action:
+      - tank_controller.set_learning:
+          id: controller
+          learning: true
+    turn_off_action:
+      - tank_controller.set_learning:
+          id: controller
+          learning: false
+
+# ---------------------------------------------------------------
+# TDS meter analog output -> GPIO1 (ADC)
+# ---------------------------------------------------------------
+sensor:
+  - platform: dallas_temp
+    # Leave `address` off for a single probe; run once and copy the
+    # address the log prints if you ever add a second one.
+    name: "Water Temperature"
+    id: water_temp
+    update_interval: 2s
+    accuracy_decimals: 2
+    filters:
+      - filter_out: nan
+      # Median of the last 5 kills single-sample glitches on the bus
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+
+  # Raw probe voltage. Internal-only; feeds the TDS calculation.
+  - platform: adc
+    pin: GPIO1
+    id: tds_voltage
+    update_interval: 500ms
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      # 20 samples smoothed -- the probe output is noisy AC-excited
+      - median:
+          window_size: 20
+          send_every: 4
+          send_first_at: 4
+
+  - platform: template
+    name: "TDS"
+    id: tds
+    unit_of_measurement: "ppm"
+    icon: "mdi:water-opacity"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      const float v = id(tds_voltage).state;
+      if (isnan(v)) return {};
+
+      // Temperature-compensate to the 25 degC reference the probe's
+      // polynomial is defined at. Fall back to 25 if the probe is absent.
+      float t = id(water_temp).state;
+      if (isnan(t)) t = 25.0f;
+      const float coeff = 1.0f + 0.02f * (t - 25.0f);
+      if (coeff <= 0.0f) return {};
+      const float vc = v / coeff;
+
+      // DFRobot/Keyestudio gravity TDS polynomial (V -> ppm), then the
+      // 0.5 TDS-to-conductivity factor, then the user K-value.
+      float ppm = (133.42f * vc * vc * vc
+                   - 255.86f * vc * vc
+                   + 857.39f * vc) * 0.5f * ${tds_k_factor};
+      if (ppm < 0.0f) ppm = 0.0f;
+      return ppm;
+    filters:
+      - clamp:
+          min_value: 0
+          max_value: 2000
+
+  # Electrical conductivity, derived from the same reading
+  - platform: template
+    name: "Electrical Conductivity"
+    unit_of_measurement: "µS/cm"
+    icon: "mdi:flash"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 2s
+    lambda: |-
+      if (isnan(id(tds).state)) return {};
+      return id(tds).state * 2.0f;
+
+  # Diagnostics
+  - platform: template
+    name: "TDS Probe Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+    update_interval: 10s
+    entity_category: diagnostic
+    lambda: |-
+      if (isnan(id(tds_voltage).state)) return {};
+      return id(tds_voltage).state;
+
+  # -------------------------------------------------------------
+  # BH1750 (GY-302) ambient light -- ADDR floating gives 0x23
+  # -------------------------------------------------------------
+  - platform: bh1750
+    name: "Tank Light Level"
+    id: tank_lux
+    address: 0x23
+    update_interval: 30s
+    accuracy_decimals: 0
+    filters:
+      - filter_out: nan
+
+  # -------------------------------------------------------------
+  # Controller state
+  # -------------------------------------------------------------
+  - platform: template
+    name: "Water Temperature F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: |-
+      if (isnan(id(water_temp).state)) return {};
+      return id(water_temp).state * 9.0f / 5.0f + 32.0f;
+
+  - platform: template
+    name: "Heater Output"
+    id: heater_duty
+    unit_of_measurement: "%"
+    icon: "mdi:radiator"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_heater_duty();"
+
+  - platform: template
+    name: "Fan Output"
+    unit_of_measurement: "%"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_fan_duty();"
+
+  - platform: template
+    name: "Predicted Temperature (15 min)"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      float v = id(controller).get_predicted_temperature();
+      if (isnan(v)) return {};
+      return v;
+
+  - platform: template
+    name: "Temperature Drift Rate"
+    unit_of_measurement: "°C/min"
+    icon: "mdi:trending-up"
+    accuracy_decimals: 4
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_drift_rate();"
+
+  - platform: template
+    name: "Model Confidence"
+    unit_of_measurement: "%"
+    icon: "mdi:brain"
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_confidence();"
+
+  - platform: template
+    name: "Tank Time Constant"
+    unit_of_measurement: "min"
+    icon: "mdi:timer-sand"
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: |-
+      float v = id(controller).get_time_constant();
+      if (isnan(v)) return {};
+      return v;
+
+  - platform: template
+    name: "Learned Heater Power"
+    unit_of_measurement: "°C/min"
+    icon: "mdi:fire"
+    accuracy_decimals: 4
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_heater_gain();"
+
+  - platform: template
+    name: "Learned Light Heat Gain"
+    unit_of_measurement: "°C/min"
+    icon: "mdi:white-balance-sunny"
+    accuracy_decimals: 4
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_light_gain();"
+
+  - platform: template
+    name: "Predicted Light Load"
+    unit_of_measurement: "%"
+    icon: "mdi:lightbulb-on-outline"
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_predicted_light_load() * 100.0f;"
+
+  - platform: wifi_signal
+    name: "Wi-Fi Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: uptime
+    name: "Uptime"
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+
+  - platform: template
+    name: "Temperature Fault"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_safety_tripped();"
+
+text_sensor:
+  - platform: template
+    name: "Controller State"
+    icon: "mdi:state-machine"
+    update_interval: 30s
+    lambda: "return {id(controller).get_state_text()};"
+
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      entity_category: diagnostic
+
+button:
+  - platform: template
+    name: "Reset Learning"
+    icon: "mdi:brain"
+    entity_category: config
+    on_press:
+      - tank_controller.reset_learning:
+          id: controller
+
+  - platform: restart
+    name: "Restart"
+    entity_category: config

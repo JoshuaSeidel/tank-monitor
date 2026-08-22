@@ -1,0 +1,178 @@
+#pragma once
+
+#include "esphome/core/component.h"
+#include "esphome/core/automation.h"
+#include "esphome/core/preferences.h"
+#include "esphome/components/sensor/sensor.h"
+#include "esphome/components/output/float_output.h"
+
+#ifdef USE_TIME
+#include "esphome/core/time.h"
+#include "esphome/components/time/real_time_clock.h"
+#endif
+
+namespace esphome {
+namespace tank_controller {
+
+// Number of parameters in the thermal model:
+//   dT/dt = kh*H - kf*F - ka*(T - TREF) + kl*L + c        [degC per minute]
+// estimated as theta = [kh, -kf, -ka, kl, c]
+static const uint8_t N_PARAMS = 5;
+
+// Light profile resolution: 96 slots of 15 minutes covers one day.
+static const uint8_t N_SLOTS = 96;
+
+// The model is written around this reference temperature so that the
+// regressors stay small and the RLS stays numerically well behaved.
+static const float TEMP_REF = 25.0f;
+
+struct ThermalModel {
+  // theta[0] = kh   heater gain, degC/min at 100% duty        (>0)
+  // theta[1] = -kf  fan gain, degC/min at 100% duty           (<0)
+  // theta[2] = -ka  passive loss per degC above ambient       (<0)
+  // theta[3] = kl   light gain, degC/min at full scale lux    (>=0)
+  // theta[4] = c    constant drift                            (any)
+  float theta[N_PARAMS];
+  // Upper triangle of the RLS covariance, stored dense for simplicity.
+  float p[N_PARAMS][N_PARAMS];
+  uint32_t updates;
+};
+
+struct LightProfile {
+  // Exponentially-averaged normalised illuminance per 15-minute slot.
+  float slot[N_SLOTS];
+  // How much evidence each slot has seen; slots below 1 are untrusted.
+  float weight[N_SLOTS];
+};
+
+class TankController : public PollingComponent {
+ public:
+  void setup() override;
+  void update() override;
+  void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::LATE; }
+
+  void set_temperature_sensor(sensor::Sensor *s) { this->temp_sensor_ = s; }
+  void set_illuminance_sensor(sensor::Sensor *s) { this->lux_sensor_ = s; }
+  void set_heater(output::FloatOutput *o) { this->heater_ = o; }
+  void set_fan(output::FloatOutput *o) { this->fan_ = o; }
+#ifdef USE_TIME
+  void set_time(time::RealTimeClock *t) { this->time_ = t; }
+#endif
+
+  void set_setpoint(float v);
+  float get_setpoint() const { return this->setpoint_; }
+  void set_min_temperature(float v) { this->min_temp_ = v; }
+  void set_max_temperature(float v) { this->max_temp_ = v; }
+  void set_full_scale_lux(float v) { this->full_scale_lux_ = v; }
+  void set_response_time(float minutes) { this->response_time_ = minutes; }
+  void set_learning_enabled(bool v) { this->learning_enabled_ = v; }
+  bool get_learning_enabled() const { return this->learning_enabled_; }
+  void set_fan_available(bool v) { this->fan_available_ = v; }
+
+  // --- Values published to Home Assistant -------------------------------
+  float get_heater_duty() const { return this->heater_duty_ * 100.0f; }
+  float get_fan_duty() const { return this->fan_duty_ * 100.0f; }
+  float get_drift_rate() const { return this->drift_rate_; }
+  float get_heater_gain() const { return this->model_.theta[0]; }
+  float get_fan_gain() const { return -this->model_.theta[1]; }
+  float get_loss_coefficient() const { return -this->model_.theta[2]; }
+  float get_light_gain() const { return this->model_.theta[3]; }
+  float get_time_constant() const;
+  float get_confidence() const;
+  float get_predicted_temperature() const { return this->predicted_temp_; }
+  float get_predicted_light_load() const { return this->predicted_light_; }
+  bool is_safety_tripped() const { return this->safety_tripped_; }
+  const char *get_state_text() const { return this->state_text_; }
+
+  // Wipe the learned model and light profile back to priors.
+  void reset_learning();
+
+ protected:
+  void apply_outputs_(float heater, float fan);
+  void learn_(float dt_min, float measured_rate);
+  void update_light_profile_(float lux_norm);
+  float predicted_light_for_(int minutes_ahead) const;
+  int current_slot_(int minutes_ahead = 0) const;
+  void clamp_model_();
+  void load_prior_();
+  void save_state_();
+
+  sensor::Sensor *temp_sensor_{nullptr};
+  sensor::Sensor *lux_sensor_{nullptr};
+  output::FloatOutput *heater_{nullptr};
+  output::FloatOutput *fan_{nullptr};
+#ifdef USE_TIME
+  time::RealTimeClock *time_{nullptr};
+#endif
+
+  ThermalModel model_{};
+  LightProfile light_{};
+  ESPPreferenceObject model_pref_;
+  ESPPreferenceObject light_pref_;
+  ESPPreferenceObject setpoint_pref_;
+
+  float setpoint_{25.0f};
+  float min_temp_{20.0f};
+  float max_temp_{30.0f};
+  float full_scale_lux_{2000.0f};
+  float response_time_{20.0f};
+  bool learning_enabled_{true};
+  bool fan_available_{true};
+
+  float heater_duty_{0.0f};
+  float fan_duty_{0.0f};
+  float integral_{0.0f};
+  float drift_rate_{0.0f};
+  float predicted_temp_{NAN};
+  float predicted_light_{0.0f};
+
+  // Learning is done over a slow window: a DS18B20 quantises to 0.0625 degC,
+  // which swamps the real drift rate if you differentiate every control tick.
+  float learn_anchor_temp_{NAN};
+  uint32_t learn_anchor_ms_{0};
+  float acc_heater_{0.0f};
+  float acc_fan_{0.0f};
+  float acc_light_{0.0f};
+  float acc_temp_{0.0f};
+  uint32_t acc_n_{0};
+
+  float last_temp_{NAN};
+  uint32_t last_update_ms_{0};
+  uint32_t missing_since_ms_{0};
+  uint32_t last_save_ms_{0};
+  bool safety_tripped_{false};
+  const char *state_text_{"starting"};
+};
+
+template<typename... Ts> class ResetLearningAction : public Action<Ts...> {
+ public:
+  explicit ResetLearningAction(TankController *parent) : parent_(parent) {}
+  void play(const Ts &...x) override { this->parent_->reset_learning(); }
+
+ protected:
+  TankController *parent_;
+};
+
+template<typename... Ts> class SetSetpointAction : public Action<Ts...> {
+ public:
+  explicit SetSetpointAction(TankController *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(float, value)
+  void play(const Ts &...x) override { this->parent_->set_setpoint(this->value_.value(x...)); }
+
+ protected:
+  TankController *parent_;
+};
+
+template<typename... Ts> class SetLearningAction : public Action<Ts...> {
+ public:
+  explicit SetLearningAction(TankController *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(bool, value)
+  void play(const Ts &...x) override { this->parent_->set_learning_enabled(this->value_.value(x...)); }
+
+ protected:
+  TankController *parent_;
+};
+
+}  // namespace tank_controller
+}  // namespace esphome
