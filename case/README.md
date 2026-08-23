@@ -8,16 +8,29 @@ both fail: they assume a board with the LCD centred and USB on a long edge.
 This board is a stick — USB-C, BOOT and RESET are all crammed onto one short
 end, with the glass filling the far two-thirds.
 
-## Print this first
+## Print this first: the fit gauge
 
-`tank-monitor-fittest.stl` — a 10 mm slice through the USB end. About three
-minutes. It tells you whether the pocket and the USB slot are right before
-you spend an hour on the real thing.
+`fit-gauge.stl` — six pockets, **21.0 to 23.5 mm in 0.5 mm steps**, each
+stamped with its size. About five minutes, no supports.
 
-LAFVIN publishes no mechanical drawing, so the dimensions here were scaled
-off photographs and are good to roughly **±1 mm**. If the coupon is tight or
-sloppy, adjust `pcb_l` / `pcb_w` / `back_h` at the top of the `.scad` and
-re-render.
+Slide the board into each. The one that grips lightly without needing force
+is your real board width. Put that number in `pcb_w` at the top of
+`tank-monitor-case.scad` and re-render — the case is then correct by
+measurement instead of by estimate.
+
+This exists because the first coupon came out too loose. The board
+dimensions here were scaled off photographs, and no amount of re-measuring
+the same photographs fixes that. The gauge answers it directly.
+
+## Then the coupon
+
+`tank-monitor-fittest.stl` — a 10 mm slice through the **USB end**. Print it
+after setting `pcb_w` from the gauge. It checks the two things the gauge
+can't: that a USB-C plug reaches the port through the slot, and that the
+walls clear BOOT and RESET.
+
+Slide it onto the USB end, not the far end — the port cutout is in its end
+wall.
 
 ## Then
 
