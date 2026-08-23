@@ -318,6 +318,12 @@ softens in warm humid air and creeps over time.
 
 ---
 
+## Assembly
+
+Step-by-step soldering instructions are in **[ASSEMBLY.md](ASSEMBLY.md)** —
+build order, the pull-up resistor, the pre-power checks, and a staged
+power-up sequence.
+
 ## Flashing
 
 ```sh
