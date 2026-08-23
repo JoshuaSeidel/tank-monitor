@@ -29,15 +29,21 @@ esphome:
   friendly_name: ${friendly_name}
 
 esp32:
-  board: esp32-c6-devkitc-1
   variant: esp32c6
+  flash_size: 4MB
   framework:
     type: esp-idf
 
 external_components:
+  # Pulled from git so this builds in the Home Assistant ESPHome add-on
+  # with no local files. refresh: 0s because the ref is a moving branch --
+  # the default caches for a day and you'd silently build stale code.
   - source:
-      type: local
-      path: components
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [tank_controller]
+    refresh: 0s
 
 logger:
   level: INFO
@@ -55,14 +61,14 @@ wifi:
   # Fallback AP so the device is recoverable if Wi-Fi drops
   ap:
     ssid: "${device_name} setup"
-    password: !secret fallback_ap_password
+    password: !secret tank_monitor_ap_password
 
 captive_portal:
 
 # OTA + a local web page for eyeballing live values
 ota:
   - platform: esphome
-    password: !secret ota_password
+    password: !secret tank_monitor_ota_password
 
 web_server:
   port: 80
@@ -71,8 +77,8 @@ web_server:
 mqtt:
   broker: !secret mqtt_broker
   port: 1883
-  username: !secret mqtt_username
-  password: !secret mqtt_password
+  username: !secret tank_monitor_mqtt_username
+  password: !secret tank_monitor_mqtt_password
   discovery: true
   discovery_prefix: homeassistant
   topic_prefix: ${device_name}

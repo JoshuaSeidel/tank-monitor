@@ -365,11 +365,48 @@ power-up sequence.
 
 ## Flashing
 
+The `tank_controller` component is pulled from this repo over git, so
+`tank-monitor.yaml` builds in the **Home Assistant ESPHome add-on** with no
+local files — paste it in, add the secrets, install.
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [tank_controller]
+    refresh: 0s
+```
+
+`refresh: 0s` matters: `main` is a moving branch, and the default caches a
+git source for a day. Without it you can push a fix and silently keep
+building the old code.
+
+Locally instead:
+
 ```sh
 pip install esphome
 cp secrets.yaml.example secrets.yaml   # then edit it
 esphome run tank-monitor.yaml
 ```
+
+### Secrets
+
+The add-on shares **one** `secrets.yaml` across every device, so anything
+device-specific is prefixed to avoid collisions:
+
+| Key | Scope |
+|---|---|
+| `wifi_ssid`, `wifi_password`, `mqtt_broker` | shared with your other devices |
+| `tank_monitor_mqtt_username` | this device |
+| `tank_monitor_mqtt_password` | this device |
+| `tank_monitor_ota_password` | this device |
+| `tank_monitor_ap_password` | this device |
+
+Give this device its own MQTT user rather than reusing a shared one — it
+keeps broker access auditable and makes the logs readable when something
+misbehaves.
 
 First flash over USB; after that `esphome run` uses OTA. Live values are at
 `http://tank-monitor.local/`.
