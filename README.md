@@ -229,10 +229,11 @@ you're close enough to read digits.
 
 ```
 ┌────────────────────────────────────────────┐
-│                                            │  ← background is GREEN /
-│    73.6 °F      TARGET                     │    AMBER / RED for temp
-│                 72-75                      │
-│  ON TARGET                      heat 32%   │
+│                 TARGET                     │  ← background is GREEN /
+│    74.5 °F      74-75                      │    AMBER / RED for temp
+│                 1H SWING                   │
+│                 0.2 °F                     │
+│  STEADY                         heat 32%   │
 ├────────────────────────────────────────────┤
 │    212 ppm      TARGET                     │  ← independently coloured
 │  TDS OK         180-250                    │    for TDS
@@ -248,15 +249,25 @@ Set to your targets. Green inside the band, amber just outside, red beyond:
 
 | | Green | Amber | Red |
 |---|---|---|---|
-| **Temperature** | 72–75 °F | 71–72, 75–76 °F | below 71, above 76 |
+| **Temperature** | 74–75 °F **and** steady | 73.5–74, 75–75.5 °F, or `SWINGING` | below 73.5, above 75.5 |
 | **TDS** | 180–250 ppm | 150–180, 250–300 ppm | below 150, above 300 |
+
+**Green requires the tank to be steady, not just momentarily in band.** The
+controller keeps an hour of temperature history and reports peak-to-peak
+swing; if that exceeds `temp_swing_max` (0.5 °F) the screen shows amber and
+`SWINGING` even when the current reading sits inside 74–75. A tank crossing
+through the band on its way between 73 and 76 is not holding temperature, and
+the display shouldn't claim it is.
+
+Swing reads `--` for the first ten minutes after a boot, and doesn't block
+green until there's enough history to mean something.
 
 All six numbers are substitutions at the top of `tank-monitor.yaml`
 (`temp_lo`, `temp_hi`, `temp_red_lo`, `temp_red_hi`, `tds_lo`, `tds_hi`,
 `tds_red_lo`, `tds_red_hi`) — change them in one place and both the display
 bands and the on-screen target text follow.
 
-The control setpoint is **23.1 °C / 73.6 °F**, the centre of your 72–75 band,
+The control setpoint is **23.6 °C / 74.5 °F**, the centre of the 74–75 band,
 so normal drift stays inside green in both directions.
 
 ### Not measured

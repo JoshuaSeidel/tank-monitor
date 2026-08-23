@@ -2,16 +2,20 @@ substitutions:
   device_name: tank-monitor
   friendly_name: Tank Monitor
   # --- Calibration ---
-  # Target water temperature, in Celsius. Centre of the 72-75 F band:
-  # 23.1 C = 73.6 F.
-  target_temp: "23.1"
+  # Target water temperature, in Celsius. Centre of the 74-75 F band:
+  # 23.6 C = 74.5 F.
+  target_temp: "23.6"
 
   # --- Display thresholds (all in the units shown on screen) ---
   # Green inside lo..hi, amber just outside, red beyond red_lo..red_hi.
-  temp_lo: "72"
+  temp_lo: "74"
   temp_hi: "75"
-  temp_red_lo: "71"
-  temp_red_hi: "76"
+  temp_red_lo: "73.5"
+  temp_red_hi: "75.5"
+  # Green also requires the tank to be *steady*: peak-to-peak swing over
+  # the last hour must be under this, in F. Being briefly in-band while
+  # swinging 3 F is not the same as holding temperature.
+  temp_swing_max: "0.5"
   tds_lo: "180"
   tds_hi: "250"
   tds_red_lo: "150"
@@ -103,8 +107,14 @@ display:
       const bool t_ok = !isnan(t);
       const float t_f = t_ok ? t * 9.0f / 5.0f + 32.0f : NAN;
 
+      // Peak-to-peak swing over the last hour, converted to F. NAN for
+      // the first ten minutes after a boot.
+      const float swing_c = id(controller).get_swing();
+      const float swing_f = isnan(swing_c) ? NAN : swing_c * 9.0f / 5.0f;
+      const bool steady = isnan(swing_f) || swing_f <= ${temp_swing_max};
+
       Color t_bg = COLOR_GREEN;
-      const char *t_label = "ON TARGET";
+      const char *t_label = "STEADY";
       if (!t_ok || id(controller).is_safety_tripped()) {
         t_bg = COLOR_RED;
         t_label = "PROBE FAULT";
@@ -114,6 +124,11 @@ display:
       } else if (t_f < ${temp_lo} || t_f > ${temp_hi}) {
         t_bg = COLOR_AMBER;
         t_label = t_f < ${temp_lo} ? "COOL" : "WARM";
+      } else if (!steady) {
+        // In band right now, but the tank is moving through it rather
+        // than holding. That is not a green condition.
+        t_bg = COLOR_AMBER;
+        t_label = "SWINGING";
       }
 
       // ---- TDS zone ---------------------------------------------------
@@ -144,13 +159,18 @@ display:
 
       // Temperature: the biggest thing on the panel.
       if (t_ok)
-        it.printf(196, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "%.1f", t_f);
+        it.printf(180, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "%.1f", t_f);
       else
-        it.print(196, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "--.-");
-      it.print(200, 22, id(font_med), ink, "\u00b0F");
+        it.print(180, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "--.-");
+      it.print(184, 56, id(font_med), ink, "\u00b0F");
 
-      it.print(200, 52, id(font_small), ink, "TARGET");
-      it.print(200, 66, id(font_med), ink, "${temp_lo}-${temp_hi}");
+      it.print(214, 4, id(font_small), ink, "TARGET");
+      it.print(214, 18, id(font_med), ink, "${temp_lo}-${temp_hi}");
+      it.print(214, 46, id(font_small), ink, "1H SWING");
+      if (isnan(swing_f))
+        it.print(214, 60, id(font_med), ink, "--");
+      else
+        it.printf(214, 60, id(font_med), ink, "%.1f \u00b0F", swing_f);
       it.print(8, 92, id(font_med), ink, t_label);
       it.printf(312, 92, id(font_med), ink, TextAlign::TOP_RIGHT, "heat %.0f%%",
                 id(controller).get_heater_duty());
@@ -439,6 +459,18 @@ sensor:
       float v = id(controller).get_predicted_temperature();
       if (isnan(v)) return {};
       return v;
+
+  - platform: template
+    name: "Temperature Swing (1h)"
+    unit_of_measurement: "°F"
+    icon: "mdi:arrow-expand-vertical"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      float v = id(controller).get_swing();
+      if (isnan(v)) return {};
+      return v * 9.0f / 5.0f;
 
   - platform: template
     name: "Temperature Drift Rate"

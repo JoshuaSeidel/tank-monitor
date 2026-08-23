@@ -43,6 +43,8 @@ void TankController::load_prior_() {
       this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
   }
   this->model_.updates = 0;
+  this->history_idx_ = 0;
+  this->history_count_ = 0;
   for (uint8_t i = 0; i < N_SLOTS; i++) {
     this->light_.slot[i] = 0.0f;
     this->light_.weight[i] = 0.0f;
@@ -229,6 +231,12 @@ void TankController::update() {
     return;
   }
   this->missing_since_ms_ = 0;
+
+  this->history_[this->history_idx_] = t;
+  this->history_idx_ = (this->history_idx_ + 1) % N_HISTORY;
+  if (this->history_count_ < N_HISTORY)
+    this->history_count_++;
+
   if (this->safety_tripped_) {
     ESP_LOGI(TAG, "Temperature probe is back");
     this->safety_tripped_ = false;
@@ -337,6 +345,21 @@ void TankController::update() {
     this->save_state_();
     this->last_save_ms_ = now;
   }
+}
+
+float TankController::get_swing() const {
+  // Ten minutes of data before this number means anything at all.
+  if (this->history_count_ < 20)
+    return NAN;
+  float lo = this->history_[0], hi = this->history_[0];
+  for (uint8_t i = 1; i < this->history_count_; i++) {
+    const float v = this->history_[i];
+    if (v < lo)
+      lo = v;
+    if (v > hi)
+      hi = v;
+  }
+  return hi - lo;
 }
 
 float TankController::get_time_constant() const {

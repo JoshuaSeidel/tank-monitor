@@ -14,6 +14,11 @@
 namespace esphome {
 namespace tank_controller {
 
+// One hour of temperature history at the 30s control interval. Used to
+// report how much the tank is actually swinging, which is the thing this
+// controller exists to minimise.
+static const uint8_t N_HISTORY = 120;
+
 // Number of parameters in the thermal model:
 //   dT/dt = kh*H - kf*F - ka*(T - TREF) + kl*L + c        [degC per minute]
 // estimated as theta = [kh, -kf, -ka, kl, c]
@@ -83,6 +88,9 @@ class TankController : public PollingComponent {
   float get_predicted_temperature() const { return this->predicted_temp_; }
   float get_predicted_light_load() const { return this->predicted_light_; }
   bool is_safety_tripped() const { return this->safety_tripped_; }
+  // Peak-to-peak temperature swing over the last hour, in degC.
+  // NAN until there is enough history to mean anything.
+  float get_swing() const;
   const char *get_state_text() const { return this->state_text_; }
 
   // Wipe the learned model and light profile back to priors.
@@ -136,6 +144,10 @@ class TankController : public PollingComponent {
   float acc_light_{0.0f};
   float acc_temp_{0.0f};
   uint32_t acc_n_{0};
+
+  float history_[N_HISTORY];
+  uint8_t history_idx_{0};
+  uint8_t history_count_{0};
 
   float last_temp_{NAN};
   uint32_t last_update_ms_{0};
