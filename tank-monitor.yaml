@@ -347,7 +347,10 @@ sensor:
     # address the log prints if you ever add a second one.
     name: "Water Temperature"
     id: water_temp
-    update_interval: 2s
+    # 10s, not 2s. The control loop runs at 30s and the tank's time
+    # constant is hours -- 2s sampling just multiplied the row count in
+    # InfluxDB by 5x for no extra information.
+    update_interval: 10s
     accuracy_decimals: 2
     filters:
       - filter_out: nan
@@ -379,7 +382,7 @@ sensor:
     icon: "mdi:water-opacity"
     accuracy_decimals: 0
     state_class: measurement
-    update_interval: 2s
+    update_interval: 30s
     lambda: |-
       const float v = id(tds_voltage).state;
       if (isnan(v)) return {};
@@ -411,7 +414,7 @@ sensor:
     icon: "mdi:flash"
     accuracy_decimals: 0
     state_class: measurement
-    update_interval: 2s
+    update_interval: 30s
     lambda: |-
       if (isnan(id(tds).state)) return {};
       return id(tds).state * 2.0f;
@@ -449,10 +452,21 @@ sensor:
     device_class: temperature
     state_class: measurement
     accuracy_decimals: 2
-    update_interval: 2s
+    update_interval: 10s
     lambda: |-
       if (isnan(id(water_temp).state)) return {};
       return id(water_temp).state * 9.0f / 5.0f + 32.0f;
+
+  # Target in F as its own series, so Grafana can draw the setpoint line
+  # over the temperature plot without converting units in the query.
+  - platform: template
+    name: "Target Temperature F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;"
 
   - platform: template
     name: "Heater Output"

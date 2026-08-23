@@ -456,6 +456,29 @@ restored on boot — a reboot doesn't cost you the learning.
 
 ---
 
+## Long-term history and Grafana
+
+Home Assistant records everything here to **InfluxDB 3** (the InfluxDB3 App,
+Enterprise with a free At-Home licence). The integration is configured through
+the UI — Settings → Devices & Services → InfluxDB — not YAML.
+
+Settings that work with this App:
+
+| Field | Value |
+|---|---|
+| API | v2 (`configure_v2` in the flow) |
+| URL | `http://32b8266a-influxdb3:8181` |
+| Verify SSL | off |
+| Organization | anything — InfluxDB 3 requires the field but ignores it |
+| Bucket | `homeassistant` — on v3 this is the *database* name |
+
+**Use `http`, not `https`.** The App sets `ssl: true` by default but ships no
+certificate files, so it serves plaintext; TLS fails with
+`WRONG_VERSION_NUMBER`.
+
+Grafana lives in [`grafana/`](grafana/) — an importable dashboard plus
+datasource setup. See [grafana/README.md](grafana/README.md).
+
 ## Home Assistant entities
 
 Under one `Tank Monitor` device:
