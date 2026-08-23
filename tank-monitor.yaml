@@ -325,6 +325,10 @@ switch:
     icon: "mdi:brain"
     lambda: "return id(controller).get_learning_enabled();"
     entity_category: config
+    # Without this the switch defaults to ALWAYS_OFF, and the boot-time
+    # write fires turn_off_action -- silently disabling learning on every
+    # single boot. Default on, but remember the user's choice.
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - tank_controller.set_learning:
           id: controller
