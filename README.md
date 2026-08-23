@@ -52,9 +52,18 @@ doesn't, which is the whole point of running the control loop on-device.
 
 ### Pins already taken by the board
 
-GPIO6/7 (SPI), 14 (LCD CS), 15 (LCD DC), 21 (LCD reset), 22 (backlight),
-8 (RGB LED), 4/5 (microSD). GPIO12/13 are USB and 24-30 are flash. That
-leaves GPIO0-3 (the only ADC-capable pins left), 9-11, 18-20, and 23.
+The LAFVIN breaks out two header rows, and **only these pins are physically
+available**:
+
+| Edge | Pins |
+|---|---|
+| One long edge | `9, 18, 19, 20, 23, 22, 13, RX, TX` |
+| Other long edge | `5, 4, 3, 2, 1, 0, 3V3, GND, 5V` |
+
+**GPIO10 is not on the board** — anything assigned to it silently does
+nothing. Avoid `22` as well (exposed, but it's also the LCD backlight net),
+`13` (USB D+), and `9` (boot strapping pin). GPIO6/7 are the LCD SPI bus and
+14/15/21 are its CS/DC/reset, none of which reach a header.
 
 ## Parts list
 
@@ -155,7 +164,7 @@ cord, and a normally-off + normally-on NEMA 5-15R receptacle per channel.
 | Module terminal | ESP32  |
 |-----------------|--------|
 | Channel 1 IN+   | GPIO23 (heater) |
-| Channel 2 IN+   | GPIO10 (fan)    |
+| Channel 2 IN+   | GPIO3 (fan)     |
 | IN− (both)      | GND    |
 
 Plug the heater into channel 1's **normally-off** receptacle and the fan into

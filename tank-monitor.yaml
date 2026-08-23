@@ -271,7 +271,10 @@ output:
 
   - platform: slow_pwm
     id: fan_output
-    pin: GPIO10
+    # GPIO3, not GPIO10: GPIO10 is not broken out on this board's headers.
+    # Avoid GPIO22 too -- it is exposed on the header but is also the LCD
+    # backlight net, and GPIO13 is USB D+.
+    pin: GPIO3
     period: 900s
     restart_cycle_on_state_change: false
 

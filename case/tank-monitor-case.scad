@@ -37,9 +37,11 @@ bezel_t   = 1.6;
 overlap   = 1.0;    // how far the bezel laps over the glass
 
 /* [CABLE EXIT] */
-// Eight wires leave this board. No stock case allows for that.
-cable_w = 11.0;
-cable_h = 4.5;
+// The GPIO headers run down BOTH long edges of this board, so wires leave
+// from both sides -- not off the end. Slots on each long side, positioned
+// over the header rows.
+cable_w = 26.0;   // slot length, along pcb_l
+cable_h = 5.0;
 
 eps = 0.01;
 $fn = 40;
@@ -63,8 +65,10 @@ module usb_slot() {
 }
 
 module cable_slot() {
-  translate([out_l - wall - eps, (out_w - cable_w) / 2, tray_h - cable_h])
-    cube([wall + 2 * eps, cable_w, cable_h + eps]);
+  // Both long edges, centred on the header rows.
+  for (y = [-eps, out_w - wall + eps])
+    translate([(out_l - cable_w) / 2 + 4, y, tray_h - cable_h])
+      cube([cable_w, wall + 2 * eps, cable_h + eps]);
 }
 
 module tray() {
@@ -104,8 +108,9 @@ module lid() {
     translate([win_x, win_y, -eps]) cube([win_l, win_w, bezel_t + 2 * eps]);
     // The USB slot continues through the skirt
     translate([-eps, wall + 2, bezel_t - eps]) cube([wall + 2 * eps, in_w - 4, skirt]);
-    translate([out_l - wall - eps, (out_w - cable_w) / 2, bezel_t - eps])
-      cube([wall + 2 * eps, cable_w, skirt]);
+    for (y = [-eps, out_w - wall + eps])
+      translate([(out_l - cable_w) / 2 + 4, y, bezel_t - eps])
+        cube([cable_w, wall + 2 * eps, skirt]);
   }
 }
 

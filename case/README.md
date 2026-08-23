@@ -44,9 +44,10 @@ that's what the geometry was arranged for.
 
 ## Cable exit
 
-An 11 × 4.5 mm slot on the far end, opposite USB — for the eight wires this
-build actually has. Every stock case assumes USB and nothing else, which is
-the other reason none of them work here.
+The GPIO headers run down **both long edges** of this board, so wires leave
+from both sides — not off the end. There's a 26 × 5 mm slot on each long
+side, positioned over the header rows. Every stock case assumes USB and
+nothing else, which is the other reason none of them work here.
 
 ## Changing dimensions
 
