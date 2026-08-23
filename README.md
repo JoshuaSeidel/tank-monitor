@@ -220,6 +220,83 @@ and it will pick up 60 Hz hum. Keep those separated. If the BH1750 sits more
 than roughly a foot from the board, add a 100 nF cap across its VCC/GND at
 the sensor end.
 
+## The display
+
+Two auto-cycling pages on the 1.47" panel. It's a small screen, so the design
+is built around one big colour-coded number per page — the idea is that the
+tank's state reads from across the room by **colour alone**, before you're
+close enough to read digits.
+
+**Page 1 — temperature (12 s dwell)**
+
+```
+┌────────────────────────────────────────────┐
+│ ON TARGET                        holding   │ ← full-width colour band
+├────────────────────────────────────────────┤
+│                       TARGET               │
+│    75.2 °F            75.2 °F              │ ← 76px, tinted to match
+│                       TREND                │
+│                       +0.01                │
+│  HEAT ▐████████░░░░░░░░░░░░░░░░░░░    32%  │
+│  FAN  ▐░░░░░░░░░░░░░░░░░░░░░░░░░░░     0%  │
+└────────────────────────────────────────────┘
+```
+
+**Page 2 — water quality (5 s dwell)**
+
+```
+┌────────────────────────────────────────────┐
+│ WATER OK                          WATER    │
+├────────────────────────────────────────────┤
+│                       COND.                │
+│    245 ppm            490                  │
+│                       uS/cm                │
+│  LIGHT  820 lx                    75.2 °F  │
+│  learning 87%  |  model confidence         │
+└────────────────────────────────────────────┘
+```
+
+### Colour code
+
+| Colour | Temperature page | Water page |
+|---|---|---|
+| **Green** | within 0.5 °F of target | 120–400 ppm |
+| **Amber** | 0.5–1.5 °F off — `WARMING` / `COOLING` | 80–120 or 400–500 ppm |
+| **Red** | over 1.5 °F off, or probe fault | under 80 or over 500 ppm |
+
+The big number is tinted the same colour as the band, so there are two
+independent cues at a glance.
+
+**The TDS thresholds are a general freshwater-community guess and you should
+change them.** Right numbers depend entirely on your stock — soft-water species
+(most tetras, shrimp) want far lower TDS than African cichlids or brackish.
+They're plain constants in the `page_water` lambda in `tank-monitor.yaml`; the
+temperature colour bands are the ones that are actually tuned to your setup.
+
+## 3D printed case
+
+Your LAFVIN board is a clone of the Waveshare ESP32-C6-LCD-1.47, so cases cut
+for the Waveshare fit. Free options:
+
+- **[Case for ESP32-C6-LCD-1.47](https://www.printables.com/model/1601229-case-for-esp32-c6-lcd-147)** by Dicson (Printables) — updated Feb 2026
+- **[ESP32-C6 1.47inch Display Enclosure](https://www.printables.com/model/1365867-esp32-c6-147inch-display-enclosure)** by Jonathan Senkerik (Printables) — snap-on lid
+- **[ESP32-C6-1.47-LCD](https://www.printables.com/model/1472316-esp32-c6-147-lcd)** by By_ISIK (Printables)
+- **[ESP32-LCD-1.47 Case](https://makerworld.com/en/models/1301018-esp32-lcd-1-47-case)** by Sedikit (MakerWorld) — two halves, needs gluing
+- **[Clip-in case](https://www.thingiverse.com/thing:7065147)** by amduck (Thingiverse) — prints without supports, but cut for the **Touch** variant, so check the front face
+
+If you want to design your own, there's an
+**[accurate reference CAD model](https://www.printables.com/model/1633740-esp32-c6-lcd-147-reference-cad-model)**
+by x_giedrius_x.
+
+**One thing every one of these will be wrong about:** they're designed around a
+bare dev board with a USB-C port and nothing else. You have eight wires leaving
+the board — power bus, three sensors, two relay channels. Expect to cut or model
+a cable exit on whichever you pick. The reference CAD model is the honest
+starting point if you'd rather do it properly than take a knife to a print.
+
+Print in PETG rather than PLA if the case will sit on the tank rim — PLA
+softens in warm humid air and creeps over time.
+
 ---
 
 ## Flashing

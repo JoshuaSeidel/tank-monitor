@@ -83,66 +83,158 @@ display:
     rotation: 90
     update_interval: 1s
     pages:
-      - id: page_main
+      # ---------------------------------------------------------------
+      # Page 1: temperature. The number fills most of the panel and is
+      # colour-coded, so the tank's state reads from across the room
+      # without having to actually read the digits.
+      # ---------------------------------------------------------------
+      - id: page_temp
         lambda: |-
-          it.fill(Color::BLACK);
-          const auto white = Color(255, 255, 255);
-          const auto grey = Color(130, 130, 130);
-          const auto amber = Color(255, 170, 0);
-          const auto cyan = Color(0, 200, 255);
-          const auto red = Color(255, 60, 60);
+          const float t = id(water_temp).state;
+          const float sp_f = id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;
+          const bool ok = !isnan(t);
+          const float t_f = ok ? t * 9.0f / 5.0f + 32.0f : NAN;
 
-          // Big current temperature, in F
-          if (!isnan(id(water_temp).state)) {
-            it.printf(8, 4, id(font_big), white, "%.1f", id(water_temp).state * 9.0f / 5.0f + 32.0f);
-            it.print(120, 18, id(font_small), grey, "F");
+          // Status colour: green on target, amber drifting, red in trouble.
+          Color band = COLOR_GREEN;
+          const char *label = "ON TARGET";
+          if (id(controller).is_safety_tripped() || !ok) {
+            band = COLOR_RED;
+            label = "PROBE FAULT";
           } else {
-            it.print(8, 4, id(font_big), red, "--.-");
+            const float dev = fabsf(t_f - sp_f);
+            if (dev > 1.5f) {
+              band = COLOR_RED;
+              label = t_f < sp_f ? "TOO COLD" : "TOO WARM";
+            } else if (dev > 0.5f) {
+              band = COLOR_AMBER;
+              label = t_f < sp_f ? "WARMING" : "COOLING";
+            }
           }
 
-          // Target, to the right of it
-          it.printf(180, 8, id(font_small), grey, "target");
-          it.printf(180, 24, id(font_med), cyan, "%.1f F",
-                    id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f);
+          it.fill(COLOR_BG);
+          it.filled_rectangle(0, 0, 320, 26, band);
+          it.print(8, 3, id(font_med), COLOR_BG, label);
+          it.printf(312, 3, id(font_med), COLOR_BG, TextAlign::TOP_RIGHT, "%s",
+                    id(controller).get_state_text());
 
-          // Heater duty as a bar
+          // The number itself, tinted the same as the band.
+          if (ok) {
+            it.printf(150, 34, id(font_huge), band, TextAlign::TOP_RIGHT, "%.1f", t_f);
+            it.print(156, 52, id(font_med), COLOR_DIM, "\u00b0F");
+          } else {
+            it.print(150, 34, id(font_huge), COLOR_RED, TextAlign::TOP_RIGHT, "--.-");
+          }
+
+          // Target, stacked to the right of the big number.
+          it.print(196, 40, id(font_small), COLOR_DIM, "TARGET");
+          it.printf(196, 56, id(font_med), COLOR_CYAN, "%.1f \u00b0F", sp_f);
+          it.print(196, 84, id(font_small), COLOR_DIM, "TREND");
+          it.printf(196, 100, id(font_med), COLOR_TEXT, "%+.2f", id(controller).get_drift_rate() * 60.0f);
+
+          // Heater / fan duty bars along the bottom.
           const float duty = id(controller).get_heater_duty();
-          it.print(8, 66, id(font_small), grey, "heater");
-          it.rectangle(70, 66, 180, 14, grey);
-          if (duty > 0.0f)
-            it.filled_rectangle(70, 66, (int) (180.0f * duty / 100.0f), 14, amber);
-          it.printf(258, 66, id(font_small), amber, "%.0f%%", duty);
-
-          // Fan duty
           const float fan = id(controller).get_fan_duty();
-          it.print(8, 88, id(font_small), grey, "fan");
-          it.rectangle(70, 88, 180, 14, grey);
+          it.print(8, 126, id(font_small), COLOR_DIM, "HEAT");
+          it.rectangle(56, 126, 200, 16, COLOR_DIM);
+          if (duty > 0.0f)
+            it.filled_rectangle(56, 126, (int) (200.0f * duty / 100.0f), 16, COLOR_AMBER);
+          it.printf(312, 126, id(font_small), COLOR_AMBER, TextAlign::TOP_RIGHT, "%.0f%%", duty);
+
+          it.print(8, 148, id(font_small), COLOR_DIM, "FAN");
+          it.rectangle(56, 148, 200, 16, COLOR_DIM);
           if (fan > 0.0f)
-            it.filled_rectangle(70, 88, (int) (180.0f * fan / 100.0f), 14, cyan);
-          it.printf(258, 88, id(font_small), cyan, "%.0f%%", fan);
+            it.filled_rectangle(56, 148, (int) (200.0f * fan / 100.0f), 16, COLOR_CYAN);
+          it.printf(312, 148, id(font_small), COLOR_CYAN, TextAlign::TOP_RIGHT, "%.0f%%", fan);
 
-          // TDS and light
-          if (!isnan(id(tds).state))
-            it.printf(8, 114, id(font_small), white, "TDS %.0f ppm", id(tds).state);
+      # ---------------------------------------------------------------
+      # Page 2: water quality. Same treatment for TDS.
+      # ---------------------------------------------------------------
+      - id: page_water
+        lambda: |-
+          const float ppm = id(tds).state;
+          const bool ok = !isnan(ppm);
+
+          // Freshwater community tanks sit roughly 100-400 ppm. Outside
+          // that is worth noticing, not necessarily worth panicking about.
+          Color band = COLOR_GREEN;
+          const char *label = "WATER OK";
+          if (!ok) {
+            band = COLOR_RED;
+            label = "NO TDS READING";
+          } else if (ppm < 80.0f || ppm > 500.0f) {
+            band = COLOR_RED;
+            label = ppm < 80.0f ? "TDS VERY LOW" : "TDS VERY HIGH";
+          } else if (ppm < 120.0f || ppm > 400.0f) {
+            band = COLOR_AMBER;
+            label = ppm < 120.0f ? "TDS LOW" : "TDS HIGH";
+          }
+
+          it.fill(COLOR_BG);
+          it.filled_rectangle(0, 0, 320, 26, band);
+          it.print(8, 3, id(font_med), COLOR_BG, label);
+          it.print(312, 3, id(font_med), COLOR_BG, TextAlign::TOP_RIGHT, "WATER");
+
+          if (ok) {
+            it.printf(170, 34, id(font_huge), band, TextAlign::TOP_RIGHT, "%.0f", ppm);
+            it.print(176, 52, id(font_med), COLOR_DIM, "ppm");
+          } else {
+            it.print(170, 34, id(font_huge), COLOR_RED, TextAlign::TOP_RIGHT, "---");
+          }
+
+          it.print(216, 40, id(font_small), COLOR_DIM, "COND.");
+          it.printf(216, 56, id(font_med), COLOR_TEXT, "%.0f", ok ? ppm * 2.0f : 0.0f);
+          it.print(216, 80, id(font_small), COLOR_DIM, "uS/cm");
+
+          // Light level, and the temperature small so it never fully
+          // leaves the screen.
           if (!isnan(id(tank_lux).state))
-            it.printf(180, 114, id(font_small), white, "%.0f lx", id(tank_lux).state);
+            it.printf(8, 126, id(font_med), COLOR_TEXT, "LIGHT  %.0f lx", id(tank_lux).state);
+          if (!isnan(id(water_temp).state))
+            it.printf(312, 126, id(font_med), COLOR_CYAN, TextAlign::TOP_RIGHT, "%.1f \u00b0F",
+                      id(water_temp).state * 9.0f / 5.0f + 32.0f);
+          it.printf(8, 150, id(font_small), COLOR_DIM, "learning %.0f%%  |  model confidence",
+                    id(controller).get_confidence());
 
-          // Status line
-          if (id(controller).is_safety_tripped())
-            it.print(8, 140, id(font_med), red, "PROBE FAULT");
-          else
-            it.printf(8, 140, id(font_med), grey, "%s", id(controller).get_state_text());
+# Cycle the two pages. Temperature is the one that matters, so it gets
+# the longer dwell -- see the interval: block below.
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          static uint8_t tick = 0;
+          tick++;
+          // 12s on temperature, 5s on water quality.
+          if (tick == 12) id(tank_display).show_page(id(page_water));
+          if (tick >= 17) { tick = 0; id(tank_display).show_page(id(page_temp)); }
+
+color:
+  - id: COLOR_BG
+    hex: "000000"
+  - id: COLOR_TEXT
+    hex: "FFFFFF"
+  - id: COLOR_DIM
+    hex: "7A7A7A"
+  - id: COLOR_GREEN
+    hex: "26C281"
+  - id: COLOR_AMBER
+    hex: "FFAA00"
+  - id: COLOR_RED
+    hex: "FF3B30"
+  - id: COLOR_CYAN
+    hex: "00C8FF"
 
 font:
   - file: "gfonts://Roboto"
     id: font_small
     size: 14
-  - file: "gfonts://Roboto"
+  - file: "gfonts://Roboto@500"
     id: font_med
     size: 20
+    glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz|/\u00b0"
   - file: "gfonts://Roboto@700"
-    id: font_big
-    size: 56
+    id: font_huge
+    size: 76
     glyphs: "0123456789.-"
 
 i2c:
