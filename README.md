@@ -222,56 +222,51 @@ the sensor end.
 
 ## The display
 
-Two auto-cycling pages on the 1.47" panel. It's a small screen, so the design
-is built around one big colour-coded number per page — the idea is that the
-tank's state reads from across the room by **colour alone**, before you're
-close enough to read digits.
-
-**Page 1 — temperature (12 s dwell)**
+**One screen, always on** — no page cycling. Temperature owns the top two
+thirds, TDS the bottom third, and each zone's *background* carries its own
+status colour, so both values read from across the room by colour before
+you're close enough to read digits.
 
 ```
 ┌────────────────────────────────────────────┐
-│ ON TARGET                        holding   │ ← full-width colour band
+│                                            │  ← background is GREEN /
+│    73.6 °F      TARGET                     │    AMBER / RED for temp
+│                 72-75                      │
+│  ON TARGET                      heat 32%   │
 ├────────────────────────────────────────────┤
-│                       TARGET               │
-│    75.2 °F            75.2 °F              │ ← 76px, tinted to match
-│                       TREND                │
-│                       +0.01                │
-│  HEAT ▐████████░░░░░░░░░░░░░░░░░░░    32%  │
-│  FAN  ▐░░░░░░░░░░░░░░░░░░░░░░░░░░░     0%  │
+│    212 ppm      TARGET                     │  ← independently coloured
+│  TDS OK         180-250                    │    for TDS
 └────────────────────────────────────────────┘
 ```
 
-**Page 2 — water quality (5 s dwell)**
+Text is near-black on every band — highest contrast at distance, and legible
+on all three colours.
 
-```
-┌────────────────────────────────────────────┐
-│ WATER OK                          WATER    │
-├────────────────────────────────────────────┤
-│                       COND.                │
-│    245 ppm            490                  │
-│                       uS/cm                │
-│  LIGHT  820 lx                    75.2 °F  │
-│  learning 87%  |  model confidence         │
-└────────────────────────────────────────────┘
-```
+### Thresholds
 
-### Colour code
+Set to your targets. Green inside the band, amber just outside, red beyond:
 
-| Colour | Temperature page | Water page |
-|---|---|---|
-| **Green** | within 0.5 °F of target | 120–400 ppm |
-| **Amber** | 0.5–1.5 °F off — `WARMING` / `COOLING` | 80–120 or 400–500 ppm |
-| **Red** | over 1.5 °F off, or probe fault | under 80 or over 500 ppm |
+| | Green | Amber | Red |
+|---|---|---|---|
+| **Temperature** | 72–75 °F | 71–72, 75–76 °F | below 71, above 76 |
+| **TDS** | 180–250 ppm | 150–180, 250–300 ppm | below 150, above 300 |
 
-The big number is tinted the same colour as the band, so there are two
-independent cues at a glance.
+All six numbers are substitutions at the top of `tank-monitor.yaml`
+(`temp_lo`, `temp_hi`, `temp_red_lo`, `temp_red_hi`, `tds_lo`, `tds_hi`,
+`tds_red_lo`, `tds_red_hi`) — change them in one place and both the display
+bands and the on-screen target text follow.
 
-**The TDS thresholds are a general freshwater-community guess and you should
-change them.** Right numbers depend entirely on your stock — soft-water species
-(most tetras, shrimp) want far lower TDS than African cichlids or brackish.
-They're plain constants in the `page_water` lambda in `tank-monitor.yaml`; the
-temperature colour bands are the ones that are actually tuned to your setup.
+The control setpoint is **23.1 °C / 73.6 °F**, the centre of your 72–75 band,
+so normal drift stays inside green in both directions.
+
+### Not measured
+
+Your target list also includes pH 7.2–7.5, GH 7–8, and KH 3–4. There's no
+sensor for those in this build — GH and KH have no practical hobby-grade
+probe and stay test-kit measurements. pH *is* addable (an analog probe on a
+spare ADC pin, GPIO0/2/3 are free), but it needs two-point calibration and
+the probe is a consumable that drifts and needs replacing every year or so.
+Say the word if you want it.
 
 ## 3D printed case
 
