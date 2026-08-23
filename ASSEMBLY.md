@@ -10,9 +10,10 @@ That way if something is wrong you know which step caused it.
 - 26–28 AWG stranded hookup wire (silicone jacket is easiest to work with)
 - 4.7 kΩ resistor (1/4 W)
 - Heat shrink, 2 mm and 3 mm
-- Small screw-terminal breakout or perfboard for the power bus
 - Soldering iron ~330 °C, thin rosin-core solder
 - Multimeter
+
+Everything solders directly to the ESP32-C6 board. No breakout, no perfboard.
 
 ## 1. Prep the board
 
@@ -32,28 +33,53 @@ neighbouring pads, which is the single most common way this build goes wrong.
 **Slide heat shrink onto the wire before you solder it.** You will forget at
 least once. Everyone does.
 
-## 3. Build the power bus
+## 3. Splice the power wires
 
-On the breakout or perfboard, make two rails:
+There is one `3V3` pad and one `GND` pad, but three sensors need power and
+four wires need ground. You can't stack that many wires on a single pad and
+get a joint that survives being moved.
 
-- **3V3 rail** — one wire from the board's `3V3` pad
-- **GND rail** — one wire from the board's `GND` pad
+So join them **off the board** and run a single pigtail to each pad.
 
-Solder those two wires to the board first and confirm with a multimeter that
-there is **no continuity between the two rails**. If there is, find the short
-now, not after everything else is attached.
+**3V3 splice — three wires plus a pigtail:**
+
+```
+   DS18B20 red   ─┐
+   TDS VCC       ─┼──[ twist + solder + heat shrink ]──── pigtail ──► 3V3 pad
+   BH1750 VCC    ─┘
+```
+
+**GND splice — four wires plus a pigtail:**
+
+```
+   DS18B20 black ─┐
+   TDS GND       ─┤
+   BH1750 GND    ─┼──[ twist + solder + heat shrink ]──── pigtail ──► GND pad
+   Relay IN− ×2  ─┘
+```
+
+For each splice: strip ~10 mm on every wire including the pigtail, twist all
+the conductors together into one bundle, flow solder through until it wicks
+right through, then cover the whole thing with 3 mm heat shrink. Slide the
+shrink on first.
+
+The two relay `IN−` terminals can share one wire — jumper between them at the
+module and run a single lead back to the splice.
+
+**Solder the two pigtails to the board first**, then check with a multimeter
+that there is **no continuity between 3V3 and GND**. Find a short now, not
+after everything else is attached.
 
 ## 4. Sensor power
 
-Land all three sensors' power onto the rails:
+Already done — it's in the splices from step 3. Just confirm each sensor is on
+the right one:
 
-| Sensor | 3V3 rail | GND rail |
+| Sensor | 3V3 splice | GND splice |
 |---|---|---|
 | DS18B20 | red | black |
 | TDS board | VCC | GND |
 | BH1750 | VCC | GND |
-
-Six wires, two rails. This is the whole reason for the bus.
 
 **TDS goes to 3.3 V, never 5 V.** 5 V on its output will destroy GPIO1.
 
@@ -75,9 +101,10 @@ Shrink each joint as you go.
 
 ## 6. The 4.7 kΩ pull-up
 
-Solder it between the **DQ line and the 3V3 rail**, at the *board* end of the
-run — not out at the probe. The easiest spot is across the bus: one leg into
-the 3V3 rail, the other onto the GPIO18 wire.
+Solder it between the **DQ line and 3V3**, at the *board* end of the run —
+not out at the probe. Easiest way: include one resistor leg in the 3V3 splice
+when you make it in step 3, and solder the other leg onto the GPIO18 wire
+where it leaves the board.
 
 Sleeve both legs with heat shrink. Bare resistor legs near a tank are a short
 waiting to happen.
@@ -93,7 +120,7 @@ only**:
 |---|---|
 | GPIO23 | Channel 1 `IN+` (heater) |
 | GPIO10 | Channel 2 `IN+` (fan) |
-| GND rail | `IN−`, both channels |
+| GND splice | `IN−`, both channels (jumpered together) |
 
 Do not open the relay module or touch its mains side. It has its own cord.
 
@@ -103,9 +130,9 @@ reading that isn't a sensor fault.
 
 ## 8. Inspect before powering
 
-1. Look at every joint under decent light. Shiny and concave is good; dull,
+1. Look at every joint under decent light, splices included. Shiny and concave is good; dull,
    cracked, or ball-shaped means reheat it.
-2. Multimeter continuity, **3V3 rail to GND rail: must be open.**
+2. Multimeter continuity, **3V3 to GND: must be open.**
 3. Tug each wire gently. Anything that moves gets resoldered.
 
 ## 9. Power up in stages

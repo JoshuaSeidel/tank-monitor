@@ -147,30 +147,30 @@ want the tank on a GFCI regardless.
 
 ### Full wiring diagram
 
-All three sensors need 3V3 and GND, which is six wires converging on two
-pins. Land power on a small bus (screw-terminal breakout, Qwiic/Grove hub
-used purely for power, or a scrap of perfboard) and run only the signal
-wires back to the GPIOs.
+All three sensors need 3V3 and GND, and the relay needs ground too — seven
+power wires converging on two pads. Everything solders directly to the board:
+join the power wires in a splice off-board and run one pigtail to each pad.
+See [ASSEMBLY.md](ASSEMBLY.md).
 
 Total sensor draw is under 10 mA, so the board's own regulator powers
 everything. No external supply.
 
-**Power — one pair of wires from the board, fanned out:**
+**Power — one pigtail per pad, split at a soldered splice:**
 
 ```
-   ESP32-C6-LCD-1.47
-   ┌─────────────┐
-   │             │        ┌──────────── 3V3 RAIL ────────────┐
-   │        3V3 ●┼────────┤                                  │
-   │             │        │      │            │           │  │
-   │        GND ●┼───┐    │     VCC          VCC         VCC │
-   │             │   │    │   DS18B20        TDS        BH1750
-   └─────────────┘   │    │     GND          GND         GND │
-                     │    │      │            │           │  │
-                     └────┤                                  │
-                          └──────────── GND RAIL ────────────┘
-                                             │
-                                             └──── Relay IN- (both ch.)
+   ESP32-C6-LCD-1.47                        ┌── DS18B20 red
+   ┌─────────────┐                          │
+   │             │            ╔═══════╗     ├── TDS VCC
+   │        3V3 ●┼────────────╢ splice╟─────┤
+   │             │            ╚═══════╝     └── BH1750 VCC
+   │             │
+   │             │            ╔═══════╗     ┌── DS18B20 black
+   │        GND ●┼────────────╢ splice╟─────┤
+   │             │            ╚═══════╝     ├── TDS GND
+   └─────────────┘                          │
+                                            ├── BH1750 GND
+                                            │
+                                            └── Relay IN- (both ch.)
 ```
 
 **Signal — one wire each, straight to its GPIO:**
