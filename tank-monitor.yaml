@@ -104,6 +104,12 @@ display:
     # The lambda paints every pixel itself (two full-width bars), so the
     # automatic clear before each frame is a wasted full-screen fill.
     auto_clear_enabled: false
+    # Full framebuffer, 320*172*2 = 110kB. Without PSRAM, ESPHome
+    # defaults to a ~20kB buffer and renders in stripes -- which means
+    # running this lambda once *per stripe*, re-rasterising the 150px
+    # font every pass. That was the ~470ms redraw. The C6 has the heap
+    # for the whole frame, so draw it in one go.
+    buffer_size: 100%
     # One screen, always on -- no page cycling. Temperature owns the top
     # two thirds, TDS the bottom third, and each zone's *background*
     # carries its own status colour so both read from across the room.
