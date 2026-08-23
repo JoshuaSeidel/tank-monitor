@@ -109,7 +109,11 @@ where it leaves the board.
 Sleeve both legs with heat shrink. Bare resistor legs near a tank are a short
 waiting to happen.
 
-Without this resistor the DS18B20 reads nothing or garbage. It is not optional.
+Without this resistor the DS18B20 reads nothing or garbage. Any value from
+2.2 kΩ to 10 kΩ will do — 4.7 kΩ is convention, not a requirement.
+
+If you don't have one yet, the README covers switching to the C6's internal
+pull-up as a bench-test stopgap. It is not a permanent substitute.
 
 ## 7. Relay control pair
 

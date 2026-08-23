@@ -56,6 +56,45 @@ GPIO6/7 (SPI), 14 (LCD CS), 15 (LCD DC), 21 (LCD reset), 22 (backlight),
 8 (RGB LED), 4/5 (microSD). GPIO12/13 are USB and 24-30 are flash. That
 leaves GPIO0-3 (the only ADC-capable pins left), 9-11, 18-20, and 23.
 
+## Parts list
+
+| Part | Notes |
+|---|---|
+| LAFVIN / Waveshare ESP32-C6-LCD-1.47 | the controller and display |
+| DS18B20 waterproof probe | water temperature |
+| Keyestudio TDS meter | dissolved solids |
+| GY-302 / BH1750 module | ambient light |
+| CZH-Labs D-1584TL | 2-channel relay outlet module, ~$49 |
+| **4.7 kΩ resistor, 1/4 W** | **required** for the DS18B20 — see below |
+| 26–28 AWG stranded wire | hookup |
+| Heat shrink, 2 mm and 3 mm | one size for joints, one for splices |
+
+The resistor is the one part that's easy to overlook because it doesn't come
+in any of the boxes. **Anything from 2.2 kΩ to 10 kΩ works** — 4.7 kΩ is the
+convention, not a requirement. Check your DS18B20 first: some waterproof
+probes ship with a small adapter board that already has it.
+
+**If you don't have one yet**, the C6's internal pull-up will get you through
+a bench test. Replace the `one_wire` block with:
+
+```yaml
+one_wire:
+  - platform: gpio
+    pin:
+      number: GPIO18
+      mode:
+        input: true
+        output: true
+        open_drain: true
+        pullup: true
+```
+
+This is a stopgap, not a fix. The internal pull-up is ~45 kΩ, about ten times
+weaker than 1-Wire wants. On a short lead it often works; on a 2-3 m
+waterproof probe cable it usually gives intermittent CRC errors and dropouts
+— which on this build means the controller sees a probe fault and cuts the
+heater. Use it to prove the wiring, then fit a real resistor.
+
 ## Wiring
 
 Everything runs at 3.3 V.
