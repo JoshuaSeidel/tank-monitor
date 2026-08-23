@@ -95,8 +95,13 @@ async def to_code(config):
 CONTROLLER_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(TankController)})
 
 
+# synchronous=True: every action below calls a method and returns. None of
+# them defer play_next_() to a callback, timer, or loop().
 @automation.register_action(
-    "tank_controller.reset_learning", ResetLearningAction, CONTROLLER_ACTION_SCHEMA
+    "tank_controller.reset_learning",
+    ResetLearningAction,
+    CONTROLLER_ACTION_SCHEMA,
+    synchronous=True,
 )
 async def reset_learning_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -109,6 +114,7 @@ async def reset_learning_to_code(config, action_id, template_arg, args):
     CONTROLLER_ACTION_SCHEMA.extend(
         {cv.Required(CONF_SETPOINT): cv.templatable(cv.float_)}
     ),
+    synchronous=True,
 )
 async def set_setpoint_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -123,6 +129,7 @@ async def set_setpoint_to_code(config, action_id, template_arg, args):
     CONTROLLER_ACTION_SCHEMA.extend(
         {cv.Required(CONF_LEARNING): cv.templatable(cv.boolean)}
     ),
+    synchronous=True,
 )
 async def set_learning_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
