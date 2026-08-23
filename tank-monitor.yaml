@@ -153,38 +153,40 @@ display:
       const Color ink = COLOR_INK;
 
       // ---- draw -------------------------------------------------------
-      it.filled_rectangle(0, 0, 320, 114, t_bg);
-      it.filled_rectangle(0, 114, 320, 58, d_bg);
-      it.horizontal_line(0, 113, 320, COLOR_INK);
+      // The panel is 33 x 18 mm. At 8 ft, legible digits need to be
+      // ~11 mm tall, which is essentially the whole screen. So the
+      // temperature gets everything above y=138 and nothing shares it --
+      // no labels, no units, no status words. The background colour
+      // carries the status; the digits carry the value.
+      it.filled_rectangle(0, 0, 320, 138, t_bg);
+      it.filled_rectangle(0, 138, 320, 34, d_bg);
+      it.horizontal_line(0, 137, 320, COLOR_INK);
 
-      // Temperature: the biggest thing on the panel.
-      if (t_ok)
-        it.printf(180, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "%.1f", t_f);
-      else
-        it.print(180, 2, id(font_huge), ink, TextAlign::TOP_RIGHT, "--.-");
-      it.print(184, 56, id(font_med), ink, "\u00b0F");
+      if (!t_ok) {
+        it.print(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
+      } else if (t_f >= 100.0f || t_f < 0.0f) {
+        // Three digits plus a decimal will not fit. In a genuine
+        // emergency, whole degrees are enough.
+        it.printf(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
+      } else {
+        it.printf(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
+      }
 
-      it.print(214, 4, id(font_small), ink, "TARGET");
-      it.print(214, 18, id(font_med), ink, "${temp_lo}-${temp_hi}");
-      it.print(214, 46, id(font_small), ink, "1H SWING");
-      if (isnan(swing_f))
-        it.print(214, 60, id(font_med), ink, "--");
-      else
-        it.printf(214, 60, id(font_med), ink, "%.1f \u00b0F", swing_f);
-      it.print(8, 92, id(font_med), ink, t_label);
-      it.printf(312, 92, id(font_med), ink, TextAlign::TOP_RIGHT, "heat %.0f%%",
-                id(controller).get_heater_duty());
-
-      // TDS: second-largest.
+      // Bottom strip: TDS, on its own status colour. Close-up detail --
+      // not meant to be read from across the room.
       if (d_ok)
-        it.printf(150, 116, id(font_mid), ink, TextAlign::TOP_RIGHT, "%.0f", ppm);
+        it.printf(6, 142, id(font_strip), ink, "TDS %.0f", ppm);
       else
-        it.print(150, 116, id(font_mid), ink, TextAlign::TOP_RIGHT, "---");
-      it.print(156, 136, id(font_med), ink, "ppm");
+        it.print(6, 142, id(font_strip), ink, "TDS --");
+      it.print(314, 144, id(font_small), ink, TextAlign::TOP_RIGHT, d_label);
 
-      it.print(214, 118, id(font_small), ink, "TARGET");
-      it.print(214, 132, id(font_med), ink, "${tds_lo}-${tds_hi}");
-      it.print(8, 150, id(font_small), ink, d_label);
+      // Unread by design at distance, but there when you walk up: the
+      // target band, and how much the tank actually moved this hour.
+      it.print(314, 4, id(font_small), ink, TextAlign::TOP_RIGHT, "${temp_lo}-${temp_hi} \u00b0F");
+      if (!isnan(swing_f))
+        it.printf(314, 18, id(font_small), ink, TextAlign::TOP_RIGHT, "sw %.1f", swing_f);
+      it.printf(314, 118, id(font_small), ink, TextAlign::TOP_RIGHT, "%s  %.0f%%", t_label,
+                id(controller).get_heater_duty());
 
 color:
   - id: COLOR_INK
@@ -197,20 +199,20 @@ color:
     hex: "FF4438"
 
 font:
-  - file: "gfonts://Roboto@500"
-    id: font_small
-    size: 14
   - file: "gfonts://Roboto@700"
-    id: font_med
-    size: 20
+    id: font_small
+    size: 13
     glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\u00b0"
   - file: "gfonts://Roboto@700"
-    id: font_mid
-    size: 46
-    glyphs: "0123456789.-"
+    id: font_strip
+    size: 26
+    glyphs: "0123456789.- ADST"
+  # Sized to the panel, not to taste: at 150px em the digits are ~11mm
+  # tall, which is the largest "NN.N" that fits 320px wide. That is the
+  # physical limit of this display for across-the-room reading.
   - file: "gfonts://Roboto@900"
     id: font_huge
-    size: 86
+    size: 150
     glyphs: "0123456789.-"
 
 i2c:

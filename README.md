@@ -222,26 +222,39 @@ the sensor end.
 
 ## The display
 
-**One screen, always on** — no page cycling. Temperature owns the top two
-thirds, TDS the bottom third, and each zone's *background* carries its own
-status colour, so both values read from across the room by colour before
-you're close enough to read digits.
+**One screen. The temperature owns almost all of it.**
+
+The panel is 1.47" diagonal at 320x172, which in landscape is about
+**33 x 18 mm** — a pixel pitch of roughly 0.10 mm. To read a number at 8 ft
+you need digits subtending ~15-20 arcminutes, which works out to **11 mm
+tall**. That is nearly the full height of the panel, so the temperature gets
+everything and nothing else competes with it.
+
+The font is sized to that constraint, not to taste. At 150 px em, "74.5"
+measures **306 px wide by 109 px tall** — the largest it can be and still fit
+320 px across. 160 px overflows. 109 px is 11.2 mm, which subtends ~16
+arcmin at 8 ft and ~25 arcmin at 5 ft.
 
 ```
 ┌────────────────────────────────────────────┐
-│                 TARGET                     │  ← background is GREEN /
-│    74.5 °F      74-75                      │    AMBER / RED for temp
-│                 1H SWING                   │
-│                 0.2 °F                     │
-│  STEADY                         heat 32%   │
+│                              74-75 °F      │
+│                              sw 0.2        │
+│              74.5                          │  ← 11mm digits, whole panel
+│                                            │    background = status colour
+│                          STEADY  32%       │
 ├────────────────────────────────────────────┤
-│    212 ppm      TARGET                     │  ← independently coloured
-│  TDS OK         180-250                    │    for TDS
+│ TDS 212                          TDS OK    │  ← 34px strip
 └────────────────────────────────────────────┘
 ```
 
-Text is near-black on every band — highest contrast at distance, and legible
-on all three colours.
+**From across the room you read the background colour, not the text.** Green,
+amber, red — that alone tells you whether the tank is holding. The digits are
+readable at 5-8 ft. Everything else (target band, hourly swing, heater duty,
+TDS status) is deliberately small: it's there when you walk up to it, and
+it's on the Home Assistant dashboard when you want to actually study it.
+
+Temperatures of 100 °F or above drop the decimal so the digits still fit. If
+you ever see that, the decimal place is not your problem.
 
 ### Thresholds
 
