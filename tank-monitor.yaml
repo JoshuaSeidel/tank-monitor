@@ -97,7 +97,13 @@ display:
     # inversion for this exact panel.
     model: WAVESHARE-ESP32-C6-LCD-1.47
     rotation: 90
-    update_interval: 1s
+    # 5s, not 1s: a full redraw of this panel takes ~470ms, and water
+    # temperature does not change meaningfully in a second. Redrawing
+    # every second spent half the CPU blocking on SPI for nothing.
+    update_interval: 5s
+    # The lambda paints every pixel itself (two full-width bars), so the
+    # automatic clear before each frame is a wasted full-screen fill.
+    auto_clear_enabled: false
     # One screen, always on -- no page cycling. Temperature owns the top
     # two thirds, TDS the bottom third, and each zone's *background*
     # carries its own status colour so both read from across the room.
