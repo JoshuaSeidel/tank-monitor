@@ -15,8 +15,10 @@
 part = "all";   // "all" | "tray" | "lid" | "fittest"
 
 /* [BOARD -- replace with caliper readings if you get them] */
-pcb_l = 51.0;     // long dimension, USB end to far end
-pcb_w = 23.0;     // short dimension
+// First coupon (pcb_w 23.0, pocket 23.8) was loose. Down 0.5mm.
+// fit-gauge.stl gives the definitive number if this is still off.
+pcb_l = 50.0;     // long dimension, USB end to far end
+pcb_w = 22.6;     // short dimension
 pcb_t = 1.6;      // bare PCB thickness
 
 back_h  = 4.0;    // tallest component on the BACK
