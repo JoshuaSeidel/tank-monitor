@@ -333,29 +333,17 @@ Say the word if you want it.
 
 ## 3D printed case
 
-Your LAFVIN board is a clone of the Waveshare ESP32-C6-LCD-1.47, so cases cut
-for the Waveshare fit. Free options:
+**Nothing off the shelf fits this board.** The Waveshare-outline cases and
+the generic MakerWorld ESP32-C6 enclosure both assume the LCD is centred with
+USB on a long edge; the LAFVIN is a stick, with USB-C, BOOT and RESET all on
+one short end.
 
-- **[Case for ESP32-C6-LCD-1.47](https://www.printables.com/model/1601229-case-for-esp32-c6-lcd-147)** by Dicson (Printables) — updated Feb 2026
-- **[ESP32-C6 1.47inch Display Enclosure](https://www.printables.com/model/1365867-esp32-c6-147inch-display-enclosure)** by Jonathan Senkerik (Printables) — snap-on lid
-- **[ESP32-C6-1.47-LCD](https://www.printables.com/model/1472316-esp32-c6-147-lcd)** by By_ISIK (Printables)
-- **[ESP32-LCD-1.47 Case](https://makerworld.com/en/models/1301018-esp32-lcd-1-47-case)** by Sedikit (MakerWorld) — two halves, needs gluing
-- **[Clip-in case](https://www.thingiverse.com/thing:7065147)** by amduck (Thingiverse) — prints without supports, but cut for the **Touch** variant, so check the front face
+So there's a purpose-built one in [`case/`](case/) — parametric OpenSCAD plus
+ready STLs, with a cable exit for the eight wires this build has. Print the
+fit-test coupon first: LAFVIN publishes no mechanical drawing, so the
+dimensions came off photographs and are good to about ±1 mm.
 
-If you want to design your own, there's an
-**[accurate reference CAD model](https://www.printables.com/model/1633740-esp32-c6-lcd-147-reference-cad-model)**
-by x_giedrius_x.
-
-**One thing every one of these will be wrong about:** they're designed around a
-bare dev board with a USB-C port and nothing else. You have eight wires leaving
-the board — power bus, three sensors, two relay channels. Expect to cut or model
-a cable exit on whichever you pick. The reference CAD model is the honest
-starting point if you'd rather do it properly than take a knife to a print.
-
-Print in PETG rather than PLA if the case will sit on the tank rim — PLA
-softens in warm humid air and creeps over time.
-
----
+See [case/README.md](case/README.md).
 
 ## Assembly
 
