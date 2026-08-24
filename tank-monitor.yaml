@@ -20,6 +20,8 @@ substitutions:
   tds_hi: "250"
   tds_red_lo: "150"
   tds_red_hi: "300"
+  # Above this the tank lights count as on, and the top strip goes amber.
+  light_on_lux: "50"
   # K-value for the TDS probe. 1.0 is the factory default.
   # Calibrate with a known solution (e.g. 707ppm / 1413us-cm standard).
   tds_k_factor: "1.0"
@@ -171,46 +173,63 @@ display:
       // it stays legible on all three colours.
       const Color ink = COLOR_INK;
 
+      // ---- light strip ------------------------------------------------
+      const float lux = id(tank_lux).state;
+      const bool l_ok = !isnan(lux);
+      const bool lights_on = l_ok && lux >= ${light_on_lux};
+      // Amber when the tank lights are on, dark when they are off. The
+      // controller predicts their heat load, so seeing their actual state
+      // next to the temperature is worth the strip.
+      const Color l_bg = lights_on ? COLOR_AMBER : COLOR_NIGHT;
+      const Color l_ink = lights_on ? COLOR_INK : COLOR_DIM;
+
       // ---- draw -------------------------------------------------------
-      // The panel is 33 x 18 mm. At 8 ft, legible digits need to be
-      // ~11 mm tall, which is essentially the whole screen. So the
-      // temperature gets everything above y=138 and nothing shares it --
-      // no labels, no units, no status words. The background colour
-      // carries the status; the digits carry the value.
-      it.filled_rectangle(0, 0, 320, 138, t_bg);
-      it.filled_rectangle(0, 138, 320, 34, d_bg);
-      it.horizontal_line(0, 137, 320, COLOR_INK);
+      // 172px of panel: 26 light strip, 114 temperature, 32 TDS. The
+      // number is sized to whatever is left after those, not the other
+      // way round.
+      it.filled_rectangle(0, 0, 320, 26, l_bg);
+      it.filled_rectangle(0, 26, 320, 114, t_bg);
+      it.filled_rectangle(0, 140, 320, 32, d_bg);
+      it.horizontal_line(0, 26, 320, COLOR_INK);
+      it.horizontal_line(0, 139, 320, COLOR_INK);
+
+      if (l_ok)
+        it.printf(6, 3, id(font_strip), l_ink, "LIGHT %.0f", lux);
+      else
+        it.print(6, 3, id(font_strip), l_ink, "LIGHT --");
+      it.print(314, 6, id(font_small), l_ink, TextAlign::TOP_RIGHT,
+               lights_on ? "lights on" : "dark");
 
       // "74.5" at 150px em renders 306px wide on a 320px panel, so the
       // number owns the full width -- nothing else can share these rows.
       if (!t_ok) {
-        it.print(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
+        it.print(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
       } else if (t_f >= 100.0f || t_f < 0.0f) {
         // Three digits plus a decimal will not fit. In a genuine
         // emergency, whole degrees are enough.
-        it.printf(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
+        it.printf(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
       } else {
-        it.printf(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
+        it.printf(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
       }
 
       // Bottom strip: TDS, on its own status colour. Close-up detail --
       // not meant to be read from across the room.
       if (d_ok)
-        it.printf(6, 142, id(font_strip), ink, "TDS %.0f", ppm);
+        it.printf(6, 146, id(font_strip), ink, "TDS %.0f", ppm);
       else
-        it.print(6, 142, id(font_strip), ink, "TDS --");
-      it.print(314, 144, id(font_small), ink, TextAlign::TOP_RIGHT, d_label);
+        it.print(6, 146, id(font_strip), ink, "TDS --");
+      it.print(314, 149, id(font_small), ink, TextAlign::TOP_RIGHT, d_label);
 
       // One status row beneath the number, in the 22px left over. Walk-up
       // detail only -- target band, hourly swing, heater duty. Putting any
       // of this beside the number is what caused the overlap.
-      it.print(6, 117, id(font_small), ink, t_label);
+      it.print(6, 124, id(font_small), ink, t_label);
       if (isnan(swing_f))
-        it.printf(314, 117, id(font_small), ink, TextAlign::TOP_RIGHT,
+        it.printf(314, 124, id(font_small), ink, TextAlign::TOP_RIGHT,
                   "${temp_lo}-${temp_hi}  |  heat %.0f%%",
                   id(controller).get_heater_duty());
       else
-        it.printf(314, 117, id(font_small), ink, TextAlign::TOP_RIGHT,
+        it.printf(314, 124, id(font_small), ink, TextAlign::TOP_RIGHT,
                   "${temp_lo}-${temp_hi}  |  sw %.1f  |  heat %.0f%%", swing_f,
                   id(controller).get_heater_duty());
 
@@ -223,6 +242,10 @@ color:
     hex: "FFB020"
   - id: COLOR_RED
     hex: "FF4438"
+  - id: COLOR_NIGHT
+    hex: "10161F"
+  - id: COLOR_DIM
+    hex: "8A93A0"
 
 font:
   - file: "gfonts://Roboto@700"
@@ -231,14 +254,14 @@ font:
     glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz\u00b0"
   - file: "gfonts://Roboto@700"
     id: font_strip
-    size: 26
-    glyphs: "0123456789.- ADST"
-  # Sized to the panel, not to taste: at 150px em the digits are ~11mm
-  # tall, which is the largest "NN.N" that fits 320px wide. That is the
-  # physical limit of this display for across-the-room reading.
+    size: 22
+    glyphs: "0123456789.- ADSTLIGH"
+  # Sized to the space left after the two strips: at 130px em the digits
+  # are ~9.7mm tall and "74.5" renders 264x94px, which fits the 96px band
+  # between the light strip and the status row.
   - file: "gfonts://Roboto@900"
     id: font_huge
-    size: 150
+    size: 130
     glyphs: "0123456789.-"
 
 i2c:

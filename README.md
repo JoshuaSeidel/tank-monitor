@@ -285,18 +285,30 @@ arcmin at 8 ft and ~25 arcmin at 5 ft.
 
 ```
 ┌────────────────────────────────────────────┐
-│                                            │
-│              74.5                          │  ← 11mm digits, full width
-│                                            │    background = status colour
-│ STEADY            74-75 | sw 0.2 | heat 32%│  ← one status row
+│ LIGHT 820                       lights on  │  ← 26px, amber when lit
 ├────────────────────────────────────────────┤
-│ TDS 212                          TDS OK    │  ← 34px strip
+│              74.5                          │  ← 9.7mm digits
+│                                            │    background = status colour
+│ STEADY            74-75 | sw 0.2 | heat 32%│  ← status row
+├────────────────────────────────────────────┤
+│ TDS 212                          TDS OK    │  ← 32px strip
 └────────────────────────────────────────────┘
 ```
 
-At 150 px the number renders **306 px wide on a 320 px panel**, so it owns
-those rows outright — nothing can sit beside it. Everything else lives in the
-22 px status row underneath.
+172 px of panel, divided: **26 light / 114 temperature / 32 TDS**. The number
+is sized to what's left rather than the other way round — at 130 px em,
+`74.5` renders 264 × 94 px into the 96 px band between the light strip and
+the status row.
+
+**The light strip costs the temperature ~1 mm of digit height** — 11 mm down
+to 9.7 mm, which is ~13 arcmin at 8 ft instead of ~16. Still readable at
+that range, slightly less comfortable. Delete the strip and bump `font_huge`
+back to 150 if you'd rather have the height.
+
+The strip goes **amber when the tank lights are on** (above `light_on_lux`,
+default 50 lx) and near-black when they're off. Since the controller
+pre-compensates for the lights' heat load, seeing their real state next to
+the temperature is worth the space.
 
 **From across the room you read the background colour, not the text.** Green,
 amber, red — that alone tells you whether the tank is holding. The digits are
