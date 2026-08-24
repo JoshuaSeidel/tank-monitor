@@ -295,10 +295,19 @@ arcmin at 8 ft and ~25 arcmin at 5 ft.
 └────────────────────────────────────────────┘
 ```
 
-172 px of panel, divided: **26 light / 114 temperature / 32 TDS**. The number
-is sized to what's left rather than the other way round — at 130 px em,
-`74.5` renders 264 × 94 px into the 96 px band between the light strip and
-the status row.
+172 px of panel, divided: **26 light / 114 temperature / 32 TDS**.
+
+**Every string is positioned by its baseline, not its top or bottom.** This
+matters more than it sounds: ESPHome places text using the font's *line box*
+— ascender to descender, 148 px at this size — while the digits themselves
+are only 92 px of ink. Anchoring `TOP_CENTER` therefore drops the glyphs
+~28 px lower than the coordinate suggests, which is exactly how the first
+attempt ended up printing the temperature through the status row. The
+baseline is where digits physically rest, so it's the one anchor that
+doesn't depend on font metrics.
+
+At 126 px em the digits occupy y 28–120, clear of the light strip above
+(ends at 26) and the status row below (ink starts at 126).
 
 **The light strip costs the temperature ~1 mm of digit height** — 11 mm down
 to 9.7 mm, which is ~13 arcmin at 8 ft instead of ~16. Still readable at

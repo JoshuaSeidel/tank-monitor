@@ -194,42 +194,49 @@ display:
       it.horizontal_line(0, 139, 320, COLOR_INK);
 
       if (l_ok)
-        it.printf(6, 3, id(font_strip), l_ink, "LIGHT %.0f", lux);
+        it.printf(6, 20, id(font_strip), l_ink, TextAlign::BASELINE_LEFT, "LIGHT %.0f", lux);
       else
-        it.print(6, 3, id(font_strip), l_ink, "LIGHT --");
-      it.print(314, 6, id(font_small), l_ink, TextAlign::TOP_RIGHT,
+        it.print(6, 20, id(font_strip), l_ink, TextAlign::BASELINE_LEFT, "LIGHT --");
+      it.print(314, 19, id(font_small), l_ink, TextAlign::BASELINE_RIGHT,
                lights_on ? "lights on" : "dark");
 
       // "74.5" at 150px em renders 306px wide on a 320px panel, so the
       // number owns the full width -- nothing else can share these rows.
+      // BASELINE, not TOP. ESPHome positions text by the font's line box
+      // (ascender to descender, ~1.17em -- 148px at this size), not by the
+      // ink of the glyphs (~0.71em, 90px). Anchoring the top therefore
+      // pushes digits ~28px lower than they look like they should sit,
+      // which is what drove them through the status row. The baseline is
+      // exactly where digits rest, so it is the one reference that does
+      // not depend on font metrics.
       if (!t_ok) {
-        it.print(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
+        it.print(160, 120, id(font_huge), ink, TextAlign::BASELINE_CENTER, "--.-");
       } else if (t_f >= 100.0f || t_f < 0.0f) {
         // Three digits plus a decimal will not fit. In a genuine
         // emergency, whole degrees are enough.
-        it.printf(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
+        it.printf(160, 120, id(font_huge), ink, TextAlign::BASELINE_CENTER, "%.0f", t_f);
       } else {
-        it.printf(160, 28, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
+        it.printf(160, 120, id(font_huge), ink, TextAlign::BASELINE_CENTER, "%.1f", t_f);
       }
 
       // Bottom strip: TDS, on its own status colour. Close-up detail --
       // not meant to be read from across the room.
       if (d_ok)
-        it.printf(6, 146, id(font_strip), ink, "TDS %.0f", ppm);
+        it.printf(6, 164, id(font_strip), ink, TextAlign::BASELINE_LEFT, "TDS %.0f", ppm);
       else
-        it.print(6, 146, id(font_strip), ink, "TDS --");
-      it.print(314, 149, id(font_small), ink, TextAlign::TOP_RIGHT, d_label);
+        it.print(6, 164, id(font_strip), ink, TextAlign::BASELINE_LEFT, "TDS --");
+      it.print(314, 163, id(font_small), ink, TextAlign::BASELINE_RIGHT, d_label);
 
       // One status row beneath the number, in the 22px left over. Walk-up
       // detail only -- target band, hourly swing, heater duty. Putting any
       // of this beside the number is what caused the overlap.
-      it.print(6, 124, id(font_small), ink, t_label);
+      it.print(6, 135, id(font_small), ink, TextAlign::BASELINE_LEFT, t_label);
       if (isnan(swing_f))
-        it.printf(314, 124, id(font_small), ink, TextAlign::TOP_RIGHT,
+        it.printf(314, 135, id(font_small), ink, TextAlign::BASELINE_RIGHT,
                   "${temp_lo}-${temp_hi}  |  heat %.0f%%",
                   id(controller).get_heater_duty());
       else
-        it.printf(314, 124, id(font_small), ink, TextAlign::TOP_RIGHT,
+        it.printf(314, 135, id(font_small), ink, TextAlign::BASELINE_RIGHT,
                   "${temp_lo}-${temp_hi}  |  sw %.1f  |  heat %.0f%%", swing_f,
                   id(controller).get_heater_duty());
 
@@ -261,7 +268,7 @@ font:
   # between the light strip and the status row.
   - file: "gfonts://Roboto@900"
     id: font_huge
-    size: 130
+    size: 126
     glyphs: "0123456789.-"
 
 i2c:
