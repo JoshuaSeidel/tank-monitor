@@ -102,7 +102,8 @@ display:
     # Board preset -- supplies cs/dc/reset pins, 34px offset and colour
     # inversion for this exact panel.
     model: WAVESHARE-ESP32-C6-LCD-1.47
-    rotation: 90
+    # 270, not 90: the board is mounted with the USB end the other way up.
+    rotation: 270
     # 5s, not 1s: a full redraw of this panel takes ~470ms, and water
     # temperature does not change meaningfully in a second. Redrawing
     # every second spent half the CPU blocking on SPI for nothing.
@@ -180,14 +181,16 @@ display:
       it.filled_rectangle(0, 138, 320, 34, d_bg);
       it.horizontal_line(0, 137, 320, COLOR_INK);
 
+      // "74.5" at 150px em renders 306px wide on a 320px panel, so the
+      // number owns the full width -- nothing else can share these rows.
       if (!t_ok) {
-        it.print(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
+        it.print(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "--.-");
       } else if (t_f >= 100.0f || t_f < 0.0f) {
         // Three digits plus a decimal will not fit. In a genuine
         // emergency, whole degrees are enough.
-        it.printf(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
+        it.printf(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "%.0f", t_f);
       } else {
-        it.printf(160, 6, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
+        it.printf(160, 2, id(font_huge), ink, TextAlign::TOP_CENTER, "%.1f", t_f);
       }
 
       // Bottom strip: TDS, on its own status colour. Close-up detail --
@@ -198,13 +201,18 @@ display:
         it.print(6, 142, id(font_strip), ink, "TDS --");
       it.print(314, 144, id(font_small), ink, TextAlign::TOP_RIGHT, d_label);
 
-      // Unread by design at distance, but there when you walk up: the
-      // target band, and how much the tank actually moved this hour.
-      it.print(314, 4, id(font_small), ink, TextAlign::TOP_RIGHT, "${temp_lo}-${temp_hi} \u00b0F");
-      if (!isnan(swing_f))
-        it.printf(314, 18, id(font_small), ink, TextAlign::TOP_RIGHT, "sw %.1f", swing_f);
-      it.printf(314, 118, id(font_small), ink, TextAlign::TOP_RIGHT, "%s  %.0f%%", t_label,
-                id(controller).get_heater_duty());
+      // One status row beneath the number, in the 22px left over. Walk-up
+      // detail only -- target band, hourly swing, heater duty. Putting any
+      // of this beside the number is what caused the overlap.
+      it.print(6, 117, id(font_small), ink, t_label);
+      if (isnan(swing_f))
+        it.printf(314, 117, id(font_small), ink, TextAlign::TOP_RIGHT,
+                  "${temp_lo}-${temp_hi}  |  heat %.0f%%",
+                  id(controller).get_heater_duty());
+      else
+        it.printf(314, 117, id(font_small), ink, TextAlign::TOP_RIGHT,
+                  "${temp_lo}-${temp_hi}  |  sw %.1f  |  heat %.0f%%", swing_f,
+                  id(controller).get_heater_duty());
 
 color:
   - id: COLOR_INK

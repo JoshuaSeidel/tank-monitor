@@ -285,15 +285,18 @@ arcmin at 8 ft and ~25 arcmin at 5 ft.
 
 ```
 ┌────────────────────────────────────────────┐
-│                              74-75 °F      │
-│                              sw 0.2        │
-│              74.5                          │  ← 11mm digits, whole panel
+│                                            │
+│              74.5                          │  ← 11mm digits, full width
 │                                            │    background = status colour
-│                          STEADY  32%       │
+│ STEADY            74-75 | sw 0.2 | heat 32%│  ← one status row
 ├────────────────────────────────────────────┤
 │ TDS 212                          TDS OK    │  ← 34px strip
 └────────────────────────────────────────────┘
 ```
+
+At 150 px the number renders **306 px wide on a 320 px panel**, so it owns
+those rows outright — nothing can sit beside it. Everything else lives in the
+22 px status row underneath.
 
 **From across the room you read the background colour, not the text.** Green,
 amber, red — that alone tells you whether the tank is holding. The digits are
