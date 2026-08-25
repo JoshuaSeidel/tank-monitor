@@ -299,8 +299,23 @@ void TankController::update() {
   this->predicted_light_ = this->predicted_light_for_((int) this->response_time_);
 
   // What the tank will do on its own, with no heater and no fan.
-  const float passive = this->model_.theta[2] * (t - TEMP_REF) + this->model_.theta[3] * this->predicted_light_ +
-                        this->model_.theta[4];
+  const float passive_raw = this->model_.theta[2] * (t - TEMP_REF) +
+                            this->model_.theta[3] * this->predicted_light_ + this->model_.theta[4];
+
+  // Weight the feedforward by how much the model has actually learned.
+  //
+  // Until RLS has data, `passive_raw` is a guess about an ambient
+  // temperature nobody measured -- and it is routinely several times
+  // larger than the error term, so it decides the output on its own. Both
+  // directions of that guess have already misfired here: an equilibrium
+  // set too high refused to heat a cold tank, and one set too low called
+  // for heat while the tank sat above target.
+  //
+  // At zero confidence this collapses to plain feedback on the measured
+  // error, which cannot be wrong about the sign. The prediction phases in
+  // over roughly a day as the model earns it.
+  const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
+  const float passive = passive_raw * trust;
 
   const float error = this->setpoint_ - t;
 
@@ -339,8 +354,10 @@ void TankController::update() {
   this->apply_outputs_(heater, fan);
 
   // Where the model says we'll be in 15 minutes at this output level.
+  // Uses the unweighted prediction: this is the model's honest forecast,
+  // not the trust-limited term the controller acts on.
   const float rate_now =
-      kh * this->heater_duty_ + this->model_.theta[1] * this->fan_duty_ + passive;
+      kh * this->heater_duty_ + this->model_.theta[1] * this->fan_duty_ + passive_raw;
   this->predicted_temp_ = t + rate_now * 15.0f;
 
   if (now - this->last_save_ms_ > SAVE_INTERVAL_MS) {
