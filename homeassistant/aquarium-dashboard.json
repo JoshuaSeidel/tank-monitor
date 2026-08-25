@@ -1,0 +1,721 @@
+{
+  "views": [
+    {
+      "title": "Tank",
+      "path": "tank",
+      "type": "sections",
+      "icon": "mdi:fishbowl",
+      "max_columns": 3,
+      "badges": [
+        {
+          "type": "entity",
+          "entity": "sensor.tank_monitor_water_temperature_f",
+          "show_name": true
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.tank_monitor_temperature_swing_1h",
+          "show_name": true
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.seneye_spec_16_ph",
+          "show_name": true
+        },
+        {
+          "type": "entity",
+          "entity": "sensor.tank_monitor_controller_state",
+          "show_name": true
+        }
+      ],
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Temperature",
+              "heading_style": "title",
+              "icon": "mdi:thermometer"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_water_temperature_f",
+              "grid_options": {
+                "columns": 12
+              },
+              "name": "Water",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "number.tank_monitor_target_temperature",
+              "grid_options": {
+                "columns": 12
+              },
+              "name": "Target",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_temperature_swing_1h",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Swing (1h)",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_controller_state",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Controller"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_heater_output",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Heater",
+              "features": [
+                {
+                  "type": "bar-gauge",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_fan_output",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Fan",
+              "features": [
+                {
+                  "type": "bar-gauge",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Water quality",
+              "heading_style": "title",
+              "icon": "mdi:water-check"
+            },
+            {
+              "type": "markdown",
+              "content": "| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('sensor.seneye_spec_16_ph') }} | 7.2 \u2013 7.5 |\n| **TDS** | {{ states('sensor.tank_monitor_tds') }} ppm | 180 \u2013 250 |\n| **GH** | {{ states('sensor.aquarium_gh_log') }} | 7 \u2013 8 |\n| **KH** | {{ states('sensor.aquarium_kh_log') }} | 3 \u2013 4 |\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature_f') }} \u00b0F | 74 \u2013 75 |\n"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.seneye_spec_16_ph",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "pH (Seneye)",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.seneye_spec_16_free_ammonia",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Free ammonia",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_tds",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "TDS",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_electrical_conductivity",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Conductivity"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_tank_light_level",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Light",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "light.tank_monitor_display_backlight",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Display"
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Health",
+              "heading_style": "title",
+              "icon": "mdi:heart-pulse"
+            },
+            {
+              "type": "markdown",
+              "content": "{% set a = states('sensor.tank_monitor_water_temperature_f') | float(-999) %}{% set b = states('sensor.seneye_spec_16_temperature') | float(-999) %}{% if a < -900 or b < -900 %}\u26a0\ufe0f **A probe is not reporting** \u2014 controller {{ states('sensor.tank_monitor_water_temperature_f') }}, Seneye {{ states('sensor.seneye_spec_16_temperature') }}\n{% else %}{% set d = (a - b) | abs | round(2) %}{% if d <= 0.5 %}\u2705 **Probes agree** \u2014 {{ d }} \u00b0F apart\n{% elif d <= 1.5 %}\ud83d\udfe1 **Probes drifting apart** \u2014 {{ d }} \u00b0F\n{% else %}\ud83d\udd34 **Probes disagree by {{ d }} \u00b0F** \u2014 one has failed or drifted\n{% endif %}\nController {{ a }} \u00b0F \u00b7 Seneye {{ b }} \u00b0F{% endif %}"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.seneye_spec_16_temperature",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Seneye temp",
+              "features": [
+                {
+                  "type": "trend-graph",
+                  "hours_to_show": 24
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "binary_sensor.tank_monitor_temperature_fault",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Probe fault"
+            },
+            {
+              "type": "tile",
+              "entity": "binary_sensor.tank_monitor_status",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Controller online"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.tank_monitor_model_confidence",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Model learned",
+              "features": [
+                {
+                  "type": "bar-gauge",
+                  "min": 0,
+                  "max": 100
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.seneye_spec_16_slide_expires",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Slide expires"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.seneye_spec_16_last_reading",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Seneye last seen"
+            },
+            {
+              "type": "tile",
+              "entity": "switch.tank_monitor_adaptive_learning",
+              "grid_options": {
+                "columns": 12
+              },
+              "name": "Adaptive learning"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Manual tests",
+      "path": "manual",
+      "type": "sections",
+      "icon": "mdi:test-tube",
+      "max_columns": 2,
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Enter today's results",
+              "heading_style": "title",
+              "icon": "mdi:pencil"
+            },
+            {
+              "type": "markdown",
+              "text_only": true,
+              "content": "Type each value, then press **Log manual test**. Last logged {{ relative_time(states.input_datetime.aquarium_last_manual_test.state | as_datetime) }} ago."
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_ph_manual",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "pH",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_gh",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "GH",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_kh",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "KH",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_tds",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "TDS",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_nitrate",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Nitrate",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_nitrite",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Nitrite",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_number.aquarium_total_ammonia",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Total ammonia",
+              "features": [
+                {
+                  "type": "numeric-input",
+                  "style": "buttons"
+                }
+              ]
+            },
+            {
+              "type": "tile",
+              "entity": "input_datetime.aquarium_last_manual_test",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Last test"
+            },
+            {
+              "type": "tile",
+              "entity": "script.aquarium_log_manual_test",
+              "name": "Log manual test",
+              "icon": "mdi:content-save-check",
+              "grid_options": {
+                "columns": 12
+              },
+              "tap_action": {
+                "action": "perform-action",
+                "perform_action": "script.aquarium_log_manual_test"
+              }
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Last logged values",
+              "heading_style": "title",
+              "icon": "mdi:clipboard-text-clock"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_ph_manual_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "pH"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_gh_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "GH"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_kh_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "KH"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_tds_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "TDS"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_nitrate_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Nitrate"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_nitrite_log",
+              "grid_options": {
+                "columns": 6
+              },
+              "name": "Nitrite"
+            },
+            {
+              "type": "tile",
+              "entity": "sensor.aquarium_total_ammonia_log",
+              "grid_options": {
+                "columns": 12
+              },
+              "name": "Total ammonia"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Trends",
+      "path": "trends",
+      "type": "sections",
+      "icon": "mdi:chart-line",
+      "max_columns": 2,
+      "sections": [
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Is it holding?",
+              "heading_style": "title",
+              "icon": "mdi:target"
+            },
+            {
+              "type": "markdown",
+              "text_only": true,
+              "content": "`Swing (1h)` is the number that says whether this worked. It started near 3 \u00b0F. Under 0.5 \u00b0F is the goal."
+            },
+            {
+              "type": "history-graph",
+              "title": "Temperature vs target",
+              "hours_to_show": 48,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.tank_monitor_water_temperature_f",
+                  "name": "Water",
+                  "color": "#00C8FF"
+                },
+                {
+                  "entity": "sensor.tank_monitor_target_temperature_f",
+                  "name": "Target",
+                  "color": "#3ECF6E"
+                },
+                {
+                  "entity": "sensor.seneye_spec_16_temperature",
+                  "name": "Seneye",
+                  "color": "#FFB020"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "Temperature swing (1h)",
+              "hours_to_show": 48,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.tank_monitor_temperature_swing_1h",
+                  "name": "Swing",
+                  "color": "#FF4438"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "Heater and fan duty",
+              "hours_to_show": 48,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.tank_monitor_heater_output",
+                  "name": "Heater",
+                  "color": "#FFB020"
+                },
+                {
+                  "entity": "sensor.tank_monitor_fan_output",
+                  "name": "Fan",
+                  "color": "#00C8FF"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "Light level",
+              "hours_to_show": 48,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.tank_monitor_tank_light_level",
+                  "name": "Light"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "grid",
+          "cards": [
+            {
+              "type": "heading",
+              "heading": "Water chemistry",
+              "heading_style": "title",
+              "icon": "mdi:flask"
+            },
+            {
+              "type": "history-graph",
+              "title": "pH \u2014 probe vs test kit",
+              "hours_to_show": 168,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.seneye_spec_16_ph",
+                  "name": "Seneye",
+                  "color": "#00C8FF"
+                },
+                {
+                  "entity": "sensor.aquarium_ph_manual_log",
+                  "name": "Test kit",
+                  "color": "#FFB020"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "TDS \u2014 probe vs test kit",
+              "hours_to_show": 168,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.tank_monitor_tds",
+                  "name": "Probe",
+                  "color": "#00C8FF"
+                },
+                {
+                  "entity": "sensor.aquarium_tds_log",
+                  "name": "Test kit",
+                  "color": "#FFB020"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "Free ammonia",
+              "hours_to_show": 168,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.seneye_spec_16_free_ammonia",
+                  "name": "Free NH3"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "Nitrogen cycle",
+              "hours_to_show": 720,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.aquarium_total_ammonia_log",
+                  "name": "Ammonia"
+                },
+                {
+                  "entity": "sensor.aquarium_nitrite_log",
+                  "name": "Nitrite"
+                },
+                {
+                  "entity": "sensor.aquarium_nitrate_log",
+                  "name": "Nitrate"
+                }
+              ]
+            },
+            {
+              "type": "history-graph",
+              "title": "GH and KH",
+              "hours_to_show": 720,
+              "grid_options": {
+                "columns": "full",
+                "rows": 4
+              },
+              "entities": [
+                {
+                  "entity": "sensor.aquarium_gh_log",
+                  "name": "GH"
+                },
+                {
+                  "entity": "sensor.aquarium_kh_log",
+                  "name": "KH"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
