@@ -241,7 +241,7 @@ everything. No external supply.
    │             │                           BH1750    ADDR → leave open
    │             │
    │      GPIO23 ●─────────────────────────► D-1584TL  CH1 IN+  (heater)
-   │      GPIO10 ●─────────────────────────► D-1584TL  CH2 IN+  (fan)
+   │       GPIO3 ●─────────────────────────► D-1584TL  CH2 IN+  (fan)
    │             │
    └─────────────┘
 ```
@@ -257,7 +257,7 @@ everything. No external supply.
 | GPIO19 | BH1750 SDA | |
 | GPIO20 | BH1750 SCL | |
 | GPIO23 | D-1584TL channel 1 IN+ | heater |
-| GPIO10 | D-1584TL channel 2 IN+ | fan |
+| GPIO3 | D-1584TL channel 2 IN+ | fan |
 
 Not wired: BH1750 `ADDR` (leave floating for address 0x23), and the relay
 module's mains side — it has its own NEMA 5-15P cord.

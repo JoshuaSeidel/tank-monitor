@@ -123,7 +123,7 @@ only**:
 | Board pad | D-1584TL |
 |---|---|
 | GPIO23 | Channel 1 `IN+` (heater) |
-| GPIO10 | Channel 2 `IN+` (fan) |
+| GPIO3 | Channel 2 `IN+` (fan) |
 | GND splice | `IN−`, both channels (jumpered together) |
 
 Do not open the relay module or touch its mains side. It has its own cord.
