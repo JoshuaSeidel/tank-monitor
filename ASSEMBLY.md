@@ -142,7 +142,7 @@ reading that isn't a sensor fault.
 ## 9. Power up in stages
 
 1. USB-C only, nothing else connected to mains. The LCD should light.
-2. `esphome logs tank-monitor.yaml`. Look for the DS18B20 address and a
+2. `esphome logs tank-monitor-remote.yaml`. Look for the DS18B20 address and a
    BH1750 found at 0x23 in the I²C scan.
 3. Check the TDS voltage reading with the probe **dry** — should sit near 0 V.
 4. Only now plug in the relay module. Confirm the heater outlet clicks when

@@ -1,13 +1,25 @@
-# Thin wrapper: everything is pulled from git at build time.
+# Thin wrapper for the LAFVIN ESP32-C6 build.
 #
 # Put THIS file in the ESPHome dashboard as tank-monitor.yaml. Nothing else
 # lives locally except secrets.yaml, so a push to main is all it takes for
 # the next build to pick up changes.
+#
+# The `files:` list is the whole configuration. packages/ is board-agnostic
+# (network, control loop, wet-side sensors); boards/ supplies every GPIO,
+# the panel and its layout. Swap the last entry to build a different board
+# -- see tank-monitor-cyd-remote.yaml.
+#
+# Order matters: later files override earlier ones, so the board file gets
+# the last word (that is how the CYD entry turns off serial logging).
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
     ref: main
-    files: [tank-monitor.yaml]
+    files:
+      - packages/base.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - boards/lafvin-esp32c6.yaml
     # refresh defaults to 1d -- that would silently build yesterday's
     # config. 0s re-fetches on every build.
     refresh: 0s

@@ -1,0 +1,109 @@
+# Wet-side sensors, expressed without pins. The board package supplies the
+# buses these sit on:
+#   one_wire:  -> dallas_temp
+#   i2c:       -> bh1750
+#   an adc sensor with id: tds_voltage -> the TDS maths below
+sensor:
+  - platform: dallas_temp
+    # Leave `address` off for a single probe; run once and copy the
+    # address the log prints if you ever add a second one.
+    # Internal: the controller and display read this directly, but it is
+    # the only Celsius value in the project so it is not published. The
+    # Fahrenheit copy below is the one Home Assistant sees.
+    internal: true
+    name: "Water Temperature"
+    id: water_temp
+    # 10s, not 2s. The control loop runs at 30s and the tank's time
+    # constant is hours -- 2s sampling just multiplied the row count in
+    # InfluxDB by 5x for no extra information.
+    update_interval: 10s
+    accuracy_decimals: 2
+    filters:
+      # No filter_out: nan here. Dropping failed reads means Home Assistant
+      # keeps displaying the last good temperature forever after the probe
+      # dies -- the device correctly showed PROBE FAULT while the dashboard
+      # still read 72.6. A stale water temperature is worse than none.
+      # NaN now propagates and the entity goes unavailable.
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+
+  - platform: template
+    name: "TDS"
+    id: tds
+    unit_of_measurement: "ppm"
+    icon: "mdi:water-opacity"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 30s
+    lambda: |-
+      const float v = id(tds_voltage).state;
+      if (isnan(v)) return {};
+
+      // Temperature-compensate to the 25 degC reference the probe's
+      // polynomial is defined at. Fall back to 25 if the probe is absent.
+      float t = id(water_temp).state;
+      if (isnan(t)) t = 25.0f;
+      const float coeff = 1.0f + 0.02f * (t - 25.0f);
+      if (coeff <= 0.0f) return {};
+      const float vc = v / coeff;
+
+      // DFRobot/Keyestudio gravity TDS polynomial (V -> ppm), then the
+      // 0.5 TDS-to-conductivity factor, then the user K-value.
+      float ppm = (133.42f * vc * vc * vc
+                   - 255.86f * vc * vc
+                   + 857.39f * vc) * 0.5f * ${tds_k_factor};
+      if (ppm < 0.0f) ppm = 0.0f;
+      return ppm;
+    filters:
+      - clamp:
+          min_value: 0
+          max_value: 2000
+
+  # Electrical conductivity, derived from the same reading
+  - platform: template
+    name: "Electrical Conductivity"
+    unit_of_measurement: "µS/cm"
+    icon: "mdi:flash"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 30s
+    lambda: |-
+      if (isnan(id(tds).state)) return {};
+      return id(tds).state * 2.0f;
+
+  # Diagnostics
+  - platform: template
+    name: "TDS Probe Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    state_class: measurement
+    update_interval: 10s
+    entity_category: diagnostic
+    lambda: |-
+      if (isnan(id(tds_voltage).state)) return {};
+      return id(tds_voltage).state;
+
+  # -------------------------------------------------------------
+  # BH1750 (GY-302) ambient light -- ADDR floating gives 0x23
+  # -------------------------------------------------------------
+  - platform: bh1750
+    name: "Tank Light Level"
+    id: tank_lux
+    address: 0x23
+    update_interval: 30s
+    accuracy_decimals: 0
+    filters:
+      - filter_out: nan
+
+  - platform: template
+    name: "Water Temperature F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(water_temp).state)) return {};
+      return id(water_temp).state * 9.0f / 5.0f + 32.0f;

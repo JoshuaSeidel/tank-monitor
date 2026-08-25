@@ -348,7 +348,7 @@ the display shouldn't claim it is.
 Swing reads `--` for the first ten minutes after a boot, and doesn't block
 green until there's enough history to mean something.
 
-All six numbers are substitutions at the top of `tank-monitor.yaml`
+All six numbers are substitutions at the top of `packages/base.yaml`
 (`temp_lo`, `temp_hi`, `temp_red_lo`, `temp_red_hi`, `tds_lo`, `tds_hi`,
 `tds_red_lo`, `tds_red_hi`) — change them in one place and both the display
 bands and the on-screen target text follow.
@@ -389,21 +389,28 @@ power-up sequence.
 
 ### Build straight from git (recommended)
 
-Rather than pasting `tank-monitor.yaml` into the ESPHome dashboard and
-re-pasting it after every change, put **`tank-monitor-remote.yaml`** there
-instead — a four-line wrapper that pulls the whole config from this repo:
+Rather than pasting the config into the ESPHome dashboard and re-pasting it
+after every change, put **`tank-monitor-remote.yaml`** there instead — a
+short wrapper that pulls the whole config from this repo:
 
 ```yaml
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
     ref: main
-    files: [tank-monitor.yaml]
+    files:
+      - packages/base.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - boards/lafvin-esp32c6.yaml
     refresh: 0s
 ```
 
 Save it in the dashboard as `tank-monitor.yaml`. After that, a push to
 `main` is all it takes — the next install builds the new config.
+
+That `files:` list *is* the configuration, and it is where you choose
+hardware — see [Config layout](#config-layout) below.
 
 **`refresh: 0s` is not optional.** The default is `1d`, so without it you
 can push a fix and spend an afternoon flashing yesterday's config.
@@ -420,17 +427,55 @@ substitutions:
   target_temp_f: "75.0"
 ```
 
-The `tank_controller` component is fetched from git the same way, so
-`tank-monitor.yaml` builds in the **Home Assistant ESPHome add-on** with no
-local files at all.
+The `tank_controller` component is fetched from git the same way, so this
+builds in the **Home Assistant ESPHome add-on** with no local files at all.
 
 Locally instead:
 
 ```sh
 pip install esphome
 cp secrets.yaml.example secrets.yaml   # then edit it
-esphome run tank-monitor.yaml
+esphome run tank-monitor-remote.yaml
 ```
+
+<a name="config-layout"></a>
+### Config layout
+
+The config is split so the board is the only thing that changes between
+builds. Nothing under `packages/` names a GPIO; everything that does lives
+in `boards/`.
+
+| File | Holds |
+| --- | --- |
+| `packages/base.yaml` | Identity, Wi-Fi, OTA, MQTT, SNTP, the display palette, the tuning substitutions |
+| `packages/control.yaml` | The `tank_controller` component and every entity derived from it |
+| `packages/sensors.yaml` | DS18B20, BH1750 and the TDS maths — expressed without pins |
+| `boards/lafvin-esp32c6.yaml` | LAFVIN ESP32-C6, 1.47" 172×320 ST7789V |
+| `boards/cyd-esp32-2432s028r.yaml` | "CYD" ESP32-2432S028R, 2.8" 240×320 ILI9341 + touch |
+
+The board file supplies the buses and ids the shared packages expect —
+`water_temp`, `tank_lux`, `tds_voltage`, `heater_output`, `fan_output` — so
+a new board is one new file in `boards/` and one changed line in the
+wrapper. A change to the control loop lands on every board from one push.
+
+Files are merged in listed order and later entries win, so the board file
+gets the last word. That is how the CYD file switches serial logging off
+without `packages/base.yaml` knowing anything about it.
+
+### Building for the CYD instead
+
+`tank-monitor-cyd-remote.yaml` is the same wrapper with the last line
+pointing at `boards/cyd-esp32-2432s028r.yaml`. That board is far more
+pin-constrained than the C6 — the full reasoning and the wire-by-wire pin
+budget are in the header comment of the board file. Two things worth
+knowing before ordering parts:
+
+- Its I²C runs on the UART pins, so the board is **OTA-only** (no serial
+  console) and the **first USB flash must be done with the BH1750
+  unplugged** — the CH340 talks to the ESP32 over those same pins.
+- Nothing on the board brings 5 V out to a connector, so the relay module
+  needs its own supply, sharing ground with the board. The D-1584TL's
+  optocoupled inputs are designed for exactly that.
 
 ### Secrets
 
@@ -596,12 +641,11 @@ steady partial value, not flip between 0 and 100.
 
 ## Tuning
 
-At the top of `tank-monitor.yaml`:
+At the top of `packages/base.yaml`:
 
-- **`target_temp` / `target_temp_f`** — the setpoint, in both units. The
-  controller works in Celsius internally; every human-facing surface (the
-  device display, the HA slider, the alarms) is Fahrenheit. Keep the two in
-  step if you edit them.
+- **`target_temp_f`** — the setpoint, in Fahrenheit. Everything you set or
+  read is Fahrenheit; the controller converts to Celsius once, internally,
+  because its priors and clamps are tuned in °C/min.
 - **`tds_k_factor`** — put the TDS probe in a known standard (707 ppm /
   1413 µS/cm), let it settle, set this to `known_ppm / displayed_ppm`,
   re-flash. Check `TDS Probe Voltage` if a reading looks wrong; in air it

@@ -1,0 +1,26 @@
+# Thin wrapper for the CYD (ESP32-2432S028R, 2.8" ILI9341) build.
+#
+# Identical to tank-monitor-remote.yaml except for the board file on the
+# last line. Everything above it -- Wi-Fi, MQTT, the tank_controller and
+# every sensor -- is shared, so a control-loop change lands on both boards
+# from one push.
+#
+# If this board is REPLACING the C6 rather than joining it, leave
+# device_name alone: it keeps the same entity ids, MQTT topics and history
+# in Home Assistant. If both run at once, uncomment the substitution below
+# and add matching tank_monitor_cyd_* keys to secrets.yaml -- two devices
+# answering to the same name will fight over MQTT.
+#
+# substitutions:
+#   device_name: tank-monitor-cyd
+#   friendly_name: Tank Monitor (CYD)
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - boards/cyd-esp32-2432s028r.yaml
+    refresh: 0s

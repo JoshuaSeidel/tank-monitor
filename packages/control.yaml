@@ -1,0 +1,224 @@
+# The control loop itself: the tank_controller component, the entities that
+# tune it, and every sensor derived from its internal state.
+#
+# Pin-free on purpose. It refers to ids the board package must provide:
+#   water_temp (sensor)  tank_lux (sensor)
+#   heater_output, fan_output (slow_pwm outputs)
+external_components:
+  # Pulled from git so this builds in the Home Assistant ESPHome add-on
+  # with no local files. refresh: 0s because the ref is a moving branch --
+  # the default caches for a day and you'd silently build stale code.
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [tank_controller]
+    refresh: 0s
+
+tank_controller:
+  id: controller
+  temperature: water_temp
+  illuminance: tank_lux
+  heater: heater_output
+  fan: fan_output
+  time_id: sntp_time
+  setpoint: ${target_temp_f}
+  # Hard cutouts, Fahrenheit. Outside these the model is ignored entirely.
+  # Set wider than the 70-80 F slider so the cutout is a backstop, not a
+  # limit you can drive into by moving the target.
+  min_temperature: 68.0
+  max_temperature: 82.0
+  # Bright aquarium light at the sensor, in lux. Used to normalise.
+  full_scale_lux: 3000
+  # How aggressively to close a temperature error. Longer = gentler.
+  # Kept well above the 15 min actuator window so the controller isn't
+  # demanding changes faster than the relay can actually resolve them.
+  response_time: 30min
+  update_interval: 30s
+
+number:
+  - platform: template
+    name: "Target Temperature"
+    id: target_temperature
+    icon: "mdi:thermostat"
+    # Fahrenheit, because that is what every other temperature in this
+    # project is shown in. The controller stores Celsius, so set_action
+    # converts on the way in.
+    unit_of_measurement: "°F"
+    device_class: temperature
+    min_value: 70.0
+    max_value: 80.0
+    step: 0.1
+    optimistic: true
+    restore_value: true
+    initial_value: ${target_temp_f}
+    entity_category: config
+    set_action:
+      - tank_controller.set_setpoint:
+          id: controller
+          setpoint: !lambda "return (x - 32.0f) * 5.0f / 9.0f;"
+
+switch:
+  - platform: template
+    name: "Adaptive Learning"
+    icon: "mdi:brain"
+    lambda: "return id(controller).get_learning_enabled();"
+    entity_category: config
+    # Without this the switch defaults to ALWAYS_OFF, and the boot-time
+    # write fires turn_off_action -- silently disabling learning on every
+    # single boot. Default on, but remember the user's choice.
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - tank_controller.set_learning:
+          id: controller
+          learning: true
+    turn_off_action:
+      - tank_controller.set_learning:
+          id: controller
+          learning: false
+
+button:
+  - platform: template
+    name: "Reset Learning"
+    icon: "mdi:brain"
+    entity_category: config
+    on_press:
+      - tank_controller.reset_learning:
+          id: controller
+
+binary_sensor:
+  - platform: template
+    name: "Temperature Fault"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_safety_tripped();"
+
+  # Heater commanded near full for 45 minutes with no measurable rise.
+  # Catches an unplugged or dead heater, a failed relay channel, or a
+  # heater whose own thermostat has cut out -- none of which the
+  # temperature alarms see until the tank has already drifted cold.
+  - platform: template
+    name: "Heater Not Responding"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_heater_stalled();"
+
+text_sensor:
+  - platform: template
+    name: "Controller State"
+    icon: "mdi:state-machine"
+    update_interval: 30s
+    lambda: "return {id(controller).get_state_text()};"
+
+sensor:
+  # Target in F as its own series, so Grafana can draw the setpoint line
+  # over the temperature plot without converting units in the query.
+  - platform: template
+    name: "Target Temperature F"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;"
+
+  - platform: template
+    name: "Heater Output"
+    id: heater_duty
+    unit_of_measurement: "%"
+    icon: "mdi:radiator"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_heater_duty();"
+
+  - platform: template
+    name: "Fan Output"
+    unit_of_measurement: "%"
+    icon: "mdi:fan"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 30s
+    lambda: "return id(controller).get_fan_duty();"
+
+  - platform: template
+    name: "Predicted Temperature (15 min)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      float v = id(controller).get_predicted_temperature();
+      if (isnan(v)) return {};
+      return v * 9.0f / 5.0f + 32.0f;
+
+  - platform: template
+    name: "Temperature Swing (1h)"
+    unit_of_measurement: "°F"
+    icon: "mdi:arrow-expand-vertical"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      float v = id(controller).get_swing();
+      if (isnan(v)) return {};
+      return v * 9.0f / 5.0f;
+
+  - platform: template
+    name: "Temperature Drift Rate"
+    # F per hour, not C per minute -- a number you can read against the
+    # tank rather than one you have to convert twice.
+    unit_of_measurement: "°F/h"
+    icon: "mdi:trending-up"
+    accuracy_decimals: 2
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_drift_rate() * 60.0f * 9.0f / 5.0f;"
+
+  - platform: template
+    name: "Model Confidence"
+    unit_of_measurement: "%"
+    icon: "mdi:brain"
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_confidence();"
+
+  - platform: template
+    name: "Tank Time Constant"
+    unit_of_measurement: "min"
+    icon: "mdi:timer-sand"
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: |-
+      float v = id(controller).get_time_constant();
+      if (isnan(v)) return {};
+      return v;
+
+  - platform: template
+    name: "Learned Heater Power"
+    unit_of_measurement: "°F/h"
+    icon: "mdi:fire"
+    accuracy_decimals: 2
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_heater_gain() * 60.0f * 9.0f / 5.0f;"
+
+  - platform: template
+    name: "Learned Light Heat Gain"
+    unit_of_measurement: "°F/h"
+    icon: "mdi:white-balance-sunny"
+    accuracy_decimals: 2
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_light_gain() * 60.0f * 9.0f / 5.0f;"
+
+  - platform: template
+    name: "Predicted Light Load"
+    unit_of_measurement: "%"
+    icon: "mdi:lightbulb-on-outline"
+    accuracy_decimals: 0
+    update_interval: 60s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_predicted_light_load() * 100.0f;"
