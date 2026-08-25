@@ -353,7 +353,7 @@ All six numbers are substitutions at the top of `tank-monitor.yaml`
 `tds_red_lo`, `tds_red_hi`) — change them in one place and both the display
 bands and the on-screen target text follow.
 
-The control setpoint is **23.6 °C / 74.5 °F**, the centre of the 74–75 band,
+The control setpoint is **74.5 °F**, the centre of the 74–75 band,
 so normal drift stays inside green in both directions.
 
 ### Not measured
@@ -459,8 +459,14 @@ First flash over USB; after that `esphome run` uses OTA. Live values are at
 The controller fits a five-parameter thermal model of your tank:
 
 ```
-dT/dt  =  kh·heater  −  kf·fan  −  ka·(T − 25)  +  kl·light  +  c    [°C/min]
+dT/dt  =  kh·heater  −  kf·fan  −  ka·(T − ref)  +  kl·light  +  c
 ```
+
+**Everything you configure or read is Fahrenheit.** The model itself runs in
+Celsius internally — not from preference, but because its priors, clamps and
+residual guards are tuned in °C/min, and hand-converting those constants is
+how a working controller quietly stops working. The component converts once
+at its boundary; no Celsius value is published or configurable.
 
 - `kh` — how fast your heater actually raises this volume of water
 - `kf` — how much your fan's evaporative cooling pulls out
@@ -474,8 +480,8 @@ ranges, which is what keeps closed-loop identification from wandering off
 during long stretches where nothing much is changing.
 
 **Learning runs on 5-minute windows, not every tick.** A DS18B20 quantizes to
-0.0625 °C; differentiating that every 30 s produces noise far larger than the
-~0.02 °C/min signal being measured. Averaging over 5 minutes brings it into
+0.1125 °F; differentiating that every 30 s produces noise far larger than the
+~2 °F/hour signal being measured. Averaging over 5 minutes brings it into
 range.
 
 Separately, a 96-slot (15-minute resolution) profile of normalized light level
@@ -533,12 +539,12 @@ it would have run at 0% forever with nothing to say so.
 
 ### Safety behavior
 
-- Above `max_temperature` (27 °C): heater off, fan full, model ignored.
-- Below `min_temperature` (21 °C): heater full.
+- Above `max_temperature` (82 °F): heater off, fan full, model ignored.
+- Below `min_temperature` (68 °F): heater full.
 - Temperature probe missing for 2 minutes: **heater cut off** and the
   `Temperature Fault` problem sensor trips. A slowly cooling tank is a much
   better failure than a cooked one.
-- Residuals over 0.5 °C/min are discarded rather than learned from — that's a
+- Residuals over 54 °F/hour are discarded rather than learned from — that's a
   water change or a bad read, not information about the tank.
 
 ---
@@ -574,7 +580,7 @@ Under one `Tank Monitor` device:
 `Adaptive Learning` switch,
 `Reset Learning` button, `Restart` button.
 
-**Main** — `Water Temperature` (°C), `Water Temperature F` (°F), `TDS` (ppm),
+**Main** — `Water Temperature F` (°F), `TDS` (ppm),
 `Electrical Conductivity` (µS/cm), `Tank Light Level` (lx), `Heater Output`
 (%), `Fan Output` (%), `Predicted Temperature (15 min)`, `Controller State`.
 
@@ -617,7 +623,7 @@ heater, big volume change, moving the tank to another room.
 
 The published value is a median over 20 ADC samples every 2 s; the probe is
 AC-excited and raw readings jump by tens of ppm. It's temperature-compensated
-to 25 °C using the DS18B20. The ppm curve is the DFRobot Gravity polynomial
+to 77 °F using the DS18B20. The ppm curve is the DFRobot Gravity polynomial
 (the Keyestudio board is a clone of it); µS/cm is derived as `ppm × 2`, not
 measured independently.
 

@@ -10,7 +10,7 @@ That way if something is wrong you know which step caused it.
 - 26–28 AWG stranded hookup wire (silicone jacket is easiest to work with)
 - 4.7 kΩ resistor (1/4 W)
 - Heat shrink, 2 mm and 3 mm
-- Soldering iron ~330 °C, thin rosin-core solder
+- Soldering iron ~625 °F (330 °C), thin rosin-core solder
 - Multimeter
 
 Everything solders directly to the ESP32-C6 board. No breakout, no perfboard.

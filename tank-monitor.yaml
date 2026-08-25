@@ -2,9 +2,9 @@ substitutions:
   device_name: tank-monitor
   friendly_name: Tank Monitor
   # --- Calibration ---
-  # Target water temperature. The controller works in Celsius internally;
-  # everything a human touches is Fahrenheit. Centre of the 74-75 F band.
-  target_temp: "23.6"
+  # Target water temperature, Fahrenheit. Centre of the 74-75 F band.
+  # Everything in this file is Fahrenheit; the controller converts once,
+  # internally, and nothing user-facing is ever Celsius.
   target_temp_f: "74.5"
 
   # --- Display thresholds (all in the units shown on screen) ---
@@ -328,10 +328,12 @@ tank_controller:
   heater: heater_output
   fan: fan_output
   time_id: sntp_time
-  setpoint: ${target_temp}
-  # Hard cutouts. Outside these the model is ignored entirely.
-  min_temperature: 21.0
-  max_temperature: 27.0
+  setpoint: ${target_temp_f}
+  # Hard cutouts, Fahrenheit. Outside these the model is ignored entirely.
+  # Set wider than the 70-80 F slider so the cutout is a backstop, not a
+  # limit you can drive into by moving the target.
+  min_temperature: 68.0
+  max_temperature: 82.0
   # Bright aquarium light at the sensor, in lux. Used to normalise.
   full_scale_lux: 3000
   # How aggressively to close a temperature error. Longer = gentler.
@@ -395,6 +397,10 @@ sensor:
   - platform: dallas_temp
     # Leave `address` off for a single probe; run once and copy the
     # address the log prints if you ever add a second one.
+    # Internal: the controller and display read this directly, but it is
+    # the only Celsius value in the project so it is not published. The
+    # Fahrenheit copy below is the one Home Assistant sees.
+    internal: true
     name: "Water Temperature"
     id: water_temp
     # 10s, not 2s. The control loop runs at 30s and the tank's time
@@ -542,14 +548,14 @@ sensor:
 
   - platform: template
     name: "Predicted Temperature (15 min)"
-    unit_of_measurement: "°C"
+    unit_of_measurement: "°F"
     device_class: temperature
     accuracy_decimals: 2
     update_interval: 30s
     lambda: |-
       float v = id(controller).get_predicted_temperature();
       if (isnan(v)) return {};
-      return v;
+      return v * 9.0f / 5.0f + 32.0f;
 
   - platform: template
     name: "Temperature Swing (1h)"
@@ -565,12 +571,14 @@ sensor:
 
   - platform: template
     name: "Temperature Drift Rate"
-    unit_of_measurement: "°C/min"
+    # F per hour, not C per minute -- a number you can read against the
+    # tank rather than one you have to convert twice.
+    unit_of_measurement: "°F/h"
     icon: "mdi:trending-up"
-    accuracy_decimals: 4
+    accuracy_decimals: 2
     update_interval: 60s
     entity_category: diagnostic
-    lambda: "return id(controller).get_drift_rate();"
+    lambda: "return id(controller).get_drift_rate() * 60.0f * 9.0f / 5.0f;"
 
   - platform: template
     name: "Model Confidence"
@@ -595,21 +603,21 @@ sensor:
 
   - platform: template
     name: "Learned Heater Power"
-    unit_of_measurement: "°C/min"
+    unit_of_measurement: "°F/h"
     icon: "mdi:fire"
-    accuracy_decimals: 4
+    accuracy_decimals: 2
     update_interval: 300s
     entity_category: diagnostic
-    lambda: "return id(controller).get_heater_gain();"
+    lambda: "return id(controller).get_heater_gain() * 60.0f * 9.0f / 5.0f;"
 
   - platform: template
     name: "Learned Light Heat Gain"
-    unit_of_measurement: "°C/min"
+    unit_of_measurement: "°F/h"
     icon: "mdi:white-balance-sunny"
-    accuracy_decimals: 4
+    accuracy_decimals: 2
     update_interval: 300s
     entity_category: diagnostic
-    lambda: "return id(controller).get_light_gain();"
+    lambda: "return id(controller).get_light_gain() * 60.0f * 9.0f / 5.0f;"
 
   - platform: template
     name: "Predicted Light Load"

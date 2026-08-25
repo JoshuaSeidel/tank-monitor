@@ -32,6 +32,18 @@ ResetLearningAction = tank_controller_ns.class_(
 SetSetpointAction = tank_controller_ns.class_("SetSetpointAction", automation.Action)
 SetLearningAction = tank_controller_ns.class_("SetLearningAction", automation.Action)
 
+def _f_to_c(f):
+    """Every temperature in this component's config is Fahrenheit.
+
+    The controller stores Celsius internally -- not from preference, but
+    because the model's priors, clamps and residual guards are tuned in
+    degC/min and hand-converting those constants is how a working
+    controller quietly stops working. The unit is an implementation
+    detail; nothing a user sets or reads is in it.
+    """
+    return (f - 32.0) * 5.0 / 9.0
+
+
 def _validate(config):
     if config[CONF_MIN_TEMPERATURE] >= config[CONF_MAX_TEMPERATURE]:
         raise cv.Invalid("min_temperature must be below max_temperature")
@@ -53,9 +65,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Required(CONF_HEATER): cv.use_id(output.FloatOutput),
             cv.Optional(CONF_FAN): cv.use_id(output.FloatOutput),
             cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
-            cv.Optional(CONF_SETPOINT, default=25.0): cv.float_range(min=0, max=40),
-            cv.Optional(CONF_MIN_TEMPERATURE, default=20.0): cv.float_range(min=0, max=40),
-            cv.Optional(CONF_MAX_TEMPERATURE, default=30.0): cv.float_range(min=0, max=40),
+            cv.Optional(CONF_SETPOINT, default=75.0): cv.float_range(min=32, max=110),
+            cv.Optional(CONF_MIN_TEMPERATURE, default=68.0): cv.float_range(min=32, max=110),
+            cv.Optional(CONF_MAX_TEMPERATURE, default=86.0): cv.float_range(min=32, max=110),
             cv.Optional(CONF_FULL_SCALE_LUX, default=2000.0): cv.positive_float,
             cv.Optional(CONF_RESPONSE_TIME, default="20min"): cv.positive_time_period_minutes,
             cv.Optional(CONF_LEARNING, default=True): cv.boolean,
@@ -84,9 +96,9 @@ async def to_code(config):
     if CONF_TIME_ID in config:
         cg.add(var.set_time(await cg.get_variable(config[CONF_TIME_ID])))
 
-    cg.add(var.set_min_temperature(config[CONF_MIN_TEMPERATURE]))
-    cg.add(var.set_max_temperature(config[CONF_MAX_TEMPERATURE]))
-    cg.add(var.set_setpoint(config[CONF_SETPOINT]))
+    cg.add(var.set_min_temperature(_f_to_c(config[CONF_MIN_TEMPERATURE])))
+    cg.add(var.set_max_temperature(_f_to_c(config[CONF_MAX_TEMPERATURE])))
+    cg.add(var.set_setpoint(_f_to_c(config[CONF_SETPOINT])))
     cg.add(var.set_full_scale_lux(config[CONF_FULL_SCALE_LUX]))
     cg.add(var.set_response_time(config[CONF_RESPONSE_TIME].total_minutes))
     cg.add(var.set_learning_enabled(config[CONF_LEARNING]))
