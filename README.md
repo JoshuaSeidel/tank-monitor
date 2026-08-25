@@ -132,8 +132,9 @@ into a GPIO will damage the pin. If you must run it at 5 V, put a 10k/20k
 divider on the output.
 
 The C6 has a single ADC unit, so the classic ESP32 problem where ADC2 stops
-working while Wi-Fi is up doesn't apply here. Any of GPIO0-3 would do; the
-rest of the ADC block (GPIO4-6) is taken by the microSD slot and LCD.
+working while Wi-Fi is up doesn't apply here. GPIO0 is the only other free
+ADC pin — GPIO2 and GPIO3 now drive the relays, and the rest of the ADC
+block (GPIO4-6) is taken by the microSD slot and LCD.
 
 ### GY-302 / BH1750 light sensor — I²C
 
@@ -163,7 +164,7 @@ cord, and a normally-off + normally-on NEMA 5-15R receptacle per channel.
 
 | Module terminal | ESP32  |
 |-----------------|--------|
-| Channel 1 IN+   | GPIO23 (heater) |
+| Channel 1 IN+   | GPIO2 (heater)  |
 | Channel 2 IN+   | GPIO3 (fan)     |
 | IN− (both)      | GND    |
 
@@ -240,7 +241,7 @@ everything. No external supply.
    │      GPIO20 ●─────────────────────────► BH1750    SCL
    │             │                           BH1750    ADDR → leave open
    │             │
-   │      GPIO23 ●─────────────────────────► D-1584TL  CH1 IN+  (heater)
+   │       GPIO2 ●─────────────────────────► D-1584TL  CH1 IN+  (heater)
    │       GPIO3 ●─────────────────────────► D-1584TL  CH2 IN+  (fan)
    │             │
    └─────────────┘
@@ -256,7 +257,7 @@ everything. No external supply.
 | GPIO1 | TDS "A" | ADC-capable pin |
 | GPIO19 | BH1750 SDA | |
 | GPIO20 | BH1750 SCL | |
-| GPIO23 | D-1584TL channel 1 IN+ | heater |
+| GPIO2 | D-1584TL channel 1 IN+ | heater |
 | GPIO3 | D-1584TL channel 2 IN+ | fan |
 
 Not wired: BH1750 `ADDR` (leave floating for address 0x23), and the relay

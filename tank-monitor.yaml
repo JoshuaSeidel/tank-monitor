@@ -302,7 +302,9 @@ one_wire:
 output:
   - platform: slow_pwm
     id: heater_output
-    pin: GPIO23
+    # GPIO2/GPIO3 are adjacent on the 5-4-3-2-1-0 header, so both relay
+    # wires land side by side. Neither is reserved for anything.
+    pin: GPIO2
     period: 900s
     restart_cycle_on_state_change: false
 
@@ -312,9 +314,8 @@ output:
 
   - platform: slow_pwm
     id: fan_output
-    # GPIO3, not GPIO10: GPIO10 is not broken out on this board's headers.
-    # Avoid GPIO22 too -- it is exposed on the header but is also the LCD
-    # backlight net, and GPIO13 is USB D+.
+    # Not GPIO10 (not broken out) and not GPIO12/13 (USB-Serial-JTAG --
+    # claiming those costs USB logging and USB flashing).
     pin: GPIO3
     period: 900s
     restart_cycle_on_state_change: false

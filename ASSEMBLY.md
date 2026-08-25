@@ -122,7 +122,7 @@ only**:
 
 | Board pad | D-1584TL |
 |---|---|
-| GPIO23 | Channel 1 `IN+` (heater) |
+| GPIO2 | Channel 1 `IN+` (heater) |
 | GPIO3 | Channel 2 `IN+` (fan) |
 | GND splice | `IN−`, both channels (jumpered together) |
 
