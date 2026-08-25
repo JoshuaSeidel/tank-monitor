@@ -99,6 +99,9 @@ class TankController : public PollingComponent {
   float get_predicted_temperature() const { return this->predicted_temp_; }
   float get_predicted_light_load() const { return this->predicted_light_; }
   bool is_safety_tripped() const { return this->safety_tripped_; }
+  // Heater commanded near full for a long stretch with no temperature
+  // response: unplugged, failed, or a dead relay channel.
+  bool is_heater_stalled() const { return this->heater_stalled_; }
   // Peak-to-peak temperature swing over the last hour, in degC.
   // NAN until there is enough history to mean anything.
   float get_swing() const;
@@ -159,6 +162,19 @@ class TankController : public PollingComponent {
   float history_[N_HISTORY];
   uint8_t history_idx_{0};
   uint8_t history_count_{0};
+
+  // Wall-clock of the last valid reading, so a gap can be detected and the
+  // windows spanning it thrown away rather than learned from.
+  uint32_t last_valid_ms_{0};
+
+  // Which 15-minute slot the light profile last saw, so its confidence
+  // counts days observed rather than samples taken.
+  int16_t last_light_slot_{-1};
+
+  // Heater-stall detection.
+  uint32_t heat_stall_since_ms_{0};
+  float heat_stall_temp_{NAN};
+  bool heater_stalled_{false};
 
   float last_temp_{NAN};
   uint32_t last_update_ms_{0};

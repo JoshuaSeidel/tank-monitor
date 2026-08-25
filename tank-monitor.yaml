@@ -639,6 +639,16 @@ binary_sensor:
     entity_category: diagnostic
     lambda: "return id(controller).is_safety_tripped();"
 
+  # Heater commanded near full for 45 minutes with no measurable rise.
+  # Catches an unplugged or dead heater, a failed relay channel, or a
+  # heater whose own thermostat has cut out -- none of which the
+  # temperature alarms see until the tank has already drifted cold.
+  - platform: template
+    name: "Heater Not Responding"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_heater_stalled();"
+
 text_sensor:
   - platform: template
     name: "Controller State"

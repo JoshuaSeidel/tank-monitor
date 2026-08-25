@@ -13,7 +13,17 @@ static const char *const TAG = "tank_controller";
 static const uint32_t LEARN_WINDOW_MS = 300000;  // 5 minutes
 // If the probe goes away for longer than this, stop controlling.
 static const uint32_t SENSOR_TIMEOUT_MS = 120000;
-static const uint32_t SAVE_INTERVAL_MS = 600000;  // 10 minutes
+static const uint32_t SAVE_INTERVAL_MS = 1800000;  // 30 minutes
+
+// A gap longer than this between valid readings means the windows that
+// span it are not measuring anything real.
+static const uint32_t DISCONTINUITY_MS = 90000;    // 1.5 min -- one missed read
+static const uint32_t HISTORY_WIPE_MS = 300000;    // 5 min
+
+// Heater at full for this long with less than this much rise means it is
+// not actually heating: unplugged, failed, or a dead relay channel.
+static const uint32_t HEAT_STALL_MS = 2700000;     // 45 minutes
+static const float HEAT_STALL_RISE = 0.05f;        // degC
 
 // RLS forgetting factor. Very close to 1: the tank changes character over
 // days (evaporation, a new heater, summer), not over minutes.
@@ -99,6 +109,14 @@ void TankController::reset_learning() {
   ESP_LOGW(TAG, "Resetting learned model and light profile to priors");
   this->load_prior_();
   this->integral_ = 0.0f;
+  // Windows in flight were accumulated against the old model; carrying
+  // them over would fold pre-reset data into the first new learning step.
+  this->learn_anchor_temp_ = NAN;
+  this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
+  this->acc_n_ = 0;
+  this->last_light_slot_ = -1;
+  this->heat_stall_since_ms_ = 0;
+  this->heater_stalled_ = false;
   this->save_state_();
 }
 
@@ -143,11 +161,18 @@ void TankController::update_light_profile_(float lux_norm) {
   int slot = this->current_slot_();
   if (slot < 0)
     return;
+  // Only count a slot's confidence up once per visit. Incrementing on
+  // every 30s update instead meant a slot reached "well observed" about a
+  // minute after first seeing it, so the profile was never more than one
+  // day's data pretending to be a schedule.
+  const bool first_seen_today = (slot != this->last_light_slot_);
+  this->last_light_slot_ = slot;
+
   float w = this->light_.weight[slot];
   // Fast to converge on the first day, slow and averaging after that.
   float alpha = w < 1.0f ? 1.0f : 0.15f;
   this->light_.slot[slot] = this->light_.slot[slot] * (1.0f - alpha) + lux_norm * alpha;
-  if (w < 30.0f)
+  if (first_seen_today && w < 30.0f)
     this->light_.weight[slot] = w + 1.0f;
 }
 
@@ -196,6 +221,15 @@ void TankController::learn_(float dt_min, float measured_rate) {
     for (uint8_t j = 0; j < N_PARAMS; j++)
       this->model_.p[i][j] = (this->model_.p[i][j] - (p_phi[i] * p_phi[j]) / denom) / LAMBDA;
 
+  // P is symmetric by construction but drifts with float rounding over
+  // thousands of updates, and an asymmetric covariance can make the gain
+  // diverge. Cheap to re-impose, so do it every step.
+  for (uint8_t i = 0; i < N_PARAMS; i++)
+    for (uint8_t j = i + 1; j < N_PARAMS; j++) {
+      const float avg = 0.5f * (this->model_.p[i][j] + this->model_.p[j][i]);
+      this->model_.p[i][j] = this->model_.p[j][i] = avg;
+    }
+
   this->clamp_model_();
   this->model_.updates++;
 
@@ -237,10 +271,49 @@ void TankController::update() {
   }
   this->missing_since_ms_ = 0;
 
+  // A gap in readings invalidates anything measured across it. The learn
+  // window would otherwise compute a rate over the whole outage from a
+  // single sample's regressor averages and feed that straight into RLS,
+  // and the swing figure would report a range that was never observed.
+  const uint32_t since_valid = this->last_valid_ms_ == 0 ? 0 : now - this->last_valid_ms_;
+  this->last_valid_ms_ = now;
+  if (since_valid > HISTORY_WIPE_MS) {
+    ESP_LOGW(TAG, "Gap of %" PRIu32 "s in readings - discarding swing history", since_valid / 1000);
+    this->history_idx_ = 0;
+    this->history_count_ = 0;
+  }
+  if (since_valid > DISCONTINUITY_MS) {
+    this->learn_anchor_temp_ = NAN;
+    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
+    this->acc_n_ = 0;
+    this->heat_stall_since_ms_ = 0;
+  }
+
   this->history_[this->history_idx_] = t;
   this->history_idx_ = (this->history_idx_ + 1) % N_HISTORY;
   if (this->history_count_ < N_HISTORY)
     this->history_count_++;
+
+  // --- heater stall ------------------------------------------------------
+  // Judged on the duty already commanded, so it covers every path out of
+  // update() including the hard temperature limits below.
+  if (this->heater_duty_ >= 0.9f) {
+    if (this->heat_stall_since_ms_ == 0) {
+      this->heat_stall_since_ms_ = now;
+      this->heat_stall_temp_ = t;
+    } else if (now - this->heat_stall_since_ms_ > HEAT_STALL_MS) {
+      const bool rose = (t - this->heat_stall_temp_) >= HEAT_STALL_RISE;
+      if (!rose && !this->heater_stalled_)
+        ESP_LOGE(TAG, "Heater at full for %" PRIu32 " min with no rise (%.2f degC) - heater may be dead",
+                 HEAT_STALL_MS / 60000, t - this->heat_stall_temp_);
+      this->heater_stalled_ = !rose;
+      this->heat_stall_since_ms_ = now;
+      this->heat_stall_temp_ = t;
+    }
+  } else {
+    this->heat_stall_since_ms_ = 0;
+    this->heater_stalled_ = false;
+  }
 
   if (this->safety_tripped_) {
     ESP_LOGI(TAG, "Temperature probe is back");

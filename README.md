@@ -515,6 +515,22 @@ are the authoritative indicators. The temperature sensor itself simply stops
 publishing, so anything reading it goes unavailable rather than showing a
 stale number.
 
+### What can go wrong, and what catches it
+
+| Failure | Caught by | Response |
+|---|---|---|
+| Probe stops responding | controller, after 120 s | heater cut, `Temperature Fault`, HA alert |
+| Probe reads wrong but plausible | Seneye cross-check on the HA dashboard | comparison card goes amber/red |
+| Heater dead, unplugged, or relay channel not wired | `Heater Not Responding`, after 45 min at full duty with no rise | HA alert; the tank is drifting cold |
+| Heater stuck on | hard `max_temperature` cutout, then HA runaway alarm | heater off, fan full |
+| Controller offline entirely | HA sees the MQTT status go offline; Seneye backstop alarms | HA alert |
+| Wi-Fi or HA down | nothing needed | control loop is on-device and unaffected |
+| Learned model goes wrong | feedforward is weighted by confidence | falls back toward plain feedback |
+
+`Heater Not Responding` is the one that would have caught the GPIO10
+mistake — the fan channel was assigned to a pin that isn't broken out, so
+it would have run at 0% forever with nothing to say so.
+
 ### Safety behavior
 
 - Above `max_temperature` (27 °C): heater off, fan full, model ignored.
