@@ -535,7 +535,7 @@ datasource setup. See [grafana/README.md](grafana/README.md).
 
 Under one `Tank Monitor` device:
 
-**Controls** — `Target Temperature` (°C, 21–27), `Display Backlight`,
+**Controls** — `Target Temperature` (°F, 70–80), `Display Backlight`,
 `Adaptive Learning` switch,
 `Reset Learning` button, `Restart` button.
 
@@ -557,8 +557,10 @@ steady partial value, not flip between 0 and 100.
 
 At the top of `tank-monitor.yaml`:
 
-- **`target_temp`** — setpoint in °C. 24.0 °C = 75.2 °F. Also adjustable live
-  from HA; the slider value persists across reboots.
+- **`target_temp` / `target_temp_f`** — the setpoint, in both units. The
+  controller works in Celsius internally; every human-facing surface (the
+  device display, the HA slider, the alarms) is Fahrenheit. Keep the two in
+  step if you edit them.
 - **`tds_k_factor`** — put the TDS probe in a known standard (707 ppm /
   1413 µS/cm), let it settle, set this to `known_ppm / displayed_ppm`,
   re-flash. Check `TDS Probe Voltage` if a reading looks wrong; in air it

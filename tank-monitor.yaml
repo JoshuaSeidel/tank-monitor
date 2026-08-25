@@ -2,9 +2,10 @@ substitutions:
   device_name: tank-monitor
   friendly_name: Tank Monitor
   # --- Calibration ---
-  # Target water temperature, in Celsius. Centre of the 74-75 F band:
-  # 23.6 C = 74.5 F.
+  # Target water temperature. The controller works in Celsius internally;
+  # everything a human touches is Fahrenheit. Centre of the 74-75 F band.
   target_temp: "23.6"
+  target_temp_f: "74.5"
 
   # --- Display thresholds (all in the units shown on screen) ---
   # Green inside lo..hi, amber just outside, red beyond red_lo..red_hi.
@@ -344,18 +345,22 @@ number:
     name: "Target Temperature"
     id: target_temperature
     icon: "mdi:thermostat"
-    unit_of_measurement: "°C"
-    min_value: 21.0
-    max_value: 27.0
+    # Fahrenheit, because that is what every other temperature in this
+    # project is shown in. The controller stores Celsius, so set_action
+    # converts on the way in.
+    unit_of_measurement: "°F"
+    device_class: temperature
+    min_value: 70.0
+    max_value: 80.0
     step: 0.1
     optimistic: true
-    restore_value: false
-    initial_value: ${target_temp}
+    restore_value: true
+    initial_value: ${target_temp_f}
     entity_category: config
     set_action:
       - tank_controller.set_setpoint:
           id: controller
-          setpoint: !lambda "return x;"
+          setpoint: !lambda "return (x - 32.0f) * 5.0f / 9.0f;"
 
 light:
   - platform: monochromatic
