@@ -22,8 +22,13 @@ static const float LAMBDA = 0.9995f;
 // Physically plausible bounds. Constraining the fit is what keeps the
 // closed-loop identification from running off into nonsense when the
 // controller isn't exciting the system much.
-static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.050f};
-static const float THETA_MAX[N_PARAMS] = {0.300f, -0.000f, -0.001f, 0.050f, 0.050f};
+// theta[4] (the constant) sets where the model thinks the tank settles:
+// equilibrium = TEMP_REF + theta[4]/ka. At +/-0.05 with a typical ka that
+// spans only ~17-23 C, so a 24 C room could not be represented at all and
+// even a trained model would stay biased toward cooling. +/-0.15 covers
+// roughly 10-30 C, which brackets any room this tank will sit in.
+static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.150f};
+static const float THETA_MAX[N_PARAMS] = {0.300f, -0.000f, -0.001f, 0.050f, 0.150f};
 
 // Starting guesses: a typical 100-200W heater in a tens-of-gallons tank.
 static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, 0.0f};
