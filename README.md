@@ -466,6 +466,36 @@ is learned per time-of-day, so the controller can predict the light heat load
 Both the model and the light profile are saved to flash every 10 minutes and
 restored on boot — a reboot doesn't cost you the learning.
 
+### If the temperature stops updating
+
+The 1-Wire bus is **scanned once, at boot**. If the DS18B20 isn't detected
+during startup, ESPHome never retries — the probe stays dead until the next
+reboot, even if you fix the wiring while it's running. Look for this in the
+logs:
+
+```
+[W][gpio.one_wire]:   Found no devices!
+[W][dallas.temp.sensor]:   Unable to select an address
+```
+
+versus a healthy boot, which prints the probe's 64-bit address.
+
+Checks, with the board powered off:
+
+| Measure | Expect |
+|---|---|
+| DQ (GPIO18) to 3V3 | ~4.7 kΩ — the pull-up bridge |
+| DQ to GND | open |
+| 3V3 to GND | open |
+| Probe VCC to 3V3 | ~0 Ω |
+
+Then **reboot** — fixing the wiring alone won't bring it back.
+
+Note that the `Temperature Fault` binary sensor and the on-device display
+are the authoritative indicators. The temperature sensor itself simply stops
+publishing, so anything reading it goes unavailable rather than showing a
+stale number.
+
 ### Safety behavior
 
 - Above `max_temperature` (27 °C): heater off, fan full, model ignored.

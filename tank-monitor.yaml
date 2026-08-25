@@ -398,8 +398,11 @@ sensor:
     update_interval: 10s
     accuracy_decimals: 2
     filters:
-      - filter_out: nan
-      # Median of the last 5 kills single-sample glitches on the bus
+      # No filter_out: nan here. Dropping failed reads means Home Assistant
+      # keeps displaying the last good temperature forever after the probe
+      # dies -- the device correctly showed PROBE FAULT while the dashboard
+      # still read 72.6. A stale water temperature is worse than none.
+      # NaN now propagates and the entity goes unavailable.
       - median:
           window_size: 5
           send_every: 1
