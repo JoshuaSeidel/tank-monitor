@@ -54,7 +54,7 @@ void TankController::load_prior_() {
 void TankController::setup() {
   this->load_prior_();
 
-  this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model"));
+  this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model_v2"));
   this->light_pref_ = global_preferences->make_preference<LightProfile>(fnv1_hash("tank_light"));
   this->setpoint_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_setpoint"));
 
@@ -308,8 +308,10 @@ void TankController::update() {
   // change doesn't demand a thermally impossible ramp.
   float desired = clampf(error / this->response_time_, -0.15f, 0.15f);
 
-  // Slow integral term: mops up whatever the model still gets wrong.
-  const float ki = 1.0f / (4.0f * this->response_time_ * this->response_time_);
+  // Integral term: mops up whatever the model still gets wrong. Sized so a
+  // 1 degC error saturates it in roughly one response time -- the old
+  // 1/(4*rt^2) took about three hours, far too slow to rescue a bad prior.
+  const float ki = 1.0f / (this->response_time_ * this->response_time_);
   this->integral_ += error * dt_min * ki;
   this->integral_ = clampf(this->integral_, -0.05f, 0.05f);
 

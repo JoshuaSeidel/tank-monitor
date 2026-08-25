@@ -27,9 +27,20 @@ static const uint8_t N_PARAMS = 5;
 // Light profile resolution: 96 slots of 15 minutes covers one day.
 static const uint8_t N_SLOTS = 96;
 
-// The model is written around this reference temperature so that the
-// regressors stay small and the RLS stays numerically well behaved.
-static const float TEMP_REF = 25.0f;
+// The model is written around this reference temperature so the regressors
+// stay small and the RLS stays well conditioned.
+//
+// It is not an arbitrary centring constant: with theta[4] (the constant
+// term) starting at zero, the prior implies the tank drifts toward
+// TEMP_REF. Setting it to 25 meant a tank sitting at 22.6 was predicted to
+// warm on its own, which cancelled the demand and held the heater at 0%
+// while the water sat 2 F below target.
+//
+// 20 C encodes the assumption that actually holds for every heated
+// aquarium: the room is cooler than the tank, so the tank always loses
+// heat. RLS corrects the exact value from there, and theta[4]'s clamp of
+// +/-0.05 lets the learned equilibrium land anywhere from ~17 to ~23 C.
+static const float TEMP_REF = 20.0f;
 
 struct ThermalModel {
   // theta[0] = kh   heater gain, degC/min at 100% duty        (>0)
