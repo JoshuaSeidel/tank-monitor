@@ -387,23 +387,42 @@ power-up sequence.
 
 ## Flashing
 
-The `tank_controller` component is pulled from this repo over git, so
-`tank-monitor.yaml` builds in the **Home Assistant ESPHome add-on** with no
-local files — paste it in, add the secrets, install.
+### Build straight from git (recommended)
+
+Rather than pasting `tank-monitor.yaml` into the ESPHome dashboard and
+re-pasting it after every change, put **`tank-monitor-remote.yaml`** there
+instead — a four-line wrapper that pulls the whole config from this repo:
 
 ```yaml
-external_components:
-  - source:
-      type: git
-      url: https://github.com/JoshuaSeidel/tank-monitor
-      ref: main
-    components: [tank_controller]
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files: [tank-monitor.yaml]
     refresh: 0s
 ```
 
-`refresh: 0s` matters: `main` is a moving branch, and the default caches a
-git source for a day. Without it you can push a fix and silently keep
-building the old code.
+Save it in the dashboard as `tank-monitor.yaml`. After that, a push to
+`main` is all it takes — the next install builds the new config.
+
+**`refresh: 0s` is not optional.** The default is `1d`, so without it you
+can push a fix and spend an afternoon flashing yesterday's config.
+
+Only `secrets.yaml` stays local. `!secret` references inside the remote
+file resolve against your local secrets, so nothing sensitive goes in git.
+
+**Local overrides win over the package**, so device-specific tweaks don't
+require forking. Adding this below the `packages:` block sets the target to
+75 °F for this device only:
+
+```yaml
+substitutions:
+  target_temp_f: "75.0"
+```
+
+The `tank_controller` component is fetched from git the same way, so
+`tank-monitor.yaml` builds in the **Home Assistant ESPHome add-on** with no
+local files at all.
 
 Locally instead:
 

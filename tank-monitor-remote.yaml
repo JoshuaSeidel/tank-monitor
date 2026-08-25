@@ -1,0 +1,13 @@
+# Thin wrapper: everything is pulled from git at build time.
+#
+# Put THIS file in the ESPHome dashboard as tank-monitor.yaml. Nothing else
+# lives locally except secrets.yaml, so a push to main is all it takes for
+# the next build to pick up changes.
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files: [tank-monitor.yaml]
+    # refresh defaults to 1d -- that would silently build yesterday's
+    # config. 0s re-fetches on every build.
+    refresh: 0s
