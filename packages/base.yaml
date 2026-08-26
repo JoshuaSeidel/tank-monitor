@@ -5,17 +5,37 @@ substitutions:
   device_name: tank-monitor
   friendly_name: Tank Monitor
   # --- Calibration ---
-  # Target water temperature, Fahrenheit. Centre of the 74-75 F band.
-  # Everything in this project is Fahrenheit; the controller converts once,
-  # internally, and nothing user-facing is ever Celsius.
-  target_temp_f: "74.5"
+  # Target water temperature, Fahrenheit. Centre of the 75.8-76.5 green
+  # band. Everything in this project is Fahrenheit; the controller converts
+  # once, internally, and nothing user-facing is ever Celsius.
+  target_temp_f: "76.0"
 
-  # --- Display thresholds (all in the units shown on screen) ---
-  # Green inside lo..hi, amber just outside, red beyond red_lo..red_hi.
-  temp_lo: "74"
-  temp_hi: "75"
-  temp_red_lo: "73.5"
-  temp_red_hi: "75.5"
+  # --- Display thresholds (Fahrenheit, as shown on screen) ---
+  # Six bands, ascending. Colour encodes DIRECTION, brightness encodes
+  # SEVERITY -- blue and red are the same alarm at opposite ends, because
+  # too cold and too hot are both emergencies for this tank.
+  #
+  #   below 74.0   blue        TOO COLD   <- emergency (mirrors red)
+  #   74.1-74.7    light blue  COLD       <- warning   (mirrors amber)
+  #   74.8-75.7    green-blue  COOL       <- off-target but safe
+  #   75.8-76.5    green       STEADY     <- target sits here
+  #   76.6-77.4    amber       WARM       <- warning
+  #   77.5+        red         TOO WARM   <- emergency
+  #
+  # The cool side has one more tier than the warm side because there is
+  # more usable room below target than above it, not because it is safer.
+  #
+  # Each threshold is the midpoint between two bands' stated edges, so any
+  # value the display can actually show (one decimal) lands in the band it
+  # is named for. Compared as `t < threshold`, ascending.
+  temp_lightblue_lo: "74.05"
+  temp_greenblue_lo: "74.75"
+  temp_green_lo: "75.75"
+  temp_amber_lo: "76.55"
+  temp_red_lo: "77.45"
+  # The green band, spelled the way a human reads it, for the status row.
+  # Display text only -- the thresholds above are what actually decide.
+  temp_band_label: "75.8-76.5"
   # Green also requires the tank to be *steady*: peak-to-peak swing over
   # the last hour must be under this, in F. Being briefly in-band while
   # swinging 3 F is not the same as holding temperature.
@@ -85,6 +105,18 @@ color:
     hex: "0A0A0A"
   - id: COLOR_GREEN
     hex: "3ECF6E"
+  # Cool-side ladder, pitched to mirror the warm side rung for rung:
+  # COLOR_TEAL is the mild tier, COLOR_LIGHTBLUE carries the same weight as
+  # COLOR_AMBER, and COLOR_BLUE is as saturated as COLOR_RED because it
+  # means the same thing. All three stay light enough that near-black ink
+  # still reads across the room -- a darker "looks cold" blue would win the
+  # metaphor and lose the legibility, which is the whole point of the panel.
+  - id: COLOR_TEAL
+    hex: "3ECFB0"
+  - id: COLOR_LIGHTBLUE
+    hex: "7FC4FF"
+  - id: COLOR_BLUE
+    hex: "2F80FF"
   - id: COLOR_AMBER
     hex: "FFB020"
   - id: COLOR_RED

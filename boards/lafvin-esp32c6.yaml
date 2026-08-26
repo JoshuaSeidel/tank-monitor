@@ -141,23 +141,51 @@ display:
       const float swing_f = isnan(swing_c) ? NAN : swing_c * 9.0f / 5.0f;
       const bool steady = isnan(swing_f) || swing_f <= ${temp_swing_max};
 
-      Color t_bg = COLOR_GREEN;
-      const char *t_label = "STEADY";
+      // Six bands, ascending, thresholds from packages/base.yaml. Colour
+      // says which way the tank is off; how loud the colour is says how
+      // much trouble it is in. Blue and red are the same alarm pointed in
+      // opposite directions -- both are emergencies.
+      Color t_bg;
+      const char *t_label;
+      // Set for the two outer bands, so the swing label below cannot
+      // paint over an alarm.
+      bool t_alarm = false;
       if (!t_ok || id(controller).is_safety_tripped()) {
         t_bg = COLOR_RED;
         t_label = "PROBE FAULT";
-      } else if (t_f < ${temp_red_lo} || t_f > ${temp_red_hi}) {
+        t_alarm = true;
+      } else if (t_f < ${temp_lightblue_lo}) {
+        t_bg = COLOR_BLUE;
+        t_label = "TOO COLD";
+        t_alarm = true;
+      } else if (t_f < ${temp_greenblue_lo}) {
+        t_bg = COLOR_LIGHTBLUE;
+        t_label = "COLD";
+      } else if (t_f < ${temp_green_lo}) {
+        t_bg = COLOR_TEAL;
+        t_label = "COOL";
+      } else if (t_f < ${temp_amber_lo}) {
+        t_bg = COLOR_GREEN;
+        t_label = "STEADY";
+      } else if (t_f < ${temp_red_lo}) {
+        t_bg = COLOR_AMBER;
+        t_label = "WARM";
+      } else {
         t_bg = COLOR_RED;
-        t_label = t_f < ${temp_lo} ? "TOO COLD" : "TOO WARM";
-      } else if (t_f < ${temp_lo} || t_f > ${temp_hi}) {
-        t_bg = COLOR_AMBER;
-        t_label = t_f < ${temp_lo} ? "COOL" : "WARM";
-      } else if (!steady) {
-        // In band right now, but the tank is moving through it rather
-        // than holding. That is not a green condition.
-        t_bg = COLOR_AMBER;
-        t_label = "SWINGING";
+        t_label = "TOO WARM";
+        t_alarm = true;
       }
+
+      // Swing changes the *label* only, never the colour: the ladder above
+      // is a statement about absolute temperature, and overloading amber to
+      // also mean "moving" would make 76.2-while-drifting look identical to
+      // a genuinely too-warm tank.
+      //
+      // Suppressed in the alarm bands. "TOO COLD" outranks "SWINGING" --
+      // if the tank is at 73 and moving, the temperature is the thing you
+      // need off the screen from eight feet away.
+      if (!t_alarm && !steady)
+        t_label = "SWINGING";
 
       // ---- TDS zone ---------------------------------------------------
       const float ppm = id(tds).state;
@@ -239,9 +267,9 @@ display:
       it.print(6, 135, id(font_small), ink, TextAlign::BASELINE_LEFT, t_label);
       if (isnan(swing_f))
         it.printf(314, 135, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_lo}-${temp_hi}  |  heat %.0f%%",
+                  "${temp_band_label}  |  heat %.0f%%",
                   id(controller).get_heater_duty());
       else
         it.printf(314, 135, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_lo}-${temp_hi}  |  sw %.1f  |  heat %.0f%%", swing_f,
+                  "${temp_band_label}  |  sw %.1f  |  heat %.0f%%", swing_f,
                   id(controller).get_heater_duty());
