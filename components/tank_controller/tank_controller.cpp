@@ -25,12 +25,14 @@ static const uint32_t HISTORY_WIPE_MS = 300000;    // 5 min
 static const uint32_t HEAT_STALL_MS = 2700000;     // 45 minutes
 static const float HEAT_STALL_RISE = 0.05f;        // degC
 
-// Residual EMA weight, and how many learning steps must land before the
-// feedforward is allowed to influence the output at all. At a 5 minute
-// window that is 15 minutes of watching the model be right (or wrong)
-// before it gets a vote.
+// Residual EMA weight. Feeds the Model Bias diagnostic only -- see the
+// comment on integral authority below for why this is reported and not
+// acted on.
 static const float BIAS_EMA_W = 0.2f;
-static const uint32_t FIT_MIN_STEPS = 3;
+
+// Ceiling on what the integral term alone may command, as a fraction of
+// heater duty. See the clamp for why this is not a fixed rate.
+static const float INTEGRAL_AUTHORITY = 0.3f;
 
 // Sign guard deadband. Inside it the feedforward is free to act
 // predictively; outside it the measured error decides the direction.
@@ -128,7 +130,6 @@ void TankController::reset_learning() {
   this->load_prior_();
   this->integral_ = 0.0f;
   this->bias_ = 0.0f;
-  this->fit_updates_ = 0;
   // Windows in flight were accumulated against the old model; carrying
   // them over would fold pre-reset data into the first new learning step.
   this->learn_anchor_temp_ = NAN;
@@ -254,12 +255,17 @@ void TankController::learn_(float dt_min, float measured_rate) {
   this->clamp_model_();
   this->model_.updates++;
 
-  // Track how wrong the model keeps being, and in which direction. A
-  // residual that averages out to zero is noise; one that holds a sign is
-  // bias, and bias is what makes the feedforward dangerous rather than
-  // merely imprecise.
+  // Track how wrong the model keeps being, and in which direction, and
+  // publish it. Reported, deliberately not acted on: an earlier version
+  // of this file used bias to gate the feedforward, on the strength of a
+  // drift reading of 0.00 degF/h that turned out to be quantisation --
+  // one DS18B20 LSB over a 5 minute window is exactly 1.35 degF/h, so
+  // that sensor alternates between 0.00 and 1.35 and a single sample of
+  // it says nothing. The model was not biased; the reading was aliased.
+  // The number is worth having on a dashboard so that mistake is visible
+  // next time, and worth keeping out of the control path until something
+  // more than one sample justifies it.
   this->bias_ = (1.0f - BIAS_EMA_W) * this->bias_ + BIAS_EMA_W * err;
-  this->fit_updates_++;
 
   ESP_LOGD(TAG, "learn: rate=%.4f pred=%.4f err=%.4f kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", measured_rate, pred, err,
            this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
@@ -407,7 +413,6 @@ void TankController::update() {
   // What the tank will do on its own, with no heater and no fan.
   const float passive_raw = this->model_.theta[2] * (t - TEMP_REF) +
                             this->model_.theta[3] * this->predicted_light_ + this->model_.theta[4];
-  this->passive_raw_ = passive_raw;
 
   // Weight the feedforward by how much the model has actually learned.
   //
@@ -418,11 +423,10 @@ void TankController::update() {
   // set too high refused to heat a cold tank, and one set too low called
   // for heat while the tank sat above target.
   //
-  // At zero trust this collapses to plain feedback on the measured error,
-  // which cannot be wrong about the sign. See get_trust(): the weight is
-  // confidence scaled by measured fit, because step count alone was not
-  // enough -- it granted authority on a schedule instead of on evidence.
-  const float trust = this->get_trust();
+  // At zero confidence this collapses to plain feedback on the measured
+  // error, which cannot be wrong about the sign. The prediction phases in
+  // over roughly a day as the model earns it.
+  const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
   const float passive = passive_raw * trust;
 
   const float error = this->setpoint_ - t;
@@ -436,7 +440,20 @@ void TankController::update() {
   // 1/(4*rt^2) took about three hours, far too slow to rescue a bad prior.
   const float ki = 1.0f / (this->response_time_ * this->response_time_);
   this->integral_ += error * dt_min * ki;
-  this->integral_ = clampf(this->integral_, -0.05f, 0.05f);
+  // Bound the integral by the actuator authority it can command, not by a
+  // fixed rate. This is what caused the overshoot: at the old flat
+  // +/-0.05 degC/min and a learned kh of 0.032, the integral ALONE was
+  // worth 158% heater duty. Once saturated it held the heater at 100%
+  // until the measured error alone could outweigh it, which took 3.6 degF
+  // of overshoot -- and that is what the tank did, running 39 minutes at
+  // full power from 75.8 F to 77.8 F against a 76.0 F setpoint.
+  //
+  // Capped at 30% duty the integral can still mop up a steady-state
+  // offset the model gets wrong, which is its job, but it can no longer
+  // outvote the measurement. Scaled by kh so it tracks the learned heater
+  // rather than assuming one.
+  const float i_max = INTEGRAL_AUTHORITY * (kh > 1e-4f ? kh : THETA_PRIOR[0]);
+  this->integral_ = clampf(this->integral_, -i_max, i_max);
 
   const float net = desired + this->integral_ - passive;
 
@@ -460,11 +477,12 @@ void TankController::update() {
   // the measurement wins -- nothing legitimate asks for heat while the
   // water is already above target, or for cooling while it is below.
   //
-  // get_trust() should keep this from ever firing, and it firing in the
-  // log is a signal the model has gone bad again. It is here because a
-  // backstop that cannot be wrong about the sign is worth more than the
-  // small amount of predictive authority it costs, and the deadband keeps
-  // the genuinely useful case -- pre-empting the lights near setpoint --
+  // This is the piece the tank's own history actually justifies: with the
+  // integral saturated, the controller ran 39 minutes at 100% duty from
+  // 75.8 F up to 77.8 F against a 76.0 F setpoint. The integral clamp
+  // above is the root fix; this is the backstop that cannot be wrong
+  // about the sign whatever the model does. The deadband leaves the
+  // genuinely useful case -- pre-empting the lights near setpoint --
   // fully intact.
   if (error < -GUARD_DEADBAND && heater > 0.0f) {
     ESP_LOGW(TAG, "Sign guard: model asked for %.0f%% heat at %.2f degF above setpoint", heater * 100.0f,
@@ -515,31 +533,6 @@ float TankController::get_swing() const {
 float TankController::get_time_constant() const {
   const float ka = -this->model_.theta[2];
   return ka > 1e-4f ? 1.0f / ka : NAN;  // minutes
-}
-
-float TankController::get_trust() const {
-  // Confidence counts learning *steps*; it says nothing about whether any
-  // of that learning worked. It saturates in a day, while theta[2] and
-  // theta[4] -- the two parameters that decide the passive term -- need
-  // several days, and theta[4] is nearly unidentifiable while the tank
-  // holds still. So confidence alone will hand full authority to a model
-  // that is still badly wrong, which is exactly what happened: at 24%
-  // confidence a passive estimate 6x too cold commanded 29% heat into a
-  // tank already above setpoint whose measured drift was 0.00 degF/h.
-  //
-  // Fit closes that gap. If the model's running residual is as large as
-  // the passive term it is producing, the term is worthless and earns a
-  // trust of zero no matter how many steps have accumulated. As the model
-  // converges the residual falls, fit rises, and the feedforward phases
-  // in -- earned rather than merely waited out.
-  if (this->fit_updates_ < FIT_MIN_STEPS)
-    return 0.0f;
-  const float conf = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
-  const float mag = std::fabs(this->passive_raw_);
-  if (!(mag > 1e-6f))
-    return conf;
-  const float fit = clampf(1.0f - std::fabs(this->bias_) / mag, 0.0f, 1.0f);
-  return conf * fit;
 }
 
 float TankController::get_confidence() const {

@@ -175,23 +175,11 @@ sensor:
     entity_category: diagnostic
     lambda: "return id(controller).get_drift_rate() * 60.0f * 9.0f / 5.0f;"
 
-  # How much of the feedforward the controller is actually acting on.
-  # This, not Model Confidence, is the number that gates the prediction:
-  # confidence scaled by measured fit. If it sits near zero while
-  # confidence climbs, the model is learning steps but not learning the
-  # tank.
-  - platform: template
-    name: "Model Trust"
-    unit_of_measurement: "%"
-    icon: "mdi:scale-balance"
-    accuracy_decimals: 0
-    update_interval: 60s
-    entity_category: diagnostic
-    lambda: "return id(controller).get_trust() * 100.0f;"
-
   # Signed: positive means the tank keeps coming out warmer than the model
-  # predicted. A value that holds one sign is bias, and bias is what makes
-  # the feedforward push the wrong way.
+  # predicted. Diagnostic only -- nothing is gated on it. Watch it against
+  # Temperature Drift Rate: a sustained one-signed bias means the model is
+  # genuinely off, whereas Drift Rate alone is quantised to 1.35 degF/h
+  # steps and a single sample of it will mislead you.
   - platform: template
     name: "Model Bias"
     unit_of_measurement: "°F/h"
