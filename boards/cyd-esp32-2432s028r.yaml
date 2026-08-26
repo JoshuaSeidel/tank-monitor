@@ -213,7 +213,13 @@ display:
       const float swing_f = isnan(swing_c) ? NAN : swing_c * 9.0f / 5.0f;
       const bool steady = isnan(swing_f) || swing_f <= ${temp_swing_max};
 
-      // Six bands, ascending, thresholds from packages/base.yaml. Colour
+      // Bands are offsets from the LIVE setpoint, not fixed temperatures,
+      // so changing the target in Home Assistant moves every colour with
+      // it. Read here rather than baked in at compile time.
+      const float sp_f = id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;
+
+      // Six bands, ascending, offsets from packages/base.yaml applied
+      // to the live setpoint. Colour
       // says which way the tank is off; how loud the colour is says how
       // much trouble it is in. Blue and red are the same alarm pointed in
       // opposite directions -- both are emergencies.
@@ -226,20 +232,20 @@ display:
         t_bg = COLOR_RED;
         t_label = "PROBE FAULT";
         t_alarm = true;
-      } else if (t_f < ${temp_lightblue_lo}) {
+      } else if (t_f < sp_f + (${temp_off_lightblue})) {
         t_bg = COLOR_BLUE;
         t_label = "TOO COLD";
         t_alarm = true;
-      } else if (t_f < ${temp_greenblue_lo}) {
+      } else if (t_f < sp_f + (${temp_off_greenblue})) {
         t_bg = COLOR_LIGHTBLUE;
         t_label = "COLD";
-      } else if (t_f < ${temp_green_lo}) {
+      } else if (t_f < sp_f + (${temp_off_green})) {
         t_bg = COLOR_TEAL;
         t_label = "COOL";
-      } else if (t_f < ${temp_amber_lo}) {
+      } else if (t_f < sp_f + (${temp_off_amber})) {
         t_bg = COLOR_GREEN;
         t_label = "STEADY";
-      } else if (t_f < ${temp_red_lo}) {
+      } else if (t_f < sp_f + (${temp_off_red})) {
         t_bg = COLOR_AMBER;
         t_label = "WARM";
       } else {
@@ -323,11 +329,13 @@ display:
       it.print(8, 176, id(font_small), ink, TextAlign::BASELINE_LEFT, t_label);
       if (isnan(swing_f))
         it.printf(312, 176, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_band_label}  |  heat %.0f%%",
+                  "%.1f-%.1f  |  heat %.0f%%",
+                  sp_f + (${temp_off_label_lo}), sp_f + (${temp_off_label_hi}),
                   id(controller).get_heater_duty());
       else
         it.printf(312, 176, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_band_label}  |  sw %.1f  |  heat %.0f%%", swing_f,
+                  "%.1f-%.1f  |  sw %.1f  |  heat %.0f%%",
+                  sp_f + (${temp_off_label_lo}), sp_f + (${temp_off_label_hi}), swing_f,
                   id(controller).get_heater_duty());
 
       // Bottom strip: TDS on its own status colour. Close-up detail.

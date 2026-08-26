@@ -15,27 +15,39 @@ substitutions:
   # SEVERITY -- blue and red are the same alarm at opposite ends, because
   # too cold and too hot are both emergencies for this tank.
   #
-  #   below 74.0   blue        TOO COLD   <- emergency (mirrors red)
-  #   74.1-74.7    light blue  COLD       <- warning   (mirrors amber)
-  #   74.8-75.7    green-blue  COOL       <- off-target but safe
-  #   75.8-76.5    green       STEADY     <- target sits here
-  #   76.6-77.4    amber       WARM       <- warning
-  #   77.5+        red         TOO WARM   <- emergency
+  # Shown relative to the setpoint, so this table holds at any target:
+  #
+  #   below sp-1.9   blue        TOO COLD   <- emergency (mirrors red)
+  #   sp-1.9..-1.3   light blue  COLD       <- warning   (mirrors amber)
+  #   sp-1.2..-0.3   green-blue  COOL       <- off-target but safe
+  #   sp-0.2..+0.5   green       STEADY     <- target sits here
+  #   sp+0.6..+1.4   amber       WARM       <- warning
+  #   above sp+1.4   red         TOO WARM   <- emergency
   #
   # The cool side has one more tier than the warm side because there is
   # more usable room below target than above it, not because it is safer.
   #
-  # Each threshold is the midpoint between two bands' stated edges, so any
-  # value the display can actually show (one decimal) lands in the band it
-  # is named for. Compared as `t < threshold`, ascending.
-  temp_lightblue_lo: "74.05"
-  temp_greenblue_lo: "74.75"
-  temp_green_lo: "75.75"
-  temp_amber_lo: "76.55"
-  temp_red_lo: "77.45"
-  # The green band, spelled the way a human reads it, for the status row.
-  # Display text only -- the thresholds above are what actually decide.
-  temp_band_label: "75.8-76.5"
+  # Stated as OFFSETS FROM THE SETPOINT, not absolute temperatures, and
+  # applied against the live setpoint at render time. Move the target from
+  # Home Assistant and the bands move with it -- there is nothing to keep
+  # in sync by hand, and no way for the colours to end up describing a
+  # target the tank is no longer being held at.
+  #
+  # The offsets below reproduce the bands above for a 76.0 F target. The
+  # asymmetry is deliberate: more usable room below target than above.
+  #
+  # Each is the midpoint between two bands' stated edges, so any value the
+  # display can show (one decimal) lands in the band it is named for.
+  # Compared as `t < setpoint + offset`, ascending.
+  temp_off_lightblue: "-1.95"
+  temp_off_greenblue: "-1.25"
+  temp_off_green: "-0.25"
+  temp_off_amber: "0.55"
+  temp_off_red: "1.45"
+  # Edges of the green band as a human reads them, also relative to the
+  # setpoint. Display text only -- the offsets above are what decide.
+  temp_off_label_lo: "-0.2"
+  temp_off_label_hi: "0.5"
   # Green also requires the tank to be *steady*: peak-to-peak swing over
   # the last hour must be under this, in F. Being briefly in-band while
   # swinging 3 F is not the same as holding temperature.
