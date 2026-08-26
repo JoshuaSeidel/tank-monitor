@@ -47,6 +47,10 @@ output:
     pin: GPIO2
     period: 900s
     restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return state;"
 
   - platform: slow_pwm
     id: fan_output
@@ -55,6 +59,10 @@ output:
     pin: GPIO3
     period: 900s
     restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
 
   - platform: ledc
     id: backlight_output

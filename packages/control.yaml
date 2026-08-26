@@ -100,6 +100,28 @@ button:
           id: controller
 
 binary_sensor:
+  # The relays themselves. Controller State says what the controller is
+  # DRIVING this window; these say whether the contacts are closed right
+  # now. They differ on purpose: holding a tank at temperature means
+  # delivering a fraction of full power, and the only way a switch can do
+  # that is by being closed part of the time. At 14% duty on a 15 minute
+  # window that is roughly 2 minutes closed and 13 open, all while
+  # Controller State reads "heating" -- because it is.
+  #
+  # Published from slow_pwm's state_change_action in the board file, so
+  # this is the actual switching, not an inference from duty.
+  - platform: template
+    id: heater_relay
+    name: "Heater"
+    device_class: running
+    icon: "mdi:radiator"
+
+  - platform: template
+    id: fan_relay
+    name: "Fan"
+    device_class: running
+    icon: "mdi:fan"
+
   - platform: template
     name: "Temperature Fault"
     device_class: problem
@@ -146,6 +168,10 @@ sensor:
     name: "Heater Output"
     id: heater_duty
     unit_of_measurement: "%"
+    # Commanded duty, not relay state -- the binary Heater above is the
+    # contacts. Diagnostic: useful in Grafana and when working out why the
+    # controller did something, not something to watch day to day.
+    entity_category: diagnostic
     icon: "mdi:radiator"
     state_class: measurement
     accuracy_decimals: 1
@@ -155,6 +181,7 @@ sensor:
   - platform: template
     name: "Fan Output"
     unit_of_measurement: "%"
+    entity_category: diagnostic
     icon: "mdi:fan"
     state_class: measurement
     accuracy_decimals: 1
