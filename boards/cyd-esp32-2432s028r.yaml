@@ -161,21 +161,27 @@ font:
     glyphs: "0123456789.-"
 
 display:
-  - platform: ili9xxx
+  - platform: mipi_spi
     id: tank_display
-    model: ILI9341
+    # Board preset: supplies data_rate, cs_pin GPIO15 and dc_pin GPIO2,
+    # both already flagged ignore_strapping_warning. Using it instead of
+    # hand-rolled ili9xxx pins is not just tidier -- mipi_spi supports
+    # buffer_size, and ili9xxx does not. See the RAM note below.
+    #
+    # IF THE PANEL IS BLANK, GARBLED OR COLOUR-INVERTED, THIS LINE IS WHY.
+    # "CYD" covers several boards that differ only in display controller,
+    # and the seller's listing is not evidence. ESPHome's presets split
+    # them by USB connector:
+    #   ESP32-2432S028        Micro USB      ILI9341   <- listing claims this
+    #   ESP32-2432S028-7789   USB-C + Micro  ST7789V
+    #   ESP32-2432S028-9342   USB-C + Micro  ILI9342
+    # The photographed board has USB-C, which points at one of the lower
+    # two, while the listing says ILI9341. Cheap clones mislabel routinely
+    # and this cannot be settled without the hardware in hand, so start
+    # with the listing's claim and swap this one string if it comes up
+    # wrong. That one-line swap is the other reason to be on mipi_spi.
+    model: ESP32-2432S028
     spi_id: display_bus
-    # GPIO15 (MTDO) and GPIO2 are both strapping pins. Like MISO above,
-    # that is fixed by the CYD's wiring -- there is no alternative pin --
-    # and the display holds them idle-high/low only after boot completes.
-    cs_pin:
-      number: GPIO15
-      ignore_strapping_warning: true
-    dc_pin:
-      number: GPIO2
-      ignore_strapping_warning: true
-    # This panel is not inverted; the CYD's ILI9341 is a plain RGB part.
-    invert_colors: false
     # Native orientation is 240x320 portrait. 90 gives 320x240 landscape
     # with the USB-C edge on the left.
     rotation: 90
@@ -185,13 +191,16 @@ display:
     # The lambda paints every pixel itself, so the automatic pre-frame
     # clear is a wasted full-screen fill.
     auto_clear_enabled: false
-    data_rate: 40MHz
-    # NOTE ON RAM: ili9xxx keeps a whole 16-bit framebuffer, 320*240*2 =
-    # 154kB, and this board has no PSRAM. That fits alongside Wi-Fi and
-    # MQTT but not by a wide margin. If the build boots into repeated
-    # allocation failures, the lever is the font sizes above (glyph
-    # bitmaps are the other big heap consumer), not the buffer -- this
-    # driver has no partial-buffer mode.
+    # 50%, NOT 100% -- and this is the whole reason for the driver switch.
+    # A full 320*240*2 = 154kB framebuffer does not fit: this board has no
+    # PSRAM, and the build leaves roughly 125kB of the tracked DRAM segment
+    # once statics are placed, before Wi-Fi and MQTT take theirs. ili9xxx
+    # allocates all 154kB in one go with no partial-buffer mode, and on
+    # failure calls mark_failed() -- the screen simply never appears while
+    # every other component runs fine. mipi_spi renders in stripes instead.
+    # The cost is that this lambda runs once per stripe, re-rasterising the
+    # 134px font each pass, which is affordable at a 5s interval.
+    buffer_size: 50%
     lambda: |-
       // ---- temperature zone -------------------------------------------
       const float t = id(water_temp).state;
@@ -204,23 +213,51 @@ display:
       const float swing_f = isnan(swing_c) ? NAN : swing_c * 9.0f / 5.0f;
       const bool steady = isnan(swing_f) || swing_f <= ${temp_swing_max};
 
-      Color t_bg = COLOR_GREEN;
-      const char *t_label = "STEADY";
+      // Six bands, ascending, thresholds from packages/base.yaml. Colour
+      // says which way the tank is off; how loud the colour is says how
+      // much trouble it is in. Blue and red are the same alarm pointed in
+      // opposite directions -- both are emergencies.
+      Color t_bg;
+      const char *t_label;
+      // Set for the two outer bands, so the swing label below cannot
+      // paint over an alarm.
+      bool t_alarm = false;
       if (!t_ok || id(controller).is_safety_tripped()) {
         t_bg = COLOR_RED;
         t_label = "PROBE FAULT";
-      } else if (t_f < ${temp_red_lo} || t_f > ${temp_red_hi}) {
+        t_alarm = true;
+      } else if (t_f < ${temp_lightblue_lo}) {
+        t_bg = COLOR_BLUE;
+        t_label = "TOO COLD";
+        t_alarm = true;
+      } else if (t_f < ${temp_greenblue_lo}) {
+        t_bg = COLOR_LIGHTBLUE;
+        t_label = "COLD";
+      } else if (t_f < ${temp_green_lo}) {
+        t_bg = COLOR_TEAL;
+        t_label = "COOL";
+      } else if (t_f < ${temp_amber_lo}) {
+        t_bg = COLOR_GREEN;
+        t_label = "STEADY";
+      } else if (t_f < ${temp_red_lo}) {
+        t_bg = COLOR_AMBER;
+        t_label = "WARM";
+      } else {
         t_bg = COLOR_RED;
-        t_label = t_f < ${temp_lo} ? "TOO COLD" : "TOO WARM";
-      } else if (t_f < ${temp_lo} || t_f > ${temp_hi}) {
-        t_bg = COLOR_AMBER;
-        t_label = t_f < ${temp_lo} ? "COOL" : "WARM";
-      } else if (!steady) {
-        // In band right now, but the tank is moving through it rather
-        // than holding. That is not a green condition.
-        t_bg = COLOR_AMBER;
-        t_label = "SWINGING";
+        t_label = "TOO WARM";
+        t_alarm = true;
       }
+
+      // Swing changes the *label* only, never the colour: the ladder above
+      // is a statement about absolute temperature, and overloading amber to
+      // also mean "moving" would make 76.2-while-drifting look identical to
+      // a genuinely too-warm tank.
+      //
+      // Suppressed in the alarm bands. "TOO COLD" outranks "SWINGING" --
+      // if the tank is at 73 and moving, the temperature is the thing you
+      // need off the screen from eight feet away.
+      if (!t_alarm && !steady)
+        t_label = "SWINGING";
 
       // ---- TDS zone ---------------------------------------------------
       const float ppm = id(tds).state;
@@ -286,11 +323,11 @@ display:
       it.print(8, 176, id(font_small), ink, TextAlign::BASELINE_LEFT, t_label);
       if (isnan(swing_f))
         it.printf(312, 176, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_lo}-${temp_hi}  |  heat %.0f%%",
+                  "${temp_band_label}  |  heat %.0f%%",
                   id(controller).get_heater_duty());
       else
         it.printf(312, 176, id(font_small), ink, TextAlign::BASELINE_RIGHT,
-                  "${temp_lo}-${temp_hi}  |  sw %.1f  |  heat %.0f%%", swing_f,
+                  "${temp_band_label}  |  sw %.1f  |  heat %.0f%%", swing_f,
                   id(controller).get_heater_duty());
 
       // Bottom strip: TDS on its own status colour. Close-up detail.

@@ -476,6 +476,19 @@ knowing before ordering parts:
 - Nothing on the board brings 5 V out to a connector, so the relay module
   needs its own supply, sharing ground with the board. The D-1584TL's
   optocoupled inputs are designed for exactly that.
+- **"CYD" is several different boards.** They differ in display controller,
+  and the seller's listing is not reliable evidence. The board file uses
+  ESPHome's `ESP32-2432S028` preset (ILI9341, what the listing claims); if
+  the panel comes up blank, garbled or colour-inverted, swap that one string
+  for `ESP32-2432S028-7789` (ST7789V) or `ESP32-2432S028-9342` (ILI9342).
+
+It uses the `mipi_spi` driver rather than `ili9xxx`, which is a RAM decision
+rather than a stylistic one. A full 320×240×2 = 154 kB framebuffer does not
+fit on a no-PSRAM ESP32 once statics are placed — `ili9xxx` allocates it in
+one shot with no partial-buffer mode, and on failure calls `mark_failed()`,
+so the screen silently never appears while everything else runs. `mipi_spi`
+renders in stripes at `buffer_size: 50%`, and makes the controller swap above
+a one-line change.
 
 ### Secrets
 
