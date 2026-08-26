@@ -48,7 +48,7 @@ query filters by `entity_id`, e.g.:
 
 ```sql
 SELECT time, value FROM "°F"
-WHERE entity_id = 'tank_monitor_water_temperature_f'
+WHERE entity_id IN ('tank_monitor_water_temperature', 'tank_monitor_water_temperature_f')
   AND $__timeFilter(time)
 ORDER BY time
 ```

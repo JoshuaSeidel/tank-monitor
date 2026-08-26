@@ -9,7 +9,7 @@
       "badges": [
         {
           "type": "entity",
-          "entity": "sensor.tank_monitor_water_temperature_f",
+          "entity": "sensor.tank_monitor_water_temperature",
           "show_name": true
         },
         {
@@ -40,7 +40,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_water_temperature_f",
+              "entity": "sensor.tank_monitor_water_temperature",
               "grid_options": {
                 "columns": 12
               },
@@ -131,7 +131,7 @@
             },
             {
               "type": "markdown",
-              "content": "| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('sensor.seneye_spec_16_ph') }} | 7.2 \u2013 7.5 |\n| **TDS** | {{ states('sensor.tank_monitor_tds') }} ppm | 180 \u2013 250 |\n| **GH** | {{ states('sensor.aquarium_gh_log') }} | 7 \u2013 8 |\n| **KH** | {{ states('sensor.aquarium_kh_log') }} | 3 \u2013 4 |\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature_f') }} \u00b0F | 74 \u2013 75 |\n"
+              "content": "| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('sensor.seneye_spec_16_ph') }} | 7.2 \u2013 7.5 |\n| **TDS** | {{ states('sensor.tank_monitor_tds') }} ppm | 180 \u2013 250 |\n| **GH** | {{ states('sensor.aquarium_gh_log') }} | 7 \u2013 8 |\n| **KH** | {{ states('sensor.aquarium_kh_log') }} | 3 \u2013 4 |\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} \u00b0F | 75.8 \u2013 76.5 |\n"
             },
             {
               "type": "tile",
@@ -218,7 +218,7 @@
             },
             {
               "type": "markdown",
-              "content": "{% set a = states('sensor.tank_monitor_water_temperature_f') | float(-999) %}{% set b = states('sensor.seneye_spec_16_temperature') | float(-999) %}{% if a < -900 or b < -900 %}\u26a0\ufe0f **A probe is not reporting** \u2014 controller {{ states('sensor.tank_monitor_water_temperature_f') }}, Seneye {{ states('sensor.seneye_spec_16_temperature') }}\n{% else %}{% set d = (a - b) | abs | round(2) %}{% if d <= 0.5 %}\u2705 **Probes agree** \u2014 {{ d }} \u00b0F apart\n{% elif d <= 1.5 %}\ud83d\udfe1 **Probes drifting apart** \u2014 {{ d }} \u00b0F\n{% else %}\ud83d\udd34 **Probes disagree by {{ d }} \u00b0F** \u2014 one has failed or drifted\n{% endif %}\nController {{ a }} \u00b0F \u00b7 Seneye {{ b }} \u00b0F{% endif %}"
+              "content": "{% set a = states('sensor.tank_monitor_water_temperature') | float(-999) %}{% set b = states('sensor.seneye_spec_16_temperature') | float(-999) %}{% if a < -900 or b < -900 %}\u26a0\ufe0f **A probe is not reporting** \u2014 controller {{ states('sensor.tank_monitor_water_temperature') }}, Seneye {{ states('sensor.seneye_spec_16_temperature') }}\n{% else %}{% set d = (a - b) | abs | round(2) %}{% if d <= 0.5 %}\u2705 **Probes agree** \u2014 {{ d }} \u00b0F apart\n{% elif d <= 1.5 %}\ud83d\udfe1 **Probes drifting apart** \u2014 {{ d }} \u00b0F\n{% else %}\ud83d\udd34 **Probes disagree by {{ d }} \u00b0F** \u2014 one has failed or drifted\n{% endif %}\nController {{ a }} \u00b0F \u00b7 Seneye {{ b }} \u00b0F{% endif %}"
             },
             {
               "type": "tile",
@@ -535,12 +535,12 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_water_temperature_f",
+                  "entity": "sensor.tank_monitor_water_temperature",
                   "name": "Water",
                   "color": "#00C8FF"
                 },
                 {
-                  "entity": "sensor.tank_monitor_target_temperature_f",
+                  "entity": "number.tank_monitor_target_temperature",
                   "name": "Target",
                   "color": "#3ECF6E"
                 },

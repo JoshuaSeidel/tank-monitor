@@ -111,16 +111,11 @@ text_sensor:
     lambda: "return {id(controller).get_state_text()};"
 
 sensor:
-  # Target in F as its own series, so Grafana can draw the setpoint line
-  # over the temperature plot without converting units in the query.
-  - platform: template
-    name: "Target Temperature F"
-    unit_of_measurement: "°F"
-    device_class: temperature
-    state_class: measurement
-    accuracy_decimals: 1
-    update_interval: 30s
-    lambda: "return id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;"
+  # NOTE: there is deliberately no "Target Temperature" sensor here. The
+  # number entity above already publishes the setpoint in Fahrenheit and
+  # is recorded to InfluxDB like any other entity, so a mirror sensor was
+  # a second entity with the same name and the same value. Grafana draws
+  # the setpoint line from number.<device>_target_temperature instead.
 
   - platform: template
     name: "Heater Output"

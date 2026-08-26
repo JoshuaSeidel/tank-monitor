@@ -130,8 +130,8 @@
           "refId": "A",
           "rawQuery": true,
           "format": "time_series",
-          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_water_temperature_f' AND $__timeFilter(time)\nORDER BY time",
-          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_water_temperature_f' AND $__timeFilter(time)\nORDER BY time"
+          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_water_temperature', 'tank_monitor_water_temperature_f') AND $__timeFilter(time)\nORDER BY time",
+          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_water_temperature', 'tank_monitor_water_temperature_f') AND $__timeFilter(time)\nORDER BY time"
         }
       ],
       "fieldConfig": {
@@ -350,8 +350,8 @@
           "refId": "A",
           "rawQuery": true,
           "format": "time_series",
-          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_water_temperature_f' AND $__timeFilter(time)\nORDER BY time",
-          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_water_temperature_f' AND $__timeFilter(time)\nORDER BY time"
+          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_water_temperature', 'tank_monitor_water_temperature_f') AND $__timeFilter(time)\nORDER BY time",
+          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_water_temperature', 'tank_monitor_water_temperature_f') AND $__timeFilter(time)\nORDER BY time"
         },
         {
           "datasource": {
@@ -361,8 +361,8 @@
           "refId": "B",
           "rawQuery": true,
           "format": "time_series",
-          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_target_temperature_f' AND $__timeFilter(time)\nORDER BY time",
-          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id = 'tank_monitor_target_temperature_f' AND $__timeFilter(time)\nORDER BY time"
+          "rawSql": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_target_temperature', 'tank_monitor_target_temperature_f') AND $__timeFilter(time)\nORDER BY time",
+          "query": "SELECT time, value FROM \"°F\"\nWHERE entity_id IN ('tank_monitor_target_temperature', 'tank_monitor_target_temperature_f') AND $__timeFilter(time)\nORDER BY time"
         }
       ],
       "fieldConfig": {

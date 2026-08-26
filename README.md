@@ -638,13 +638,24 @@ Under one `Tank Monitor` device:
 `Adaptive Learning` switch,
 `Reset Learning` button, `Restart` button.
 
-**Main** — `Water Temperature F` (°F), `TDS` (ppm),
+**Main** — `Water Temperature` (°F), `TDS` (ppm),
 `Electrical Conductivity` (µS/cm), `Tank Light Level` (lx), `Heater Output`
 (%), `Fan Output` (%), `Predicted Temperature (15 min)`, `Controller State`.
 
-**Diagnostic** — `Model Confidence`, `Tank Time Constant`, `Learned Heater
-Power`, `Learned Light Heat Gain`, `Predicted Light Load`, `Temperature Drift
-Rate`, `TDS Probe Voltage`, `Temperature Fault`, Wi-Fi signal, uptime, IP.
+**Diagnostic** — `Model Confidence`, `Model Bias`, `Tank Time Constant`,
+`Learned Heater Power`, `Learned Light Heat Gain`, `Predicted Light Load`,
+`Temperature Drift Rate`, `TDS Probe Voltage`, `Temperature Fault`,
+`Heater Not Responding`, Wi-Fi signal, uptime, IP.
+
+There is no `Target Temperature` *sensor* — the `Target Temperature` number
+under Controls is the setpoint, and it is recorded to InfluxDB like any other
+entity, so Grafana draws the setpoint line straight from
+`number.tank_monitor_target_temperature`. A mirror sensor would have been a
+second entity with the same name and the same value.
+
+No entity name carries a `°F` suffix. Every temperature in this project is
+Fahrenheit, so the unit is not a distinguishing feature — see
+[Tuning](#tuning).
 
 `Model Confidence` reaching 100% means roughly a day of learning steps have
 accumulated. Watch `Heater Output` — once settled it should sit at a fairly

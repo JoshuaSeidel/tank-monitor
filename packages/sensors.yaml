@@ -7,11 +7,12 @@ sensor:
   - platform: dallas_temp
     # Leave `address` off for a single probe; run once and copy the
     # address the log prints if you ever add a second one.
-    # Internal: the controller and display read this directly, but it is
-    # the only Celsius value in the project so it is not published. The
-    # Fahrenheit copy below is the one Home Assistant sees.
+    # Internal and deliberately unnamed. It is the only Celsius value in
+    # the project, so it is never published; the Fahrenheit sensor below
+    # is the one Home Assistant sees, and that one owns the name. Two
+    # entities called "Water Temperature" on one device would derive the
+    # same MQTT object_id and collide.
     internal: true
-    name: "Water Temperature"
     id: water_temp
     # 10s, not 2s. The control loop runs at 30s and the tank's time
     # constant is hours -- 2s sampling just multiplied the row count in
@@ -97,8 +98,11 @@ sensor:
     filters:
       - filter_out: nan
 
+  # The published water temperature. Fahrenheit, like everything else a
+  # human reads here -- the unit is not in the name because there is no
+  # other unit it could be in.
   - platform: template
-    name: "Water Temperature F"
+    name: "Water Temperature"
     unit_of_measurement: "°F"
     device_class: temperature
     state_class: measurement
