@@ -25,6 +25,15 @@ static const uint32_t HISTORY_WIPE_MS = 300000;    // 5 min
 static const uint32_t HEAT_STALL_MS = 2700000;     // 45 minutes
 static const float HEAT_STALL_RISE = 0.05f;        // degC
 
+// Fan equivalent. The bar is deliberately low -- merely "did not fall at
+// all" -- because passive loss alone should drop this tank well over a
+// degF in 45 minutes. If the water is flat or rising while the fan is
+// commanded wide open, something is wrong with the fan, the relay
+// channel, or the outlet. It cannot detect a weak fan, only an absent
+// one; the learned fan gain is the sensitive measure.
+static const uint32_t FAN_STALL_MS = 2700000;      // 45 minutes
+static const float FAN_STALL_FALL = 0.05f;         // degC
+
 // Residual EMA weight. Feeds the Model Bias diagnostic only -- see the
 // comment on integral authority below for why this is reported and not
 // acted on.
@@ -154,6 +163,8 @@ void TankController::reset_learning() {
   this->last_light_slot_ = -1;
   this->heat_stall_since_ms_ = 0;
   this->heater_stalled_ = false;
+  this->fan_stall_since_ms_ = 0;
+  this->fan_stalled_ = false;
   this->save_state_();
 }
 
@@ -337,6 +348,7 @@ void TankController::update() {
     this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
     this->acc_n_ = 0;
     this->heat_stall_since_ms_ = 0;
+    this->fan_stall_since_ms_ = 0;
   }
 
   this->history_[this->history_idx_] = t;
@@ -363,6 +375,24 @@ void TankController::update() {
   } else {
     this->heat_stall_since_ms_ = 0;
     this->heater_stalled_ = false;
+  }
+
+  if (this->fan_duty_ >= 0.9f) {
+    if (this->fan_stall_since_ms_ == 0) {
+      this->fan_stall_since_ms_ = now;
+      this->fan_stall_temp_ = t;
+    } else if (now - this->fan_stall_since_ms_ > FAN_STALL_MS) {
+      const bool fell = (this->fan_stall_temp_ - t) >= FAN_STALL_FALL;
+      if (!fell && !this->fan_stalled_)
+        ESP_LOGE(TAG, "Fan at full for %" PRIu32 " min with no fall (%.2f degF) - fan may be dead",
+                 FAN_STALL_MS / 60000, (t - this->fan_stall_temp_) * 9.0f / 5.0f);
+      this->fan_stalled_ = !fell;
+      this->fan_stall_since_ms_ = now;
+      this->fan_stall_temp_ = t;
+    }
+  } else {
+    this->fan_stall_since_ms_ = 0;
+    this->fan_stalled_ = false;
   }
 
   if (this->safety_tripped_) {

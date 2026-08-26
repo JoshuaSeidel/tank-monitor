@@ -116,6 +116,18 @@ binary_sensor:
     entity_category: diagnostic
     lambda: "return id(controller).is_heater_stalled();"
 
+  # Fan commanded wide open for 45 minutes and the water did not fall at
+  # all. Weaker evidence than the heater's version, because passive loss
+  # alone should drop this tank over a degF in that time -- flat or rising
+  # water under full fan means the fan, the relay channel or the outlet is
+  # dead. A merely feeble fan will not trip this; Learned Fan Power is the
+  # sensitive measure.
+  - platform: template
+    name: "Fan Not Responding"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_fan_stalled();"
+
 text_sensor:
   - platform: template
     name: "Controller State"
@@ -226,6 +238,22 @@ sensor:
     update_interval: 300s
     entity_category: diagnostic
     lambda: "return id(controller).get_heater_gain() * 60.0f * 9.0f / 5.0f;"
+
+  # The fan's counterpart to Learned Heater Power, and the honest answer to
+  # "is the fan doing anything". Heater Output and Fan Output are commanded
+  # duty -- the controller reading back its own decision, with no current
+  # sensing and no proof the relay closed. These learned gains are inferred
+  # from how the water actually responded, so they are the closest thing to
+  # a measurement of delivery. Sits near its -0.002 floor once the fan has
+  # run for a while = the fan is not cooling.
+  - platform: template
+    name: "Learned Fan Power"
+    unit_of_measurement: "°F/h"
+    icon: "mdi:fan"
+    accuracy_decimals: 2
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: "return id(controller).get_fan_gain() * 60.0f * 9.0f / 5.0f;"
 
   - platform: template
     name: "Learned Light Heat Gain"

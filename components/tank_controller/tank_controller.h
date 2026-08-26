@@ -106,6 +106,11 @@ class TankController : public PollingComponent {
   // Heater commanded near full for a long stretch with no temperature
   // response: unplugged, failed, or a dead relay channel.
   bool is_heater_stalled() const { return this->heater_stalled_; }
+  // Same check for the fan. Weaker evidence than the heater's -- the tank
+  // cools on its own, so this only catches a fan that is failing while the
+  // water is going the WRONG way. A merely feeble fan will not trip it;
+  // watch get_fan_gain() for that.
+  bool is_fan_stalled() const { return this->fan_stalled_; }
   // Peak-to-peak temperature swing over the last hour, in degC.
   // NAN until there is enough history to mean anything.
   float get_swing() const;
@@ -182,6 +187,11 @@ class TankController : public PollingComponent {
   uint32_t heat_stall_since_ms_{0};
   float heat_stall_temp_{NAN};
   bool heater_stalled_{false};
+
+  // Fan-stall detection, same shape.
+  uint32_t fan_stall_since_ms_{0};
+  float fan_stall_temp_{NAN};
+  bool fan_stalled_{false};
 
   float last_temp_{NAN};
   uint32_t last_update_ms_{0};

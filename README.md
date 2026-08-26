@@ -644,8 +644,9 @@ Under one `Tank Monitor` device:
 
 **Diagnostic** — `Model Confidence`, `Model Bias`, `Tank Time Constant`,
 `Learned Heater Power`, `Learned Light Heat Gain`, `Predicted Light Load`,
-`Temperature Drift Rate`, `TDS Probe Voltage`, `Temperature Fault`,
-`Heater Not Responding`, Wi-Fi signal, uptime, IP.
+`Learned Fan Power`, `Temperature Drift Rate`, `TDS Probe Voltage`,
+`Temperature Fault`, `Heater Not Responding`, `Fan Not Responding`,
+Wi-Fi signal, uptime, IP.
 
 There is no `Target Temperature` *sensor* — the `Target Temperature` number
 under Controls is the setpoint, and it is recorded to InfluxDB like any other
@@ -660,6 +661,33 @@ Fahrenheit, so the unit is not a distinguishing feature — see
 `Model Confidence` reaching 100% means roughly a day of learning steps have
 accumulated. Watch `Heater Output` — once settled it should sit at a fairly
 steady partial value, not flip between 0 and 100.
+
+### `Heater Output` and `Fan Output` are commands, not measurements
+
+Both are the controller reading back its own decision. There is no current
+sensing on either channel and nothing confirms the relay closed, or that
+anything is plugged into that outlet. `Fan Output: 100%` means "over the next
+900 seconds I intend to hold Ch2 closed the whole time", nothing more. They
+are standard controller-output terms, but they carry a `%` and a
+`state_class: measurement`, so it is easy to read them as evidence.
+
+They are not evidence, and this has already cost an evening: a heater that
+had stopped delivering heat showed 90–97% on that graph the entire time it
+was failing. What caught it was the water falling while the model said it
+should be climbing.
+
+The entities that actually reflect delivery are inferred from how the water
+responded:
+
+| Entity | Says |
+| --- | --- |
+| `Learned Heater Power` (°F/h) | how much the heater really adds at 100% |
+| `Learned Fan Power` (°F/h) | the same for the fan; near its floor after real runtime means it is not cooling |
+| `Heater Not Responding` | ≥90% commanded for 45 min with no rise |
+| `Fan Not Responding` | ≥90% commanded for 45 min with no fall |
+
+The two "Not Responding" checks are coarse — they catch an absent actuator,
+not a weak one. Use the learned gains for that.
 
 ---
 
