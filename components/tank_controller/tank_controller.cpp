@@ -25,6 +25,24 @@ static const uint32_t HISTORY_WIPE_MS = 300000;    // 5 min
 static const uint32_t HEAT_STALL_MS = 2700000;     // 45 minutes
 static const float HEAT_STALL_RISE = 0.05f;        // degC
 
+// Residual EMA weight, and how many learning steps must land before the
+// feedforward is allowed to influence the output at all. At a 5 minute
+// window that is 15 minutes of watching the model be right (or wrong)
+// before it gets a vote.
+static const float BIAS_EMA_W = 0.2f;
+static const uint32_t FIT_MIN_STEPS = 3;
+
+// Sign guard deadband. Inside it the feedforward is free to act
+// predictively; outside it the measured error decides the direction.
+//
+// Written in Fahrenheit and converted once, like every other number a
+// human sets or reads in this project. Celsius survives below this line
+// only because the model's priors and clamps are tuned in degC/min --
+// it is an implementation detail and must not reach a log line, a sensor
+// or a screen.
+static const float GUARD_DEADBAND_F = 0.1f;
+static const float GUARD_DEADBAND = GUARD_DEADBAND_F * 5.0f / 9.0f;
+
 // RLS forgetting factor. Very close to 1: the tank changes character over
 // days (evaporation, a new heater, summer), not over minutes.
 static const float LAMBDA = 0.9995f;
@@ -109,6 +127,8 @@ void TankController::reset_learning() {
   ESP_LOGW(TAG, "Resetting learned model and light profile to priors");
   this->load_prior_();
   this->integral_ = 0.0f;
+  this->bias_ = 0.0f;
+  this->fit_updates_ = 0;
   // Windows in flight were accumulated against the old model; carrying
   // them over would fold pre-reset data into the first new learning step.
   this->learn_anchor_temp_ = NAN;
@@ -199,7 +219,8 @@ void TankController::learn_(float dt_min, float measured_rate) {
   // A residual this large is a bad reading or someone doing a water change,
   // not new information about the tank.
   if (std::fabs(err) > 0.5f) {
-    ESP_LOGW(TAG, "Discarding learning step, residual %.3f degC/min looks like a disturbance", err);
+    ESP_LOGW(TAG, "Discarding learning step, residual %.2f degF/h looks like a disturbance",
+             err * 60.0f * 9.0f / 5.0f);
     return;
   }
 
@@ -232,6 +253,13 @@ void TankController::learn_(float dt_min, float measured_rate) {
 
   this->clamp_model_();
   this->model_.updates++;
+
+  // Track how wrong the model keeps being, and in which direction. A
+  // residual that averages out to zero is noise; one that holds a sign is
+  // bias, and bias is what makes the feedforward dangerous rather than
+  // merely imprecise.
+  this->bias_ = (1.0f - BIAS_EMA_W) * this->bias_ + BIAS_EMA_W * err;
+  this->fit_updates_++;
 
   ESP_LOGD(TAG, "learn: rate=%.4f pred=%.4f err=%.4f kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", measured_rate, pred, err,
            this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
@@ -304,8 +332,8 @@ void TankController::update() {
     } else if (now - this->heat_stall_since_ms_ > HEAT_STALL_MS) {
       const bool rose = (t - this->heat_stall_temp_) >= HEAT_STALL_RISE;
       if (!rose && !this->heater_stalled_)
-        ESP_LOGE(TAG, "Heater at full for %" PRIu32 " min with no rise (%.2f degC) - heater may be dead",
-                 HEAT_STALL_MS / 60000, t - this->heat_stall_temp_);
+        ESP_LOGE(TAG, "Heater at full for %" PRIu32 " min with no rise (%.2f degF) - heater may be dead",
+                 HEAT_STALL_MS / 60000, (t - this->heat_stall_temp_) * 9.0f / 5.0f);
       this->heater_stalled_ = !rose;
       this->heat_stall_since_ms_ = now;
       this->heat_stall_temp_ = t;
@@ -379,6 +407,7 @@ void TankController::update() {
   // What the tank will do on its own, with no heater and no fan.
   const float passive_raw = this->model_.theta[2] * (t - TEMP_REF) +
                             this->model_.theta[3] * this->predicted_light_ + this->model_.theta[4];
+  this->passive_raw_ = passive_raw;
 
   // Weight the feedforward by how much the model has actually learned.
   //
@@ -389,10 +418,11 @@ void TankController::update() {
   // set too high refused to heat a cold tank, and one set too low called
   // for heat while the tank sat above target.
   //
-  // At zero confidence this collapses to plain feedback on the measured
-  // error, which cannot be wrong about the sign. The prediction phases in
-  // over roughly a day as the model earns it.
-  const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
+  // At zero trust this collapses to plain feedback on the measured error,
+  // which cannot be wrong about the sign. See get_trust(): the weight is
+  // confidence scaled by measured fit, because step count alone was not
+  // enough -- it granted authority on a schedule instead of on evidence.
+  const float trust = this->get_trust();
   const float passive = passive_raw * trust;
 
   const float error = this->setpoint_ - t;
@@ -423,6 +453,29 @@ void TankController::update() {
     }
   } else {
     this->state_text_ = "holding";
+  }
+
+  // Sign guard. The feedforward is a model; the error is a measurement.
+  // When the two disagree about which direction the tank needs to move,
+  // the measurement wins -- nothing legitimate asks for heat while the
+  // water is already above target, or for cooling while it is below.
+  //
+  // get_trust() should keep this from ever firing, and it firing in the
+  // log is a signal the model has gone bad again. It is here because a
+  // backstop that cannot be wrong about the sign is worth more than the
+  // small amount of predictive authority it costs, and the deadband keeps
+  // the genuinely useful case -- pre-empting the lights near setpoint --
+  // fully intact.
+  if (error < -GUARD_DEADBAND && heater > 0.0f) {
+    ESP_LOGW(TAG, "Sign guard: model asked for %.0f%% heat at %.2f degF above setpoint", heater * 100.0f,
+             -error * 9.0f / 5.0f);
+    heater = 0.0f;
+    this->state_text_ = "coasting (overruled)";
+  } else if (error > GUARD_DEADBAND && fan > 0.0f) {
+    ESP_LOGW(TAG, "Sign guard: model asked for %.0f%% cooling at %.2f degF below setpoint", fan * 100.0f,
+             error * 9.0f / 5.0f);
+    fan = 0.0f;
+    this->state_text_ = "coasting (overruled)";
   }
 
   // Anti-windup: if we're pinned at an actuator limit, stop integrating.
@@ -464,6 +517,31 @@ float TankController::get_time_constant() const {
   return ka > 1e-4f ? 1.0f / ka : NAN;  // minutes
 }
 
+float TankController::get_trust() const {
+  // Confidence counts learning *steps*; it says nothing about whether any
+  // of that learning worked. It saturates in a day, while theta[2] and
+  // theta[4] -- the two parameters that decide the passive term -- need
+  // several days, and theta[4] is nearly unidentifiable while the tank
+  // holds still. So confidence alone will hand full authority to a model
+  // that is still badly wrong, which is exactly what happened: at 24%
+  // confidence a passive estimate 6x too cold commanded 29% heat into a
+  // tank already above setpoint whose measured drift was 0.00 degF/h.
+  //
+  // Fit closes that gap. If the model's running residual is as large as
+  // the passive term it is producing, the term is worthless and earns a
+  // trust of zero no matter how many steps have accumulated. As the model
+  // converges the residual falls, fit rises, and the feedforward phases
+  // in -- earned rather than merely waited out.
+  if (this->fit_updates_ < FIT_MIN_STEPS)
+    return 0.0f;
+  const float conf = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
+  const float mag = std::fabs(this->passive_raw_);
+  if (!(mag > 1e-6f))
+    return conf;
+  const float fit = clampf(1.0f - std::fabs(this->bias_) / mag, 0.0f, 1.0f);
+  return conf * fit;
+}
+
 float TankController::get_confidence() const {
   // Two full learning windows per 10 minutes of data; call it settled after
   // roughly a day of observations.
@@ -473,7 +551,8 @@ float TankController::get_confidence() const {
 
 void TankController::dump_config() {
   ESP_LOGCONFIG(TAG, "Tank Controller:");
-  ESP_LOGCONFIG(TAG, "  Setpoint: %.2f degC (limits %.1f - %.1f)", this->setpoint_, this->min_temp_, this->max_temp_);
+  ESP_LOGCONFIG(TAG, "  Setpoint: %.1f degF (limits %.1f - %.1f)", this->setpoint_ * 9.0f / 5.0f + 32.0f,
+                this->min_temp_ * 9.0f / 5.0f + 32.0f, this->max_temp_ * 9.0f / 5.0f + 32.0f);
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
   ESP_LOGCONFIG(TAG, "  Fan available: %s", YESNO(this->fan_available_));
   ESP_LOGCONFIG(TAG, "  Learning: %s (%" PRIu32 " steps, %.0f%% confidence)", ONOFF(this->learning_enabled_),

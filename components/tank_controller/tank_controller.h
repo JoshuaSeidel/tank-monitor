@@ -96,6 +96,15 @@ class TankController : public PollingComponent {
   float get_light_gain() const { return this->model_.theta[3]; }
   float get_time_constant() const;
   float get_confidence() const;
+  // How trust-worthy the feedforward actually is, 0..1. Confidence scaled
+  // by measured fit -- see the definition for why the two are not the same
+  // thing.
+  float get_trust() const;
+  // Running bias of the model's own predictions, degC/min. Positive means
+  // the tank is warmer than the model keeps saying it will be. This is the
+  // number that would have made the "heating at 29% while above setpoint"
+  // failure obvious in one glance.
+  float get_model_bias() const { return this->bias_; }
   float get_predicted_temperature() const { return this->predicted_temp_; }
   float get_predicted_light_load() const { return this->predicted_light_; }
   bool is_safety_tripped() const { return this->safety_tripped_; }
@@ -148,6 +157,17 @@ class TankController : public PollingComponent {
   float drift_rate_{0.0f};
   float predicted_temp_{NAN};
   float predicted_light_{0.0f};
+  // Most recent unweighted passive estimate, kept so get_trust() can size
+  // the bias against the prediction it is judging.
+  float passive_raw_{0.0f};
+
+  // Exponentially-averaged residual from learn_(), and how many learning
+  // steps have gone into it *this session*. Deliberately not persisted:
+  // after a reboot the model's fit is unverified, and the counter forces
+  // it to prove itself against live water again before the controller
+  // acts on it.
+  float bias_{0.0f};
+  uint32_t fit_updates_{0};
 
   // Learning is done over a slow window: a DS18B20 quantises to 0.0625 degC,
   // which swamps the real drift rate if you differentiate every control tick.
