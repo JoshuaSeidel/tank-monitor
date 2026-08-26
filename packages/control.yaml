@@ -43,16 +43,29 @@ number:
     icon: "mdi:thermostat"
     # Fahrenheit, because that is what every other temperature in this
     # project is shown in. The controller stores Celsius, so set_action
-    # converts on the way in.
+    # converts on the way in and the lambda converts on the way out.
     unit_of_measurement: "°F"
     device_class: temperature
     min_value: 70.0
     max_value: 80.0
     step: 0.1
-    optimistic: true
-    restore_value: true
-    initial_value: ${target_temp_f}
     entity_category: config
+    # Reads the controller back rather than keeping its own copy, and
+    # therefore NOT optimistic/restore_value/initial_value.
+    #
+    # Those three gave the setpoint two owners: the number persisted its
+    # own value, the controller persisted setpoint_pref_, and on boot the
+    # number restored its copy and pushed it in -- so whichever was
+    # written last silently won. They did diverge: the controller held
+    # 76.0 F while the number held 73.9 F, and after a flash the number
+    # won and the tank was cooled toward 73.9 with a fan at 100%.
+    #
+    # The controller already persists the setpoint across reboots and is
+    # the thing that acts on it, so it owns it. This entity is now a view
+    # onto that one value plus a way to change it. The default for a tank
+    # that has never been configured comes from `setpoint:` above.
+    lambda: "return id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;"
+    update_interval: 30s
     set_action:
       - tank_controller.set_setpoint:
           id: controller

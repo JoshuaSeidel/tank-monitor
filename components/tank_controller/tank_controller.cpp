@@ -45,6 +45,16 @@ static const float INTEGRAL_AUTHORITY = 0.3f;
 static const float GUARD_DEADBAND_F = 0.1f;
 static const float GUARD_DEADBAND = GUARD_DEADBAND_F * 5.0f / 9.0f;
 
+// How far above setpoint the tank must sit before the fan is worth running.
+// Deliberately much wider than GUARD_DEADBAND, and deliberately asymmetric
+// with the heater, because the tank is not symmetric: it sheds heat to a
+// cooler room at roughly 3.3 degF/h all by itself, so a small warm
+// excursion corrects on its own and a small cold one does not. Running an
+// evaporative fan against drift that is already going the right way costs
+// water and risks pushing the tank into the cool bands for nothing.
+static const float FAN_DEADBAND_F = 0.5f;
+static const float FAN_DEADBAND = FAN_DEADBAND_F * 5.0f / 9.0f;
+
 // RLS forgetting factor. Very close to 1: the tank changes character over
 // days (evaporation, a new heater, summer), not over minutes.
 static const float LAMBDA = 0.9995f;
@@ -57,8 +67,14 @@ static const float LAMBDA = 0.9995f;
 // spans only ~17-23 C, so a 24 C room could not be represented at all and
 // even a trained model would stay biased toward cooling. +/-0.15 covers
 // roughly 10-30 C, which brackets any room this tank will sit in.
+// theta[1] (fan) is bounded AWAY from zero for the same reason theta[0]
+// (heater) has a floor of 0.002: the control law divides by the gain, so a
+// gain free to approach zero turns any cooling demand into a saturated
+// output. It was allowed to reach -0.000 while the heater was not -- an
+// asymmetry with no physical justification, since a fan that does nothing
+// at all is not a fan.
 static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.150f};
-static const float THETA_MAX[N_PARAMS] = {0.300f, -0.000f, -0.001f, 0.050f, 0.150f};
+static const float THETA_MAX[N_PARAMS] = {0.300f, -0.002f, -0.001f, 0.050f, 0.150f};
 
 // Starting guesses: a typical 100-200W heater in a tens-of-gallons tank.
 static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, 0.0f};
@@ -452,8 +468,16 @@ void TankController::update() {
   // offset the model gets wrong, which is its job, but it can no longer
   // outvote the measurement. Scaled by kh so it tracks the learned heater
   // rather than assuming one.
-  const float i_max = INTEGRAL_AUTHORITY * (kh > 1e-4f ? kh : THETA_PRIOR[0]);
-  this->integral_ = clampf(this->integral_, -i_max, i_max);
+  // Bounded by what each actuator can do with it, not by a single rate.
+  // A positive integral drives the heater and a negative one drives the
+  // fan, and the two gains differ by roughly an order of magnitude, so
+  // clamping both sides with kh held the heater to 30% duty while leaving
+  // the fan free up to 0.3*kh/kf -- which grows without bound as kf falls.
+  // With an unlearned fan gain that is how a 0.66 degF excursion came out
+  // as 100% fan.
+  const float i_max_heat = INTEGRAL_AUTHORITY * (kh > 1e-4f ? kh : THETA_PRIOR[0]);
+  const float i_max_cool = INTEGRAL_AUTHORITY * (kf > 1e-4f ? kf : -THETA_PRIOR[1]);
+  this->integral_ = clampf(this->integral_, -i_max_cool, i_max_heat);
 
   const float net = desired + this->integral_ - passive;
 
@@ -494,6 +518,13 @@ void TankController::update() {
              error * 9.0f / 5.0f);
     fan = 0.0f;
     this->state_text_ = "coasting (overruled)";
+  } else if (fan > 0.0f && error > -FAN_DEADBAND) {
+    // Warm, but not by enough to be worth evaporating water over. Ordered
+    // AFTER the sign guard on purpose: this branch is wide enough to
+    // swallow the pathological below-setpoint case, and that one has to
+    // keep reaching the log.
+    fan = 0.0f;
+    this->state_text_ = "coasting";
   }
 
   // Anti-windup: if we're pinned at an actuator limit, stop integrating.
