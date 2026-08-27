@@ -5,15 +5,22 @@
 # every sensor -- is shared, so a control-loop change lands on both boards
 # from one push.
 #
-# If this board is REPLACING the C6 rather than joining it, leave
-# device_name alone: it keeps the same entity ids, MQTT topics and history
-# in Home Assistant. If both run at once, uncomment the substitution below
-# and add matching tank_monitor_cyd_* keys to secrets.yaml -- two devices
-# answering to the same name will fight over MQTT.
+# device_name MUST differ from the C6's if both boards run at once. It is
+# not cosmetic: it sets the MQTT topic prefix, the discovery object ids,
+# the mDNS hostname and the fallback AP name all at once. Two devices
+# answering to "tank-monitor" publish to identical topics and overwrite
+# each other's Home Assistant entities as fast as they appear -- which
+# looks like entities silently going missing, not like a name clash.
 #
-# substitutions:
-#   device_name: tank-monitor-cyd
-#   friendly_name: Tank Monitor (CYD)
+# Secrets are NOT affected. base.yaml references fixed keys
+# (tank_monitor_mqtt_username and friends) rather than deriving them from
+# device_name, so both boards share one Wi-Fi, MQTT and OTA identity with
+# nothing to add to secrets.yaml.
+#
+# Change this if you renamed the device; it only has to be unique.
+substitutions:
+  device_name: tank-monitor-v2
+  friendly_name: Tank Monitor v2
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor

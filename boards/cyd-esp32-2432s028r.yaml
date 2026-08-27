@@ -121,14 +121,36 @@ touchscreen:
     interrupt_pin: GPIO36
     update_interval: 50ms
     threshold: 400
-    # The stock CYD calibration. Nothing here reads touch *coordinates* --
-    # any press toggles the backlight -- so these numbers only need to be
-    # plausible, not accurate. They matter if you ever add touch regions.
+    # The panel is rotated 90 in the LVGL block, and rotation there
+    # composites the drawn layer -- it does not tell the touch controller
+    # anything. So the digitiser still reports in its native 240x320
+    # portrait frame while LVGL lays out 320x240 landscape, and every
+    # press lands somewhere other than the widget under your finger.
+    #
+    # swap_xy fixes the axes; mirror_x fixes the handedness that swapping
+    # introduces. If presses land mirrored along one axis, flip the
+    # corresponding mirror_ below -- see the calibration note in the
+    # README.
+    transform:
+      swap_xy: true
+      mirror_x: true
+      mirror_y: false
+    # Stock CYD calibration. These now matter: LVGL hit-tests real
+    # coordinates against real widgets, where before any press anywhere
+    # just toggled the backlight.
     calibration:
       x_min: 280
       x_max: 3860
       y_min: 340
       y_max: 3860
+    # Temporary, and worth keeping until touch is confirmed accurate:
+    # logs where the driver thinks each press landed. Tap the four nav
+    # buttons and compare against their coordinates -- HOME is x 8-74,
+    # SET 80-146, WATER 152-218, all at y 208-232.
+    on_touch:
+      - logger.log:
+          format: "touch: x=%d y=%d (raw x=%d y=%d)"
+          args: [touch.x, touch.y, touch.x_raw, touch.y_raw]
 
 sensor:
   # TDS meter analog output -> GPIO35 (ADC1, input-only)
