@@ -277,22 +277,31 @@ display:
       const float ppm = id(tds).state;
       const bool d_ok = !isnan(ppm);
 
-      Color d_bg = COLOR_GREEN;
-      const char *d_label = "TDS OK";
+      // TDS is reported, not judged. Colour-coding it implies a verdict
+      // the number cannot support: TDS is the sum of everything dissolved,
+      // so the same 450 ppm can be a correctly remineralised tank or a
+      // mineral-starved one full of sodium and nitrate. This tank is the
+      // first case -- GH 1.7 at 489 ppm proved the point -- so a red strip
+      // was calling a deliberate, correct remineralisation a fault.
+      //
+      // GH and KH carry the verdict, and they are test-kit values that
+      // live in Home Assistant. The one state still worth colouring is a
+      // dead probe, which is a fault rather than an opinion.
+      Color d_bg = COLOR_NIGHT;
+      const char *d_label = "";
       if (!d_ok) {
         d_bg = COLOR_RED;
         d_label = "NO READING";
-      } else if (ppm < ${tds_red_lo} || ppm > ${tds_red_hi}) {
-        d_bg = COLOR_RED;
-        d_label = ppm < ${tds_lo} ? "TDS VERY LOW" : "TDS VERY HIGH";
-      } else if (ppm < ${tds_lo} || ppm > ${tds_hi}) {
-        d_bg = COLOR_AMBER;
-        d_label = ppm < ${tds_lo} ? "TDS LOW" : "TDS HIGH";
       }
 
       // Near-black on every band -- highest contrast at a distance, and
-      // it stays legible on all three colours.
+      // it stays legible on all the light status colours.
       const Color ink = COLOR_INK;
+
+      // The TDS strip is dark now that it no longer carries a verdict, so
+      // near-black ink would vanish into it. Light ink on the neutral
+      // strip, near-black on the red fault strip.
+      const Color d_ink = d_ok ? COLOR_DIM : COLOR_INK;
 
       // ---- light strip ------------------------------------------------
       const float lux = id(tank_lux).state;
@@ -348,7 +357,7 @@ display:
 
       // Bottom strip: TDS on its own status colour. Close-up detail.
       if (d_ok)
-        it.printf(8, 216, id(font_strip), ink, TextAlign::BASELINE_LEFT, "TDS %.0f", ppm);
+        it.printf(8, 216, id(font_strip), d_ink, TextAlign::BASELINE_LEFT, "TDS %.0f", ppm);
       else
-        it.print(8, 216, id(font_strip), ink, TextAlign::BASELINE_LEFT, "TDS --");
-      it.print(312, 234, id(font_small), ink, TextAlign::BASELINE_RIGHT, d_label);
+        it.print(8, 216, id(font_strip), d_ink, TextAlign::BASELINE_LEFT, "TDS --");
+      it.print(312, 234, id(font_small), d_ink, TextAlign::BASELINE_RIGHT, d_label);

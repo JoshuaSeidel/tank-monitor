@@ -52,10 +52,12 @@ substitutions:
   # the last hour must be under this, in F. Being briefly in-band while
   # swinging 3 F is not the same as holding temperature.
   temp_swing_max: "0.5"
-  tds_lo: "180"
-  tds_hi: "250"
-  tds_red_lo: "150"
-  tds_red_hi: "300"
+  # No TDS thresholds. The strip reports the number and colours only a
+  # dead probe. TDS is the sum of everything dissolved, so it cannot say
+  # whether the right minerals are present -- this tank sat at 489 ppm
+  # with GH 1.7, which any threshold would have called fine or called an
+  # emergency, and both would have been wrong. GH and KH carry that
+  # verdict, in Home Assistant, against targets you can adjust.
   # Above this the tank lights count as on, and the top strip goes amber.
   light_on_lux: "50"
   # K-value for the TDS probe. 1.0 is the factory default.
