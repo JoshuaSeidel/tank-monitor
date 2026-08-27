@@ -42,6 +42,24 @@ logger:
   level: INFO
   baud_rate: 0
 
+# ESPHome's default MQTT unique_id generator is "legacy", which builds
+# "ESP" + component_type + object_id and includes neither the device name
+# nor the MAC. Two boards running the same package set therefore publish
+# byte-identical unique_ids -- "ESPsensorwater_temperature" on both -- and
+# Home Assistant silently drops the second registration. The symptom is
+# entities that never appear, with no error anywhere, and renaming the
+# device does not help because the name was never part of the id.
+#
+# Only the chemistry sensors got through, being the sole entities the
+# other board does not also have.
+#
+# "mac" generates MAC + component_type + hash(friendly_name), which is
+# unique per board. Set here rather than in base.yaml on purpose: changing
+# it on the C6 would regenerate every one of its unique_ids, orphaning its
+# existing entities and their history.
+mqtt:
+  discovery_unique_id_generator: mac
+
 spi:
   # Display bus (HSPI pins). MISO is wired but the panel never talks back;
   # it is here because the driver expects a complete bus.
