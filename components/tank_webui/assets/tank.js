@@ -8,9 +8,22 @@
 // State arrives on /events (server-sent events); control goes back over
 // the REST endpoints web_server already exposes.
 
-const F = (c) => (c * 9) / 5 + 32;
+// web_server reports an entity as "<domain>/[<device>/]<Display Name>" --
+// a slash, and the display name, not the object id the REST routes use.
+// Deriving the key from the id itself rather than hard-coding the string
+// survives both the optional device segment and any renaming of the
+// separator, and needs nothing from the verbose first payload.
+const key = (id) => {
+  const parts = String(id).split("/");
+  const slug = parts[parts.length - 1]
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
+  return parts[0] + "-" + slug;
+};
 
-// Entity ids as web_server reports them: "<domain>-<object_id>".
+// Everything the device publishes is already Fahrenheit -- the one
+// Celsius sensor is internal and never reaches the web server.
 const E = {
   temp: "sensor-water_temperature",
   target: "number-target_temperature",
@@ -138,7 +151,7 @@ class TankApp extends HTMLElement {
     const es = new EventSource("/events");
     es.addEventListener("state", (e) => {
       const d = JSON.parse(e.data);
-      this.s[d.id] = d;
+      this.s[key(d.id)] = d;
       this.$("dot").classList.add("on");
       this.render();
     });
@@ -149,8 +162,7 @@ class TankApp extends HTMLElement {
 
   render() {
     const q = (id) => this.$(id);
-    // Sensors report Celsius; every human-facing number here is Fahrenheit.
-    const t = F(this.num(E.temp));
+    const t = this.num(E.temp);
     const sp = this.num(E.target);
     const fault = this.s[E.fault] && this.s[E.fault].value;
 
