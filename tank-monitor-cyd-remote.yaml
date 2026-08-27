@@ -31,5 +31,6 @@ packages:
       - packages/control.yaml
       - packages/sensors.yaml
       - packages/chemistry.yaml
+      - packages/migrate.yaml
       - boards/cyd-esp32-2432s028r.yaml
     refresh: 0s

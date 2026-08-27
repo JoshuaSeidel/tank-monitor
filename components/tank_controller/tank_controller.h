@@ -119,6 +119,15 @@ class TankController : public PollingComponent {
   // Wipe the learned model and light profile back to priors.
   void reset_learning();
 
+  /// Adopt a thermal model measured by another controller on the same tank.
+  ///
+  /// Arguments are in the units the diagnostic sensors publish -- degF per
+  /// hour for the gains, minutes for the time constant, percent for
+  /// confidence -- so a migration can be driven straight from what the
+  /// old device already reports, with no unit maths at the call site.
+  void import_model(float heater_f_per_h, float fan_f_per_h, float light_f_per_h, float bias_f_per_h,
+                    float time_constant_min, float confidence_pct);
+
  protected:
   void apply_outputs_(float heater, float fan);
   void learn_(float dt_min, float measured_rate);
@@ -225,6 +234,24 @@ template<typename... Ts> class SetLearningAction : public Action<Ts...> {
   explicit SetLearningAction(TankController *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(bool, value)
   void play(const Ts &...x) override { this->parent_->set_learning_enabled(this->value_.value(x...)); }
+
+ protected:
+  TankController *parent_;
+};
+
+template<typename... Ts> class ImportModelAction : public Action<Ts...> {
+ public:
+  explicit ImportModelAction(TankController *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(float, heater)
+  TEMPLATABLE_VALUE(float, fan)
+  TEMPLATABLE_VALUE(float, light)
+  TEMPLATABLE_VALUE(float, bias)
+  TEMPLATABLE_VALUE(float, tc)
+  TEMPLATABLE_VALUE(float, confidence)
+  void play(const Ts &...x) override {
+    this->parent_->import_model(this->heater_.value(x...), this->fan_.value(x...), this->light_.value(x...),
+                                this->bias_.value(x...), this->tc_.value(x...), this->confidence_.value(x...));
+  }
 
  protected:
   TankController *parent_;

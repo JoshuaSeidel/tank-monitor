@@ -1,0 +1,109 @@
+# One-shot migration of a learned thermal model between boards.
+#
+# The model describes the TANK -- how fast this volume of water gains heat
+# from this heater, loses it to this room, and picks it up from the lights.
+# None of that is a property of the microcontroller, so moving to another
+# board should not mean relearning it over a day while the fish sit in a
+# tank that is being characterised from scratch again.
+#
+# Migration runs over MQTT because that is the transport both boards
+# already share, and because the six numbers involved are ones the old
+# device is publishing anyway -- Learned Heater Power, Learned Fan Power,
+# Learned Light Heat Gain, Model Bias, Tank Time Constant and Model
+# Confidence. Nothing has to be read out of flash.
+#
+# Publish all six to <device>/seed/... retained, and this applies them the
+# moment the last one arrives. Retained means the order does not matter
+# and a reboot mid-migration is harmless.
+#
+# Then delete the retained topics, or the seed re-applies on every boot
+# and overwrites what this board has since learned for itself.
+
+globals:
+  - id: seed_heater
+    type: float
+    initial_value: 'NAN'
+  - id: seed_fan
+    type: float
+    initial_value: 'NAN'
+  - id: seed_light
+    type: float
+    initial_value: 'NAN'
+  - id: seed_bias
+    type: float
+    initial_value: 'NAN'
+  - id: seed_tc
+    type: float
+    initial_value: 'NAN'
+  - id: seed_conf
+    type: float
+    initial_value: 'NAN'
+  # Guards against re-importing on every subsequent message in the burst.
+  - id: seed_done
+    type: bool
+    initial_value: 'false'
+
+script:
+  - id: try_seed
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(seed_done) && !isnan(id(seed_heater)) && !isnan(id(seed_fan)) &&
+                     !isnan(id(seed_light)) && !isnan(id(seed_bias)) &&
+                     !isnan(id(seed_tc)) && !isnan(id(seed_conf));
+          then:
+            - logger.log: "Seed complete - importing thermal model from the previous controller"
+            - tank_controller.import_model:
+                id: controller
+                heater_f_per_h: !lambda "return id(seed_heater);"
+                fan_f_per_h: !lambda "return id(seed_fan);"
+                light_f_per_h: !lambda "return id(seed_light);"
+                bias_f_per_h: !lambda "return id(seed_bias);"
+                time_constant_min: !lambda "return id(seed_tc);"
+                confidence_pct: !lambda "return id(seed_conf);"
+            - lambda: id(seed_done) = true;
+
+sensor:
+  - platform: mqtt_subscribe
+    id: sub_seed_heater
+    topic: ${device_name}/seed/heater_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_heater) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_fan
+    topic: ${device_name}/seed/fan_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_fan) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_light
+    topic: ${device_name}/seed/light_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_light) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_bias
+    topic: ${device_name}/seed/bias_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_bias) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_tc
+    topic: ${device_name}/seed/time_constant_min
+    internal: true
+    on_value:
+      - lambda: id(seed_tc) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_conf
+    topic: ${device_name}/seed/confidence_pct
+    internal: true
+    on_value:
+      - lambda: id(seed_conf) = x;
+      - script.execute: try_seed

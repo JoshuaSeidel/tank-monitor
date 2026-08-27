@@ -31,6 +31,17 @@ ResetLearningAction = tank_controller_ns.class_(
 )
 SetSetpointAction = tank_controller_ns.class_("SetSetpointAction", automation.Action)
 SetLearningAction = tank_controller_ns.class_("SetLearningAction", automation.Action)
+ImportModelAction = tank_controller_ns.class_("ImportModelAction", automation.Action)
+
+# Prefixed to avoid shadowing CONF_HEATER, which this component already
+# uses for its heater output. Redefining it silently broke the component's
+# own schema.
+CONF_IMP_HEATER = "heater_f_per_h"
+CONF_IMP_FAN = "fan_f_per_h"
+CONF_IMP_LIGHT = "light_f_per_h"
+CONF_IMP_BIAS = "bias_f_per_h"
+CONF_IMP_TC = "time_constant_min"
+CONF_IMP_CONF = "confidence_pct"
 
 def _f_to_c(f):
     """Every temperature in this component's config is Fahrenheit.
@@ -147,4 +158,34 @@ async def set_learning_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, paren)
     cg.add(var.set_value(await cg.templatable(config[CONF_LEARNING], args, bool)))
+    return var
+
+
+@automation.register_action(
+    "tank_controller.import_model",
+    ImportModelAction,
+    CONTROLLER_ACTION_SCHEMA.extend(
+        {
+            cv.Required(CONF_IMP_HEATER): cv.templatable(cv.float_),
+            cv.Required(CONF_IMP_FAN): cv.templatable(cv.float_),
+            cv.Required(CONF_IMP_LIGHT): cv.templatable(cv.float_),
+            cv.Required(CONF_IMP_BIAS): cv.templatable(cv.float_),
+            cv.Required(CONF_IMP_TC): cv.templatable(cv.float_),
+            cv.Required(CONF_IMP_CONF): cv.templatable(cv.float_),
+        }
+    ),
+    synchronous=True,
+)
+async def import_model_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, paren)
+    for key, setter in (
+        (CONF_IMP_HEATER, var.set_heater),
+        (CONF_IMP_FAN, var.set_fan),
+        (CONF_IMP_LIGHT, var.set_light),
+        (CONF_IMP_BIAS, var.set_bias),
+        (CONF_IMP_TC, var.set_tc),
+        (CONF_IMP_CONF, var.set_confidence),
+    ):
+        cg.add(setter(await cg.templatable(config[key], args, float)))
     return var

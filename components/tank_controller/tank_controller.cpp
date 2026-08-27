@@ -168,6 +168,45 @@ void TankController::reset_learning() {
   this->save_state_();
 }
 
+void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float light_f_per_h,
+                                 float bias_f_per_h, float time_constant_min, float confidence_pct) {
+  // degF/hour -> degC/minute. 9/5 for the scale, 60 for the time base.
+  const float to_c_min = 1.0f / (60.0f * 9.0f / 5.0f);
+
+  this->model_.theta[0] = heater_f_per_h * to_c_min;
+  this->model_.theta[1] = -fan_f_per_h * to_c_min;
+  this->model_.theta[2] = (time_constant_min > 1.0f) ? -(1.0f / time_constant_min) : THETA_PRIOR[2];
+  this->model_.theta[3] = light_f_per_h * to_c_min;
+  this->model_.theta[4] = bias_f_per_h * to_c_min;
+
+  // Covariance goes back to the prior rather than being inherited. A tight
+  // P would tell RLS the fit is already settled and make it refuse to move
+  // -- but this model was measured on another device, and anything that
+  // differs (a relay with different contact resistance, the probe sitting
+  // somewhere else in the tank) has to be learnable from here. Confident
+  // starting point, still willing to be corrected.
+  for (uint8_t i = 0; i < N_PARAMS; i++)
+    for (uint8_t j = 0; j < N_PARAMS; j++)
+      this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
+
+  // Confidence is what gates the feedforward, so it has to come across or
+  // the imported model would sit unused. Capped at 90%: an inherited fit
+  // has earned most of the trust, not all of it.
+  const float target = (24.0f * 60.0f) / (LEARN_WINDOW_MS / 60000.0f);
+  this->model_.updates = (uint32_t) (clampf(confidence_pct, 0.0f, 90.0f) / 100.0f * target);
+
+  this->clamp_model_();
+  this->integral_ = 0.0f;
+  this->learn_anchor_temp_ = NAN;
+  this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
+  this->acc_n_ = 0;
+  this->save_state_();
+
+  ESP_LOGI(TAG, "Imported model: kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f, confidence %.0f%%",
+           this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
+           this->model_.theta[4], this->get_confidence());
+}
+
 void TankController::clamp_model_() {
   for (uint8_t i = 0; i < N_PARAMS; i++) {
     if (std::isnan(this->model_.theta[i]))
