@@ -99,6 +99,21 @@ button:
       - tank_controller.reset_learning:
           id: controller
 
+# Both relay sensors publish only on a transition, so without this they sit
+# at "unknown" from boot until the first time that relay closes -- which for
+# the fan could be never. Seed them off at startup; slow_pwm's own state at
+# boot is off, so this is the truth, not an assumption.
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: false
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: false
+
 binary_sensor:
   # The relays themselves. Controller State says what the controller is
   # DRIVING this window; these say whether the contacts are closed right
