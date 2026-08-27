@@ -27,7 +27,7 @@ const key = (id) => {
 const E = {
   temp: "sensor-water_temperature",
   target: "number-target_temperature",
-  state: "sensor-controller_state",
+  state: "text_sensor-controller_state",
   heat: "sensor-heater_output",
   fan: "sensor-fan_output",
   swing: "sensor-temperature_swing_1h",
@@ -132,6 +132,11 @@ class TankApp extends HTMLElement {
 
   post(path) { fetch(path, { method: "POST" }); }
 
+  // Domains disagree about how they report a boolean: binary_sensor and
+  // switch send true/false, but light sends the string "ON"/"OFF" -- and
+  // "OFF" is truthy, so a plain !! left the backlight toggle stuck on.
+  static on(v) { return v === true || v === 1 || v === "ON" || v === "on"; }
+
   wire() {
     const nudge = (d) => {
       const v = parseFloat(this.$("target").textContent);
@@ -164,13 +169,13 @@ class TankApp extends HTMLElement {
     const q = (id) => this.$(id);
     const t = this.num(E.temp);
     const sp = this.num(E.target);
-    const fault = this.s[E.fault] && this.s[E.fault].value;
+    const fault = this.s[E.fault] ? this.s[E.fault].value : false;
 
     if (!isNaN(t)) q("temp").textContent = t.toFixed(1);
     if (!isNaN(sp)) q("target").textContent = sp.toFixed(1);
 
     let colour = "#3ECF6E", label = "STEADY";
-    if (fault || isNaN(t)) { colour = "#FF4438"; label = "NO PROBE"; }
+    if (TankApp.on(fault) || isNaN(t)) { colour = "#FF4438"; label = "NO PROBE"; }
     else if (!isNaN(sp)) {
       for (const [off, c, l] of BANDS) { colour = c; label = l; if (t < sp + off) break; }
     }
@@ -193,7 +198,7 @@ class TankApp extends HTMLElement {
     if (!isNaN(f)) { q("fanv").textContent = f.toFixed(0) + "%"; q("fanb").style.width = f + "%"; }
     const relay = (k, el) => {
       const v = this.s[k];
-      if (v) q(el).textContent = "relay " + (v.value ? "on" : "off");
+      if (v) q(el).textContent = "relay " + (TankApp.on(v.value) ? "on" : "off");
     };
     relay(E.heatRelay, "heatr"); relay(E.fanRelay, "fanr");
 
@@ -230,7 +235,7 @@ class TankApp extends HTMLElement {
 
     const on = (k, el) => {
       const v = this.s[k];
-      if (v) q(el).classList.toggle("on", !!v.value);
+      if (v) q(el).classList.toggle("on", TankApp.on(v.value));
     };
     on(E.learn, "sw_learn"); on(E.light, "sw_light");
   }
