@@ -17,6 +17,7 @@ packages:
     ref: main
     files:
       - packages/base.yaml
+      - packages/webui.yaml
       - packages/control.yaml
       - packages/sensors.yaml
       - boards/lafvin-esp32c6.yaml

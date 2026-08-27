@@ -20,6 +20,7 @@ packages:
     ref: main
     files:
       - packages/base.yaml
+      - packages/webui.yaml
       - packages/control.yaml
       - packages/sensors.yaml
       - packages/chemistry.yaml

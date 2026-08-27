@@ -1,0 +1,29 @@
+# The custom web interface.
+#
+# Kept out of base.yaml on purpose: it is the one part of this project that
+# depends on files ESPHome cannot fetch for you. Remote packages pull the
+# YAML listed in `files:` and nothing those files reference, so tank.js and
+# tank.css have to exist in your ESPHome config directory. If they don't,
+# the build fails at config validation -- which is why this is a separate
+# include you can simply drop, rather than a line buried in base.yaml that
+# breaks every build until the copy is done.
+#
+# Put them there once, from the SSH / Terminal add-on:
+#
+#   mkdir -p /config/esphome/www && cd /config/esphome/www
+#   wget -O tank.js  https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.js
+#   wget -O tank.css https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.css
+#
+# Re-run that when either file changes here. Everything else still comes
+# from git on every build.
+#
+# Blanking js_url is what makes this work: ESPHome's page is only
+# `<esp-app></esp-app>` plus one script tag, so with its CDN bundle
+# suppressed, whatever tank.js defines as `esp-app` becomes the entire
+# interface -- served from this device's flash, with no internet and no
+# Home Assistant.
+web_server:
+  js_url: ""
+  css_url: ""
+  js_include: www/tank.js
+  css_include: www/tank.css
