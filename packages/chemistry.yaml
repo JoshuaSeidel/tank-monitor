@@ -98,3 +98,67 @@ sensor:
     on_value:
       - lambda: id(chem_no3) = x;
       - script.execute: chem_stamp_now
+
+  # The subscriptions above are internal; these publish the CACHED values,
+  # which is what the web UI and the panel should both read. Same reason
+  # the display reads globals: after a reboot with the broker down, the
+  # subscription has nothing and the cache still has the last reading.
+  - platform: template
+    name: "Chem pH"
+    accuracy_decimals: 2
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_ph))) return {}; return id(chem_ph);"
+  - platform: template
+    name: "Chem NH3"
+    unit_of_measurement: "mg/L"
+    accuracy_decimals: 3
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_nh3))) return {}; return id(chem_nh3);"
+  - platform: template
+    name: "Chem GH"
+    unit_of_measurement: "ppm"
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_gh))) return {}; return id(chem_gh);"
+  - platform: template
+    name: "Chem KH"
+    unit_of_measurement: "ppm"
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_kh))) return {}; return id(chem_kh);"
+  - platform: template
+    name: "Chem NO2"
+    unit_of_measurement: "ppm"
+    accuracy_decimals: 1
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_no2))) return {}; return id(chem_no2);"
+  - platform: template
+    name: "Chem NO3"
+    unit_of_measurement: "ppm"
+    accuracy_decimals: 0
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: "if (isnan(id(chem_no3))) return {}; return id(chem_no3);"
+
+text_sensor:
+  # How stale the chemistry block is, in words. A panel that cannot say
+  # how old its numbers are is worse than one showing none.
+  - platform: template
+    name: "Chem Age"
+    update_interval: 30s
+    entity_category: diagnostic
+    lambda: |-
+      if (id(chem_stamp) == 0) return {"never"};
+      auto n = id(sntp_time).now();
+      if (!n.is_valid()) return {};
+      const uint32_t age = (uint32_t) n.timestamp - id(chem_stamp);
+      char buf[24];
+      if (age < 3600)        snprintf(buf, sizeof(buf), "%um ago", age / 60);
+      else if (age < 172800) snprintf(buf, sizeof(buf), "%uh ago", age / 3600);
+      else                   snprintf(buf, sizeof(buf), "%ud ago", age / 86400);
+      return {buf};

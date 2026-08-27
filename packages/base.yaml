@@ -93,9 +93,22 @@ ota:
   - platform: esphome
     password: !secret tank_monitor_ota_password
 
+# The built-in page is only `<esp-app></esp-app>` plus one script tag, so
+# blanking js_url suppresses ESPHome's CDN bundle and whatever js_include
+# defines as `esp-app` becomes the whole interface. Everything is served
+# from this device's flash: no CDN, no internet, no Home Assistant.
+#
+# www/tank.js and www/tank.css must sit in the ESPHome config directory
+# alongside secrets.yaml. Remote packages fetch the YAML in `files:`, not
+# assets these reference, so these two are copied rather than pulled --
+# see the README.
 web_server:
   port: 80
   version: 3
+  js_url: ""
+  css_url: ""
+  js_include: www/tank.js
+  css_include: www/tank.css
 
 mqtt:
   broker: !secret mqtt_broker

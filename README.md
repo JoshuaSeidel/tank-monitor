@@ -490,6 +490,35 @@ so the screen silently never appears while everything else runs. `mipi_spi`
 renders in stripes at `buffer_size: 50%`, and makes the controller swap above
 a one-line change.
 
+### Web interface
+
+Every build serves its own UI at the device's IP — no Home Assistant, no
+internet, no CDN. ESPHome's page is only `<esp-app></esp-app>` plus one
+script tag, so blanking `js_url` suppresses its bundle and `www/tank.js`
+becomes the whole interface. State arrives over `/events`; controls POST
+back to the REST endpoints `web_server` already exposes.
+
+**Two files must be copied into your ESPHome config directory**, next to
+`secrets.yaml`:
+
+```
+www/tank.js
+www/tank.css
+```
+
+Remote packages fetch the YAML listed in `files:` — not assets that YAML
+references — so unlike everything else these are copied by hand rather
+than pulled from git. Re-copy them when they change here.
+
+It shows temperature with the same band colours as the panels, the target
+with steppers, heater and fan duty plus live relay state, swing, TDS,
+light, model confidence, and the water chemistry mirrored from Home
+Assistant with its age. Controls: setpoint, adaptive learning, backlight,
+restart, reset learning.
+
+The chemistry card hides itself on boards that don't include
+`packages/chemistry.yaml`, rather than showing six dashes.
+
 ### Secrets
 
 The add-on shares **one** `secrets.yaml` across every device, so anything
