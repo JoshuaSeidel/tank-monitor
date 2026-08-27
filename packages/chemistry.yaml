@@ -1,0 +1,100 @@
+# Water chemistry pulled in from Home Assistant over MQTT.
+#
+# These are values the ESP32 cannot measure: pH and free ammonia come from
+# the Seneye, GH/KH/NO2/NO3 from a test kit typed into HA. They arrive on
+# retained topics, so the broker replays the last known value the moment
+# this device reconnects.
+#
+# Retention alone is not enough, though: if Home Assistant is down then so
+# is its broker, and a device that rebooted in that window would show
+# nothing. So every value is also mirrored into a restore_value global and
+# stamped with the time it arrived. The display reads the globals, never
+# the subscription -- which means the panel always shows the last known
+# reading and, honestly, how old it is.
+#
+# Deliberately NOT in packages/base.yaml: the C6 must not inherit any of
+# this. Include it from a board wrapper that wants it.
+
+globals:
+  - id: chem_ph
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_nh3
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_gh
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_kh
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_no2
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_no3
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  # Epoch seconds of the most recent arrival of ANY of the above. One
+  # stamp, not six: what matters on a small screen is "how stale is this
+  # panel", and the oldest value governs that.
+  - id: chem_stamp
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+
+script:
+  - id: chem_stamp_now
+    then:
+      - lambda: |-
+          auto t = id(sntp_time).now();
+          if (t.is_valid()) id(chem_stamp) = (uint32_t) t.timestamp;
+
+sensor:
+  - platform: mqtt_subscribe
+    id: sub_ph
+    topic: tank-monitor/chem/ph
+    internal: true
+    on_value:
+      - lambda: id(chem_ph) = x;
+      - script.execute: chem_stamp_now
+  - platform: mqtt_subscribe
+    id: sub_nh3
+    topic: tank-monitor/chem/nh3
+    internal: true
+    on_value:
+      - lambda: id(chem_nh3) = x;
+      - script.execute: chem_stamp_now
+  - platform: mqtt_subscribe
+    id: sub_gh
+    topic: tank-monitor/chem/gh
+    internal: true
+    on_value:
+      - lambda: id(chem_gh) = x;
+      - script.execute: chem_stamp_now
+  - platform: mqtt_subscribe
+    id: sub_kh
+    topic: tank-monitor/chem/kh
+    internal: true
+    on_value:
+      - lambda: id(chem_kh) = x;
+      - script.execute: chem_stamp_now
+  - platform: mqtt_subscribe
+    id: sub_no2
+    topic: tank-monitor/chem/no2
+    internal: true
+    on_value:
+      - lambda: id(chem_no2) = x;
+      - script.execute: chem_stamp_now
+  - platform: mqtt_subscribe
+    id: sub_no3
+    topic: tank-monitor/chem/no3
+    internal: true
+    on_value:
+      - lambda: id(chem_no3) = x;
+      - script.execute: chem_stamp_now

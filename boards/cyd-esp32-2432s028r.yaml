@@ -757,7 +757,7 @@ lvgl:
             x: 14
             y: 114
             width: 292
-            height: 64
+            height: 44
             styles: card
             widgets:
               - label:
@@ -768,7 +768,7 @@ lvgl:
               - label:
                   id: w_swing
                   x: 0
-                  y: 18
+                  y: 16
                   text: "--"
                   text_font: font_md
                   text_color: 0xF2F6FC
@@ -780,7 +780,7 @@ lvgl:
               - label:
                   id: w_drift
                   x: 100
-                  y: 18
+                  y: 16
                   text: "--"
                   text_font: font_md
                   text_color: 0xF2F6FC
@@ -792,10 +792,63 @@ lvgl:
               - label:
                   id: w_conf
                   x: 196
-                  y: 18
+                  y: 16
                   text: "--"
                   text_font: font_md
                   text_color: 0xF2F6FC
+
+        # Chemistry the ESP32 cannot measure, mirrored from Home Assistant
+        # over retained MQTT and cached in flash. Shown with its age, so a
+        # stale panel says so instead of quietly lying.
+        - obj:
+            x: 14
+            y: 164
+            width: 292
+            height: 38
+            styles: card
+            widgets:
+              - label:
+                  id: c_ph
+                  x: 0
+                  y: 0
+                  text: "pH --"
+                  text_font: font_sm
+                  text_color: 0xF2F6FC
+              - label:
+                  id: c_nh3
+                  x: 74
+                  y: 0
+                  text: "NH3 --"
+                  text_font: font_sm
+                  text_color: 0xF2F6FC
+              - label:
+                  id: c_gh
+                  x: 158
+                  y: 0
+                  text: "GH --"
+                  text_font: font_sm
+                  text_color: 0xF2F6FC
+              - label:
+                  id: c_kh
+                  x: 222
+                  y: 0
+                  text: "KH --"
+                  text_font: font_sm
+                  text_color: 0xF2F6FC
+              - label:
+                  id: c_no
+                  x: 0
+                  y: 16
+                  text: "NO2 --  NO3 --"
+                  styles: caption
+              - label:
+                  id: c_age
+                  x: 150
+                  y: 16
+                  width: 126
+                  text_align: RIGHT
+                  text: "never"
+                  styles: caption
 
         # ---- page nav ----------------------------------------------
         # Buttons, not swipes. Resistive touch resolves a tap reliably and
@@ -929,3 +982,30 @@ interval:
           if (!isnan(sw)) lv_label_set_text_fmt(id(w_swing), "%.2f F", sw * 9.0f / 5.0f);
           lv_label_set_text_fmt(id(w_drift), "%+.2f F/h", id(controller).get_drift_rate() * 60.0f * 9.0f / 5.0f);
           lv_label_set_text_fmt(id(w_conf), "%.0f%%", id(controller).get_confidence());
+
+          // --- chemistry, from the flash-cached globals (never the live
+          // subscription) so a broker outage shows the last reading and
+          // its age rather than blanking the panel.
+          if (isnan(id(chem_ph)))  lv_label_set_text(id(c_ph),  "pH --");
+          else lv_label_set_text_fmt(id(c_ph),  "pH %.2f", id(chem_ph));
+          if (isnan(id(chem_nh3))) lv_label_set_text(id(c_nh3), "NH3 --");
+          else lv_label_set_text_fmt(id(c_nh3), "NH3 %.3f", id(chem_nh3));
+          if (isnan(id(chem_gh)))  lv_label_set_text(id(c_gh),  "GH --");
+          else lv_label_set_text_fmt(id(c_gh),  "GH %.0f", id(chem_gh));
+          if (isnan(id(chem_kh)))  lv_label_set_text(id(c_kh),  "KH --");
+          else lv_label_set_text_fmt(id(c_kh),  "KH %.0f", id(chem_kh));
+          lv_label_set_text_fmt(id(c_no), "NO2 %.1f  NO3 %.0f",
+                                isnan(id(chem_no2)) ? 0.0f : id(chem_no2),
+                                isnan(id(chem_no3)) ? 0.0f : id(chem_no3));
+
+          if (id(chem_stamp) == 0) {
+            lv_label_set_text(id(c_age), "never");
+          } else {
+            auto nowt = id(sntp_time).now();
+            if (nowt.is_valid()) {
+              const uint32_t age = (uint32_t) nowt.timestamp - id(chem_stamp);
+              if (age < 3600)        lv_label_set_text_fmt(id(c_age), "%um ago", age / 60);
+              else if (age < 172800) lv_label_set_text_fmt(id(c_age), "%uh ago", age / 3600);
+              else                   lv_label_set_text_fmt(id(c_age), "%ud ago", age / 86400);
+            }
+          }
