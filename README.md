@@ -498,24 +498,14 @@ script tag, so blanking `js_url` suppresses its bundle and `www/tank.js`
 becomes the whole interface. State arrives over `/events`; controls POST
 back to the REST endpoints `web_server` already exposes.
 
-**Two files must exist in your ESPHome config directory first.** Remote
-packages fetch the YAML listed in `files:` and nothing that YAML
-references, so these are the one part of the project git cannot deliver.
-From the SSH / Terminal add-on:
+**Nothing to copy.** The script and stylesheet live inside the
+`tank_webui` external component, which git delivers in full — unlike
+`js_include`, which reads from the ESPHome config directory and cannot be
+supplied by a remote package. The component embeds them at build time and
+serves them at `/tank.js` and `/tank.css`, so `js_url` points at the
+device itself.
 
-```sh
-mkdir -p /config/esphome/www && cd /config/esphome/www
-wget -O tank.js  https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.js
-wget -O tank.css https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.css
-```
-
-Re-run that whenever either file changes here.
-
-The web UI lives in its own `packages/webui.yaml`, listed in both board
-wrappers. If those files are absent the build fails at validation with
-`Could not find file` — so if you'd rather not have the custom UI, delete
-that one line from the wrapper and you get ESPHome's stock page instead.
-Nothing else depends on it.
+Push, rebuild, done — same as every other change here.
 
 It shows temperature with the same band colours as the panels, the target
 with steppers, heater and fan duty plus live relay state, swing, TDS,
