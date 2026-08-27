@@ -1,0 +1,9 @@
+substitutions:
+  device_name: tank-monitor-v2
+  friendly_name: Tank Monitor v2
+packages:
+  base: !include packages/base.yaml
+  control: !include packages/control_local.yaml
+  sensors: !include packages/sensors.yaml
+  chem: !include packages/chemistry.yaml
+  board: !include boards/cyd-esp32-2432s028r.yaml

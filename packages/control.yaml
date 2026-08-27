@@ -167,12 +167,74 @@ binary_sensor:
 
 text_sensor:
   - platform: template
+    name: "Seed Status"
+    id: seed_status
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (id(seed_done)) return {"imported"};
+      int n = 0;
+      if (!isnan(id(seed_heater))) n++;
+      if (!isnan(id(seed_fan))) n++;
+      if (!isnan(id(seed_light))) n++;
+      if (!isnan(id(seed_bias))) n++;
+      if (!isnan(id(seed_tc))) n++;
+      if (!isnan(id(seed_conf))) n++;
+      if (n == 0) return {"idle"};
+      char buf[24];
+      snprintf(buf, sizeof(buf), "waiting %d/6", n);
+      return {buf};
+
+  - platform: template
     name: "Controller State"
     icon: "mdi:state-machine"
     update_interval: 30s
     lambda: "return {id(controller).get_state_text()};"
 
 sensor:
+  - platform: mqtt_subscribe
+    id: sub_seed_heater
+    topic: ${device_name}/seed/heater_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_heater) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_fan
+    topic: ${device_name}/seed/fan_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_fan) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_light
+    topic: ${device_name}/seed/light_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_light) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_bias
+    topic: ${device_name}/seed/bias_f_per_h
+    internal: true
+    on_value:
+      - lambda: id(seed_bias) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_tc
+    topic: ${device_name}/seed/time_constant_min
+    internal: true
+    on_value:
+      - lambda: id(seed_tc) = x;
+      - script.execute: try_seed
+  - platform: mqtt_subscribe
+    id: sub_seed_conf
+    topic: ${device_name}/seed/confidence_pct
+    internal: true
+    on_value:
+      - lambda: id(seed_conf) = x;
+      - script.execute: try_seed
+
   # NOTE: there is deliberately no "Target Temperature" sensor here. The
   # number entity above already publishes the setpoint in Fahrenheit and
   # is recorded to InfluxDB like any other entity, so a mirror sensor was
@@ -314,3 +376,63 @@ sensor:
     update_interval: 60s
     entity_category: diagnostic
     lambda: "return id(controller).get_predicted_light_load() * 100.0f;"
+
+
+# --- migrating a learned model between boards -------------------------
+# Lives in this package, which every board loads, rather than an opt-in
+# one. The opt-in version failed twice for the same reason: the board
+# wrapper is the single file NOT pulled from git, so "add a line to your
+# wrapper" is a step that silently does not happen and leaves a device
+# that looks healthy and quietly ignores the seed.
+#
+# Cost of always loading it: six MQTT subscriptions and seven globals.
+# Topics are device-scoped (<device_name>/seed/...), so two boards cannot
+# seed each other, and a board with nothing retained never fires.
+#
+# Publish the six values the OLD board reports to <new>/seed/<key>,
+# retained. Import fires when the last lands. Then clear the retained
+# topics, or it re-seeds every boot over whatever has been learned since.
+globals:
+  - id: seed_heater
+    type: float
+    initial_value: 'NAN'
+  - id: seed_fan
+    type: float
+    initial_value: 'NAN'
+  - id: seed_light
+    type: float
+    initial_value: 'NAN'
+  - id: seed_bias
+    type: float
+    initial_value: 'NAN'
+  - id: seed_tc
+    type: float
+    initial_value: 'NAN'
+  - id: seed_conf
+    type: float
+    initial_value: 'NAN'
+  # Guards against re-importing on every subsequent message in the burst.
+  - id: seed_done
+    type: bool
+    initial_value: 'false'
+
+script:
+  - id: try_seed
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return !id(seed_done) && !isnan(id(seed_heater)) && !isnan(id(seed_fan)) &&
+                     !isnan(id(seed_light)) && !isnan(id(seed_bias)) &&
+                     !isnan(id(seed_tc)) && !isnan(id(seed_conf));
+          then:
+            - logger.log: "Seed complete - importing thermal model from the previous controller"
+            - tank_controller.import_model:
+                id: controller
+                heater_f_per_h: !lambda "return id(seed_heater);"
+                fan_f_per_h: !lambda "return id(seed_fan);"
+                light_f_per_h: !lambda "return id(seed_light);"
+                bias_f_per_h: !lambda "return id(seed_bias);"
+                time_constant_min: !lambda "return id(seed_tc);"
+                confidence_pct: !lambda "return id(seed_conf);"
+            - lambda: id(seed_done) = true;
