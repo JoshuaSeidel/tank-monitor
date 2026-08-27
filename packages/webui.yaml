@@ -1,29 +1,32 @@
-# The custom web interface.
+# The custom web interface, delivered entirely by git.
 #
-# Kept out of base.yaml on purpose: it is the one part of this project that
-# depends on files ESPHome cannot fetch for you. Remote packages pull the
-# YAML listed in `files:` and nothing those files reference, so tank.js and
-# tank.css have to exist in your ESPHome config directory. If they don't,
-# the build fails at config validation -- which is why this is a separate
-# include you can simply drop, rather than a line buried in base.yaml that
-# breaks every build until the copy is done.
+# ESPHome's own `js_include` reads a file from the ESPHome config
+# directory at build time, and remote packages fetch only the YAML listed
+# in `files:` -- so with a git-driven install that file could never arrive,
+# and had to be copied and re-copied by hand. Which defeats the point of
+# pulling from git at all.
 #
-# Put them there once, from the SSH / Terminal add-on:
+# External *components* are fetched from git in full, assets included. So
+# the script and stylesheet live inside components/tank_webui/assets/ and
+# that component serves them over routes on this device. js_url then
+# points at the device itself.
 #
-#   mkdir -p /config/esphome/www && cd /config/esphome/www
-#   wget -O tank.js  https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.js
-#   wget -O tank.css https://raw.githubusercontent.com/JoshuaSeidel/tank-monitor/main/www/tank.css
-#
-# Re-run that when either file changes here. Everything else still comes
-# from git on every build.
-#
-# Blanking js_url is what makes this work: ESPHome's page is only
-# `<esp-app></esp-app>` plus one script tag, so with its CDN bundle
+# Result: nothing to copy, nothing from a CDN, no internet needed, and a
+# push to main updates the UI on the next build like everything else.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [tank_webui]
+    refresh: 0s
+
+tank_webui:
+
+# Blanking the defaults is what hands the page over: ESPHome's index is
+# only `<esp-app></esp-app>` plus one script tag, so with its CDN bundle
 # suppressed, whatever tank.js defines as `esp-app` becomes the entire
-# interface -- served from this device's flash, with no internet and no
-# Home Assistant.
+# interface.
 web_server:
-  js_url: ""
-  css_url: ""
-  js_include: www/tank.js
-  css_include: www/tank.css
+  js_url: "/tank.js"
+  css_url: "/tank.css"
