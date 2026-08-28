@@ -139,11 +139,26 @@ touchscreen:
     interrupt_pin: GPIO36
     update_interval: 50ms
     threshold: 400
-    # No transform. With the display transformed in hardware above, the
-    # panel's raw axes already run the same way as the layout: the tap
-    # logged at raw (616, 3578) normalises to 0.094, 0.920, which against
-    # the calibration below is x=30 y=221 -- inside HOME's box (x 8-74,
-    # y 208-232). Anything added here would move it back off.
+    # swap_xy here too, and for a different reason than the display's.
+    #
+    # Touchscreen::add_raw_touch_position_ swaps the axes BEFORE storing
+    # x_raw/y_raw, so the (616, 3578) reported by the diagnostic was
+    # already swapped -- the digitiser actually read (3578, 616). Reading
+    # that pair as if it were unswapped is what made "no transform" look
+    # right; it is not.
+    #
+    # Worked through with the real algorithm, tapping HOME:
+    #   swap        -> x_raw=616, y_raw=3578
+    #   normalise x -> (616-280)/3580  = 0.094 -> x = 0.094*320 = 30
+    #   normalise y -> (3578-340)/3520 = 0.920 -> y = 0.920*240 = 221
+    # (30, 221) is inside HOME's box: x 8-74, y 208-232.
+    #
+    # Note the calibration pairs are applied AFTER the swap, so x_min/x_max
+    # bound the digitiser's y axis and vice versa. Do not "fix" that.
+    transform:
+      swap_xy: true
+      mirror_x: false
+      mirror_y: false
     # Stock CYD calibration. These now matter: LVGL hit-tests real
     # coordinates against real widgets, where before any press anywhere
     # just toggled the backlight.
@@ -233,18 +248,32 @@ display:
     spi_id: display_bus
     # Landscape is done HERE, in the panel's own MADCTL, not in LVGL.
     #
-    # LVGL's rotation: 90 rotates the layer it composites and leaves the
-    # display reporting its native 240x320. The touchscreen takes its
-    # dimensions from the display, so touch came back in portrait while
-    # every widget was laid out in landscape: a tap on HOME reported
-    # x=217 y=294, and a y of 294 does not exist on a 240-tall canvas.
-    # No mirror_/swap_ combination can fix that -- those flip and swap
-    # axes, they do not rescale 240 into 320.
+    # LVGL's rotation: 90 leaves the display reporting its native 240x320
+    # and rotates in software -- mipi_spi does not advertise hardware
+    # rotation, so LVGL cannot delegate it (only it8951 and epaper_spi do).
+    # The touchscreen takes its dimensions from the display, so touch came
+    # back in portrait while every widget was laid out in landscape: a tap
+    # on HOME reported x=217 y=294, and a y of 294 cannot exist on a
+    # 240-tall canvas. No mirror_/swap_ setting fixes that -- they flip and
+    # swap axes, they do not rescale 240 into 320 -- and the clamp in
+    # Touchscreen::normalize_ rules out stretching it via calibration.
     #
-    # A hardware transform changes the panel's own scan order, so the
-    # display reports 320x240, the touchscreen inherits 320x240, and the
-    # two agree with no correction on either side. It is also free: the
-    # controller does it, not the CPU.
+    # swap_xy ALONE. This is MADCTL MV, the standard ILI9341 landscape
+    # value. The three settings here replace the model's defaults outright
+    # rather than adding to them (get_base_transform takes config over
+    # defaults), and this driver defaults to mirror_x=True for portrait --
+    # so writing swap_xy + mirror_x yields MV|MX, which is a transpose
+    # plus a mirror. That is a reflection, not a rotation, and it renders
+    # the UI unusable. The ILI9341 set is: MX portrait, MV landscape,
+    # MY portrait-180, MX|MY|MV landscape-180.
+    #
+    # MV keeps the same physical orientation the LVGL-rotated build had:
+    # HOME's centre lands at physical column 220, row 41, which is where
+    # the measured tap (raw 3578, 616) fell. The 180 variant would put it
+    # in the opposite corner.
+    #
+    # Rotating here is also free -- the display controller does it, not
+    # the CPU, on a board with no PSRAM.
     # Declaring a transform means declaring dimensions too. These are the
     # size AFTER the swap, not the panel's native 240x320: ESPHome swaps
     # the model's native geometry when swap_xy is set and then checks the
@@ -255,7 +284,7 @@ display:
       height: 240
     transform:
       swap_xy: true
-      mirror_x: true
+      mirror_x: false
       mirror_y: false
     # Same reasoning as the C6 board: a full redraw is expensive and water
     # temperature does not move in a second.
