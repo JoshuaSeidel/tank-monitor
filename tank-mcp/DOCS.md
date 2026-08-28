@@ -27,6 +27,11 @@ The app talks to Home Assistant through the Supervisor proxy, so there is no
 long-lived access token to create. It picks up the Mosquitto broker the same
 way.
 
+**Port.** The container listens on 8099, which is also what the ha-mcp App
+uses. If Supervisor refuses to start it with *port 8099 is already in use*,
+remap the host side under the app's Network settings — 8091 works. The
+container port stays 8099; only the host port moves.
+
 ## Options
 
 | Option | Default | What it does |
@@ -40,14 +45,14 @@ way.
 
 ## Connecting a client
 
-The endpoint is streamable HTTP at `http://<home-assistant-ip>:8099/mcp`,
+The endpoint is streamable HTTP at `http://<home-assistant-ip>:<host-port>/mcp`,
 with `Authorization: Bearer <api_token>`.
 
 Claude Code:
 
 ```bash
 claude mcp add --transport http tank \
-  http://192.168.6.4:8099/mcp \
+  http://192.168.6.4:8091/mcp \
   --header "Authorization: Bearer <api_token>"
 ```
 

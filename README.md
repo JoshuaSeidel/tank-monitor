@@ -656,6 +656,32 @@ certificate files, so it serves plaintext; TLS fails with
 Grafana lives in [`grafana/`](grafana/) — an importable dashboard plus
 datasource setup. See [grafana/README.md](grafana/README.md).
 
+## Asking the tank questions (Tank MCP)
+
+[`tank-mcp/`](tank-mcp/) is a Home Assistant App that serves an **MCP server**
+for this tank: an AI assistant gets tools for the controller, the Seneye,
+manual test entry, and a record of fish and shrimp lost — plus the ability to
+say any of it out loud on an Echo.
+
+It is deliberately not a general Home Assistant bridge. Every tool answers a
+tank question and answers it with a verdict attached, using thresholds set for
+*this* stock (73.4 °F cold floor for the loaches, 0.02 mg/L free ammonia,
+GH/KH read live from the target helpers rather than hard-coded).
+
+Install it by adding this repository under **Settings → Apps → Store → ⋮ →
+Repositories**. Full documentation, tool list, and the Alexa routine setup are
+in [tank-mcp/DOCS.md](tank-mcp/DOCS.md).
+
+Two things it adds on the Home Assistant side:
+
+- An **Aquarium Livestock** device, published over MQTT discovery — total
+  alive, losses over 7 and 30 days, days since the last one, with the
+  per-species breakdown as attributes.
+- `script.aquarium_speak_status`, which builds the spoken report from Home
+  Assistant state alone. That is the ask-out-loud path: Alexa cannot call MCP,
+  so exposing this script to Alexa and pointing a routine at it is what makes
+  "Alexa, tank report" work.
+
 ## Home Assistant entities
 
 Under one `Tank Monitor` device:

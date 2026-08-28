@@ -29,10 +29,14 @@ DEVICE = {
 }
 
 # (object_id, name, value_template, unit, device_class, icon)
+#
+# Names are relative to the device: Home Assistant prefixes the device
+# name onto each one, so "Total" here becomes
+# sensor.aquarium_livestock_total, not ..._livestock_total.
 SENSORS: list[tuple[str, str, str, str | None, str | None, str]] = [
     (
         "livestock_total",
-        "Livestock Total",
+        "Total",
         "{{ value_json.total_alive }}",
         "animals",
         None,
@@ -40,7 +44,7 @@ SENSORS: list[tuple[str, str, str, str | None, str | None, str]] = [
     ),
     (
         "livestock_losses_7d",
-        "Livestock Losses 7d",
+        "Losses 7d",
         "{{ value_json.losses_7d }}",
         "animals",
         None,
@@ -48,7 +52,7 @@ SENSORS: list[tuple[str, str, str, str | None, str | None, str]] = [
     ),
     (
         "livestock_losses_30d",
-        "Livestock Losses 30d",
+        "Losses 30d",
         "{{ value_json.losses_30d }}",
         "animals",
         None,
@@ -56,7 +60,7 @@ SENSORS: list[tuple[str, str, str, str | None, str | None, str]] = [
     ),
     (
         "livestock_last_loss",
-        "Livestock Last Loss",
+        "Last Loss",
         "{{ value_json.last_loss_on if value_json.last_loss_on else 'unknown' }}",
         None,
         "date",
@@ -64,7 +68,7 @@ SENSORS: list[tuple[str, str, str, str | None, str | None, str]] = [
     ),
     (
         "livestock_days_since_loss",
-        "Livestock Days Since Loss",
+        "Days Since Loss",
         "{{ value_json.days_since_loss if value_json.days_since_loss is not none else 'unknown' }}",
         "d",
         None,
@@ -114,7 +118,6 @@ class LivestockPublisher:
             payload: dict[str, Any] = {
                 "name": name,
                 "unique_id": f"{DEVICE_ID}_{object_id}",
-                "object_id": f"aquarium_{object_id}",
                 "state_topic": STATE_TOPIC,
                 "value_template": template,
                 "json_attributes_topic": STATE_TOPIC,
