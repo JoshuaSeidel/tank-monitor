@@ -194,42 +194,42 @@ text_sensor:
 sensor:
   - platform: mqtt_subscribe
     id: sub_seed_heater
-    topic: ${device_name}/seed/heater_f_per_h
+    topic: tank-seed/${device_name}/heater_f_per_h
     internal: true
     on_value:
       - lambda: id(seed_heater) = x;
       - script.execute: try_seed
   - platform: mqtt_subscribe
     id: sub_seed_fan
-    topic: ${device_name}/seed/fan_f_per_h
+    topic: tank-seed/${device_name}/fan_f_per_h
     internal: true
     on_value:
       - lambda: id(seed_fan) = x;
       - script.execute: try_seed
   - platform: mqtt_subscribe
     id: sub_seed_light
-    topic: ${device_name}/seed/light_f_per_h
+    topic: tank-seed/${device_name}/light_f_per_h
     internal: true
     on_value:
       - lambda: id(seed_light) = x;
       - script.execute: try_seed
   - platform: mqtt_subscribe
     id: sub_seed_bias
-    topic: ${device_name}/seed/bias_f_per_h
+    topic: tank-seed/${device_name}/bias_f_per_h
     internal: true
     on_value:
       - lambda: id(seed_bias) = x;
       - script.execute: try_seed
   - platform: mqtt_subscribe
     id: sub_seed_tc
-    topic: ${device_name}/seed/time_constant_min
+    topic: tank-seed/${device_name}/time_constant_min
     internal: true
     on_value:
       - lambda: id(seed_tc) = x;
       - script.execute: try_seed
   - platform: mqtt_subscribe
     id: sub_seed_conf
-    topic: ${device_name}/seed/confidence_pct
+    topic: tank-seed/${device_name}/confidence_pct
     internal: true
     on_value:
       - lambda: id(seed_conf) = x;
@@ -386,12 +386,21 @@ sensor:
 # that looks healthy and quietly ignores the seed.
 #
 # Cost of always loading it: six MQTT subscriptions and seven globals.
-# Topics are device-scoped (<device_name>/seed/...), so two boards cannot
-# seed each other, and a board with nothing retained never fires.
+# Topics are device-scoped (tank-seed/<device_name>/...), so two boards
+# cannot seed each other, and a board with nothing retained never fires.
 #
-# Publish the six values the OLD board reports to <new>/seed/<key>,
-# retained. Import fires when the last lands. Then clear the retained
-# topics, or it re-seeds every boot over whatever has been learned since.
+# The topics deliberately sit OUTSIDE the device's own mqtt topic_prefix.
+# The first version scoped them as <device_name>/seed/..., i.e. under the
+# prefix, and the device silently received nothing on them while happily
+# receiving tank-monitor/chem/... on the same connection -- same broker,
+# same client, subscriptions compiled in and verified in main.cpp. The
+# only variable that changed the outcome was whether the topic sat under
+# topic_prefix. Do not "tidy" these back under the prefix.
+#
+# Publish the six values the OLD board reports to
+# tank-seed/<new_device_name>/<key>, retained. Import fires when the last
+# one lands. Then clear the retained topics, or it re-seeds every boot
+# over whatever has been learned since.
 globals:
   - id: seed_heater
     type: float
