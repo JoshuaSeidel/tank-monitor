@@ -198,12 +198,27 @@ there is no spare, which is why the assignments below are not negotiable.
 
 | Connector | Pin | Goes to |
 |---|---|---|
-| Expand Input | IO35 | TDS `A` |
-| Expand Input | IO22 | DS18B20 yellow (DQ) |
-| Expand Input | IO27 | Relay Ch1 `IN+` (heater) |
-| Speaker header | IO26 | Relay Ch2 `IN+` (fan) |
-| UART header | IO1 | BH1750 `SDA` |
-| UART header | IO3 | BH1750 `SCL` |
+| 3-pin (`3.3V`/`IO35`/`GND`) | IO35 | TDS `A` |
+| SPI header | IO27 (CS) | Relay Ch1 `IN+` (heater) |
+| SPI header | IO18 (SCK) | Relay Ch2 `IN+` (fan) |
+| SPI header | IO19 (MISO) | DS18B20 yellow (DQ) |
+| UART header | IO1 (TXD) | BH1750 `SDA` |
+| UART header | IO3 (RXD) | BH1750 `SCL` |
+
+IO23 on the SPI header is left spare.
+
+**IO18, IO19 and IO23 are the microSD bus.** Nothing in this build uses the
+card, so they are free GPIO — which is what makes the wiring fit without
+touching the speaker header. Don't fit an SD card while these are in use.
+
+**Power the BH1750 from the 3-pin header's `3.3V`, not the UART header's
+`5V`.** The GY-302 pulls SDA and SCL up to its own VCC, and the ESP32's pins
+are not 5V tolerant, so a 5V-powered sensor would drive 5V into IO1/IO3.
+Splice its VCC with the TDS module's onto the 3.3V pin.
+
+Board revisions differ. If your silkscreen doesn't match the table, meter
+each connector before wiring — an earlier version of this build used IO22 and
+the speaker header, neither of which is usable on the revision above.
 
 Leave BH1750 `ADDR` unconnected — floating is address 0x23, which is what the
 config expects.
@@ -222,15 +237,14 @@ Same as the C6 build: between the **DQ line and 3V3**, at the board end of the
 run, not out at the probe. Sleeve both legs. Without it the DS18B20 reads
 nothing or garbage.
 
-## 4. Relay power — this board has no 5 V output
+## 4. Relay power
 
-Nothing on the CYD brings 5 V out to a connector, so the D-1584TL needs its own
-5 V supply. Its inputs are optocoupled, which is what makes this fine: run the
-separate supply to the module, and **tie its ground to the board's ground** so
-the control signals share a reference.
+The D-1584TL's inputs are optocoupled and draw very little current. IO27 and
+IO18 go to `IN+` on channels 1 and 2; `IN−` on both channels goes to the
+board's ground, so the control signals share a reference.
 
-IO27 and IO26 go to `IN+` on channels 1 and 2. `IN−` on both channels goes to
-the shared ground.
+The UART header brings out **5V** if the module needs a supply rather than
+just a control signal.
 
 Do not open the relay module or touch its mains side. It has its own cord.
 
@@ -238,17 +252,15 @@ Do not open the relay module or touch its mains side. It has its own cord.
 next to a mains cable picks up 60 Hz hum, and you will chase a noisy reading
 that is not a sensor fault.
 
-## 5. Verify the fan line before you rely on it
+## 5. Don't use the speaker header
 
-IO26 is shared with the on-board speaker amplifier. Meter the speaker header
-with the board off and confirm the pin connects **directly** to IO26 on the
-ESP32, not to the amplifier's output. If it is post-amp it cannot drive a relay
-input, and the fan has to move to **IO2 on the SPI header** instead — IO2 is a
-strapping pin, so it then needs a pulldown to stay low at boot, and
-`boards/cyd-esp32-2432s028r.yaml` has to change to match.
+On this board revision IO26 reaches the speaker connector through the audio
+amplifier, so it cannot drive a relay input — and feeding an amplifier output
+into a relay can damage the amp. With three free GPIOs on the SPI header there
+is no reason to go near it.
 
-A fan line that silently does nothing looks exactly like a controller that
-never calls for cooling, so confirm this now rather than during a heat spike.
+If you are on a revision that does bring IO26 out directly, it still isn't
+needed. Leave the speaker connector alone.
 
 ## 6. First USB flash: unplug the BH1750
 

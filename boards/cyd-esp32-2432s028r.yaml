@@ -6,23 +6,44 @@
 # Pin budget
 # ---------------------------------------------------------------
 # Almost every GPIO on this board is spoken for internally: 12-15 display,
-# 25/32/33/36/39 touch, 5/18/19/23 microSD, 4/16/17 RGB LED, 21 backlight,
-# 26 speaker, 34 onboard LDR. What is left on the JST connectors is IO22,
-# IO27 and IO35 ("Expand Input"), IO26 (speaker) and IO1/IO3 (UART).
-# Every wire below lands on a connector -- no soldering to pads.
+# 25/32/33/36/39 touch, 4/16/17 RGB LED, 21 backlight, 26 speaker,
+# 34 onboard LDR. The connectors on this revision expose:
 #
-#   TDS analog   IO35   Expand Input.  Input-only, ADC1. ADC2 is unusable
+#   3.3V / IO35 / GND          3-pin header
+#   IO23 IO19 IO18 IO27        4-pin header silkscreened SPI
+#   RXD(IO3) TXD(IO1) GND 5V   4-pin header silkscreened UART
+#   speaker (2-pin), BAT (2-pin)
+#
+# IO18/19/23 are the microSD bus. Nothing here uses the card, so they are
+# free GPIO -- which is what makes this build fit without the speaker
+# header. Every wire lands on a connector; nothing solders to the board.
+#
+#   TDS analog   IO35   3-pin header. Input-only, ADC1. ADC2 is unusable
 #                       while Wi-Fi is on, so 32-39 is the only choice and
-#                       35 is the only free one.
-#   DS18B20      IO22   Expand Input.  4.7k pull-up to 3V3.
-#   Heater relay IO27   Expand Input.
-#   Fan relay    IO26   Speaker header.
-#   BH1750 SDA   IO1    UART header (TX).
-#   BH1750 SCL   IO3    UART header (RX).
+#                       35 is the only free one. Not negotiable.
+#   Heater relay IO27   SPI header (CS).
+#   Fan relay    IO18   SPI header (SCK).
+#   DS18B20      IO19   SPI header (MISO). 4.7k pull-up to 3V3.
+#   BH1750 SDA   IO1    UART header (TXD).
+#   BH1750 SCL   IO3    UART header (RXD).
 #
-# The relay module needs its own 5V supply -- nothing on this board brings
-# 5V out to a connector. The CZH-Labs D-1584TL inputs are optocoupled, so
-# a separate supply sharing ground with the board is the intended wiring.
+# IO23 is left spare.
+#
+# NOT IO22: it is not broken out on this board revision. An earlier version
+# of this file put the DS18B20 there, which cannot work here.
+#
+# NOT the speaker header: IO26 reaches it through the audio amplifier on
+# this revision, so it cannot drive a relay input. With three GPIOs free on
+# the SPI header there is no reason to try.
+#
+# POWER THE BH1750 FROM THE 3.3V PIN, NOT THE UART HEADER'S 5V. The GY-302
+# pulls SDA and SCL up to its own VCC, and the ESP32's GPIOs are not 5V
+# tolerant -- 5V there would drive 5V into IO1/IO3. Splice the sensor's VCC
+# with the TDS module's onto the 3.3V pin.
+#
+# The D-1584TL's inputs are optocoupled and draw little current, so its
+# grounds tie to the board's ground. 5V is available on the UART header if
+# the module needs it.
 #
 # TWO CONSEQUENCES OF PUTTING I2C ON THE UART PINS, both real:
 #   1. Serial logging is off (baud_rate: 0 below). This device is OTA-only,
@@ -86,7 +107,9 @@ i2c:
 
 one_wire:
   - platform: gpio
-    pin: GPIO22
+    # SPI header, silkscreened MISO. A microSD data line, free because
+    # nothing here uses the card. Needs the 4.7k pull-up to 3V3.
+    pin: GPIO19
 
 # Time-proportional heater/fan drive -- see boards/lafvin-esp32c6.yaml for
 # why the window is 900s rather than 300s (mechanical relay wear).
@@ -103,12 +126,10 @@ output:
 
   - platform: slow_pwm
     id: fan_output
-    # Speaker header. Confirm with a meter that this connector taps IO26
-    # directly and not the output side of the audio amplifier -- if it is
-    # post-amp it cannot drive a relay input and the fan has to move to
-    # IO2 on the SPI header instead (a strapping pin, so it would need a
-    # pulldown to stay low at boot).
-    pin: GPIO26
+    # SPI header, silkscreened SCK. Another free microSD line. This used to
+    # be IO26 on the speaker header, which reaches the pin through the audio
+    # amplifier on this board revision and cannot drive a relay input.
+    pin: GPIO18
     period: 900s
     restart_cycle_on_state_change: false
     state_change_action:
