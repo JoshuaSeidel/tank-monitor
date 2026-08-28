@@ -161,14 +161,30 @@ touchscreen:
       x_max: 3860
       y_min: 340
       y_max: 3860
-    # Temporary, and worth keeping until touch is confirmed accurate:
-    # logs where the driver thinks each press landed. Tap the four nav
+    # Reports where the driver thinks each press landed. Tap the nav
     # buttons and compare against their coordinates -- HOME is x 8-74,
     # SET 80-146, WATER 152-218, all at y 208-232.
+    #
+    # This publishes to an entity rather than logging. The previous
+    # version used logger.log, which defaults to DEBUG while this board
+    # runs the logger at INFO, so it printed nothing and the calibration
+    # question stayed open for as long as the diagnostic looked present.
+    # An entity can be read over HTTP with no log stream and no guessing
+    # about levels.
     on_touch:
-      - logger.log:
-          format: "touch: x=%d y=%d (raw x=%d y=%d)"
-          args: [touch.x, touch.y, touch.x_raw, touch.y_raw]
+      - text_sensor.template.publish:
+          id: last_touch
+          state: !lambda |-
+            char b[56];
+            snprintf(b, sizeof(b), "x=%d y=%d (raw %d,%d)",
+                     touch.x, touch.y, touch.x_raw, touch.y_raw);
+            return {b};
+
+text_sensor:
+  - platform: template
+    name: "Last Touch"
+    id: last_touch
+    entity_category: diagnostic
 
 sensor:
   # TDS meter analog output -> GPIO35 (ADC1, input-only)
