@@ -1,0 +1,39 @@
+name: Tank MCP
+version: "1.0.0"
+slug: tank_mcp
+description: >-
+  MCP server for the aquarium: live controller state, Seneye readings,
+  manual water-test entry, a livestock and losses ledger, and Alexa
+  announcements.
+url: https://github.com/JoshuaSeidel/tank-monitor/tree/main/tank-mcp
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: application
+boot: auto
+# Deliberately not ingress: MCP clients need a stable, directly reachable
+# URL and send their own Authorization header. Ingress rewrites both.
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: MCP streamable-HTTP endpoint, served at /mcp
+homeassistant_api: true
+hassio_api: true
+hassio_role: default
+services:
+  - mqtt:want
+options:
+  api_token: ""
+  device: tank_monitor
+  seneye_prefix: seneye_spec_16
+  default_echo: media_player.office
+  publish_livestock_to_mqtt: true
+  log_level: info
+schema:
+  api_token: password?
+  device: list(tank_monitor|tank_monitor_v2)
+  seneye_prefix: str
+  default_echo: str
+  publish_livestock_to_mqtt: bool
+  log_level: list(debug|info|warning|error)

@@ -228,6 +228,15 @@ font:
     size: 44
     # '+' for the setpoint button; '-' already covers its partner.
     glyphs: "0123456789.-+"
+  # The Water & Model cards carry a caption and a sub-line as well as the
+  # number, which font_xl (52px line box) cannot fit in a card that also
+  # has to leave room for two more rows below it. font_xl stays as it is
+  # for the home page, where the temperature is the headline and owns the
+  # card on its own.
+  - file: "gfonts://Roboto@700"
+    id: font_lg
+    size: 27
+    glyphs: "0123456789.-"
   - file: "gfonts://Roboto@700"
     id: font_md
     size: 18
@@ -815,10 +824,12 @@ lvgl:
 
         - obj:
             x: 14
-            y: 30
+            y: 28
             width: 142
             height: 76
             styles: card
+            pad_all: 5
+            scrollable: false
             widgets:
               - label:
                   x: 0
@@ -828,23 +839,25 @@ lvgl:
               - label:
                   id: w_tds
                   x: 0
-                  y: 18
+                  y: 15
                   text: "--"
-                  text_font: font_xl
+                  text_font: font_lg
                   text_color: 0xF2F6FC
               - label:
                   id: w_ec
                   x: 0
-                  y: 60
+                  y: 48
                   text: "-- uS/cm"
                   styles: caption
 
         - obj:
             x: 164
-            y: 30
+            y: 28
             width: 142
             height: 76
             styles: card
+            pad_all: 5
+            scrollable: false
             widgets:
               - label:
                   x: 0
@@ -854,23 +867,25 @@ lvgl:
               - label:
                   id: w_lux
                   x: 0
-                  y: 18
+                  y: 15
                   text: "--"
-                  text_font: font_xl
+                  text_font: font_lg
                   text_color: 0xF2F6FC
               - label:
                   id: w_lux_state
                   x: 0
-                  y: 60
+                  y: 48
                   text: "--"
                   styles: caption
 
         - obj:
             x: 14
-            y: 114
+            y: 108
             width: 292
-            height: 44
+            height: 48
             styles: card
+            pad_all: 4
+            scrollable: false
             widgets:
               - label:
                   x: 0
@@ -914,10 +929,12 @@ lvgl:
         # stale panel says so instead of quietly lying.
         - obj:
             x: 14
-            y: 164
+            y: 160
             width: 292
-            height: 38
+            height: 44
             styles: card
+            pad_all: 5
+            scrollable: false
             widgets:
               - label:
                   id: c_ph
