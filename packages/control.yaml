@@ -171,19 +171,44 @@ text_sensor:
     id: seed_status
     entity_category: diagnostic
     update_interval: 30s
+    # The "s3" is a build marker. Twice now a migration has failed in a way
+    # that looked identical whether the firmware was current or stale, and
+    # there was no way to tell them apart from the outside. Bump it with any
+    # change to this block; if the device does not report the marker you
+    # expect, the build is old and nothing below is worth debugging.
     lambda: |-
-      if (id(seed_done)) return {"imported"};
-      int n = 0;
-      if (!isnan(id(seed_heater))) n++;
-      if (!isnan(id(seed_fan))) n++;
-      if (!isnan(id(seed_light))) n++;
-      if (!isnan(id(seed_bias))) n++;
-      if (!isnan(id(seed_tc))) n++;
-      if (!isnan(id(seed_conf))) n++;
-      if (n == 0) return {"idle"};
-      char buf[24];
-      snprintf(buf, sizeof(buf), "waiting %d/6", n);
-      return {buf};
+      if (id(seed_done)) return {"imported (s3)"};
+      if (id(seed_payload).state.empty()) return {"idle (s3)"};
+      if (!id(seed_parsed)) return {"bad payload (s3)"};
+      return {"parsed, not imported (s3)"};
+
+  # One topic, one subscription, one atomic payload -- six separate topics
+  # meant six chances to half-arrive, and the "waiting n/6" state existed
+  # only to describe that failure mode. CSV rather than JSON so the parse is
+  # a single sscanf with no allocator.
+  #
+  # This is a NON-internal text_sensor on purpose: it publishes whatever
+  # arrived, verbatim. If a seed goes missing again, the question "did the
+  # device receive anything at all" is answered by looking, not inferring.
+  - platform: mqtt_subscribe
+    name: "Seed Payload"
+    id: seed_payload
+    topic: tank-seed/${device_name}/model
+    entity_category: diagnostic
+    on_value:
+      - lambda: |-
+          float v[6];
+          id(seed_parsed) = (sscanf(x.c_str(), "%f,%f,%f,%f,%f,%f",
+                                    &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6);
+          if (id(seed_parsed)) {
+            id(seed_heater) = v[0];
+            id(seed_fan)    = v[1];
+            id(seed_light)  = v[2];
+            id(seed_bias)   = v[3];
+            id(seed_tc)     = v[4];
+            id(seed_conf)   = v[5];
+          }
+      - script.execute: try_seed
 
   - platform: template
     name: "Controller State"
@@ -192,49 +217,6 @@ text_sensor:
     lambda: "return {id(controller).get_state_text()};"
 
 sensor:
-  - platform: mqtt_subscribe
-    id: sub_seed_heater
-    topic: tank-seed/${device_name}/heater_f_per_h
-    internal: true
-    on_value:
-      - lambda: id(seed_heater) = x;
-      - script.execute: try_seed
-  - platform: mqtt_subscribe
-    id: sub_seed_fan
-    topic: tank-seed/${device_name}/fan_f_per_h
-    internal: true
-    on_value:
-      - lambda: id(seed_fan) = x;
-      - script.execute: try_seed
-  - platform: mqtt_subscribe
-    id: sub_seed_light
-    topic: tank-seed/${device_name}/light_f_per_h
-    internal: true
-    on_value:
-      - lambda: id(seed_light) = x;
-      - script.execute: try_seed
-  - platform: mqtt_subscribe
-    id: sub_seed_bias
-    topic: tank-seed/${device_name}/bias_f_per_h
-    internal: true
-    on_value:
-      - lambda: id(seed_bias) = x;
-      - script.execute: try_seed
-  - platform: mqtt_subscribe
-    id: sub_seed_tc
-    topic: tank-seed/${device_name}/time_constant_min
-    internal: true
-    on_value:
-      - lambda: id(seed_tc) = x;
-      - script.execute: try_seed
-  - platform: mqtt_subscribe
-    id: sub_seed_conf
-    topic: tank-seed/${device_name}/confidence_pct
-    internal: true
-    on_value:
-      - lambda: id(seed_conf) = x;
-      - script.execute: try_seed
-
   # NOTE: there is deliberately no "Target Temperature" sensor here. The
   # number entity above already publishes the setpoint in Fahrenheit and
   # is recorded to InfluxDB like any other entity, so a mirror sensor was
@@ -385,22 +367,25 @@ sensor:
 # wrapper" is a step that silently does not happen and leaves a device
 # that looks healthy and quietly ignores the seed.
 #
-# Cost of always loading it: six MQTT subscriptions and seven globals.
-# Topics are device-scoped (tank-seed/<device_name>/...), so two boards
-# cannot seed each other, and a board with nothing retained never fires.
+# Cost of always loading it: one MQTT subscription and eight globals.
+# The topic is device-scoped (tank-seed/<device_name>/model), so two
+# boards cannot seed each other, and a board with nothing retained never
+# fires.
 #
-# The topics deliberately sit OUTSIDE the device's own mqtt topic_prefix.
-# The first version scoped them as <device_name>/seed/..., i.e. under the
-# prefix, and the device silently received nothing on them while happily
-# receiving tank-monitor/chem/... on the same connection -- same broker,
-# same client, subscriptions compiled in and verified in main.cpp. The
-# only variable that changed the outcome was whether the topic sat under
-# topic_prefix. Do not "tidy" these back under the prefix.
+# The topic deliberately sits OUTSIDE the device's own mqtt topic_prefix.
+# An earlier version scoped it as <device_name>/seed/..., i.e. under the
+# prefix, and the device silently received nothing there while happily
+# receiving tank-monitor/chem/... on the same connection. Moving it out
+# did not on its own fix the migration, so the prefix is not proven to be
+# the cause -- but every topic known to work in this project sits outside
+# the prefix, and there is no reason to put this one back inside.
 #
-# Publish the six values the OLD board reports to
-# tank-seed/<new_device_name>/<key>, retained. Import fires when the last
-# one lands. Then clear the retained topics, or it re-seeds every boot
-# over whatever has been learned since.
+# Publish ONE retained CSV payload to tank-seed/<new_device_name>/model:
+#
+#   heater_f_per_h,fan_f_per_h,light_f_per_h,bias_f_per_h,tc_min,confidence
+#
+# Import fires the moment it parses. Then clear the retained topic, or it
+# re-seeds on every boot over whatever has been learned since.
 globals:
   - id: seed_heater
     type: float
@@ -420,6 +405,9 @@ globals:
   - id: seed_conf
     type: float
     initial_value: 'NAN'
+  - id: seed_parsed
+    type: bool
+    initial_value: 'false'
   # Guards against re-importing on every subsequent message in the burst.
   - id: seed_done
     type: bool
@@ -431,9 +419,7 @@ script:
       - if:
           condition:
             lambda: |-
-              return !id(seed_done) && !isnan(id(seed_heater)) && !isnan(id(seed_fan)) &&
-                     !isnan(id(seed_light)) && !isnan(id(seed_bias)) &&
-                     !isnan(id(seed_tc)) && !isnan(id(seed_conf));
+              return !id(seed_done) && id(seed_parsed);
           then:
             - logger.log: "Seed complete - importing thermal model from the previous controller"
             - tank_controller.import_model:
