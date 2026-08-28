@@ -139,20 +139,11 @@ touchscreen:
     interrupt_pin: GPIO36
     update_interval: 50ms
     threshold: 400
-    # The panel is rotated 90 in the LVGL block, and rotation there
-    # composites the drawn layer -- it does not tell the touch controller
-    # anything. So the digitiser still reports in its native 240x320
-    # portrait frame while LVGL lays out 320x240 landscape, and every
-    # press lands somewhere other than the widget under your finger.
-    #
-    # swap_xy fixes the axes; mirror_x fixes the handedness that swapping
-    # introduces. If presses land mirrored along one axis, flip the
-    # corresponding mirror_ below -- see the calibration note in the
-    # README.
-    transform:
-      swap_xy: true
-      mirror_x: true
-      mirror_y: false
+    # No transform. With the display transformed in hardware above, the
+    # panel's raw axes already run the same way as the layout: the tap
+    # logged at raw (616, 3578) normalises to 0.094, 0.920, which against
+    # the calibration below is x=30 y=221 -- inside HOME's box (x 8-74,
+    # y 208-232). Anything added here would move it back off.
     # Stock CYD calibration. These now matter: LVGL hit-tests real
     # coordinates against real widgets, where before any press anywhere
     # just toggled the backlight.
@@ -240,8 +231,32 @@ display:
     # wrong. That one-line swap is the other reason to be on mipi_spi.
     model: ESP32-2432S028
     spi_id: display_bus
-    # Rotation lives in the LVGL block now -- LVGL rejects it here,
-    # because it rotates the layer it composites rather than the panel.
+    # Landscape is done HERE, in the panel's own MADCTL, not in LVGL.
+    #
+    # LVGL's rotation: 90 rotates the layer it composites and leaves the
+    # display reporting its native 240x320. The touchscreen takes its
+    # dimensions from the display, so touch came back in portrait while
+    # every widget was laid out in landscape: a tap on HOME reported
+    # x=217 y=294, and a y of 294 does not exist on a 240-tall canvas.
+    # No mirror_/swap_ combination can fix that -- those flip and swap
+    # axes, they do not rescale 240 into 320.
+    #
+    # A hardware transform changes the panel's own scan order, so the
+    # display reports 320x240, the touchscreen inherits 320x240, and the
+    # two agree with no correction on either side. It is also free: the
+    # controller does it, not the CPU.
+    # Declaring a transform means declaring dimensions too. These are the
+    # size AFTER the swap, not the panel's native 240x320: ESPHome swaps
+    # the model's native geometry when swap_xy is set and then checks the
+    # declared size against it, so 240x320 here fails validation with
+    # "Invalid offsets" (it computes a negative pad).
+    dimensions:
+      width: 320
+      height: 240
+    transform:
+      swap_xy: true
+      mirror_x: true
+      mirror_y: false
     # Same reasoning as the C6 board: a full redraw is expensive and water
     # temperature does not move in a second.
     update_interval: 5s
@@ -277,7 +292,6 @@ lvgl:
   buffer_size: 12%
   # Native panel is 240x320 portrait; 90 gives 320x240 landscape with the
   # USB-C edge on the left.
-  rotation: 90
   bg_color: 0x0B1220
 
   style_definitions:
