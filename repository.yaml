@@ -1,0 +1,11 @@
+# Makes this repo installable as a Home Assistant App (add-on) store.
+#
+# Settings -> Apps -> Store -> (three dots) -> Repositories ->
+#   https://github.com/JoshuaSeidel/tank-monitor
+#
+# Supervisor scans top-level directories for a config.yaml, which is why
+# tank-mcp/ sits at the repo root next to the ESPHome packages rather than
+# under a tidier apps/ folder.
+name: Tank Monitor
+url: https://github.com/JoshuaSeidel/tank-monitor
+maintainer: Joshua Seidel <me@joshuaseidel.com>
