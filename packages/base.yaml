@@ -155,6 +155,14 @@ binary_sensor:
     name: "Status"
 
 text_sensor:
+  # Which build is actually on the board. Twice now a diagnosis has stalled
+  # on "is this the firmware I just pushed, or the one from yesterday" with
+  # no way to tell from outside -- once on the model seed, once on a pin
+  # reassignment. The compile timestamp answers it in one read.
+  - platform: version
+    name: "Firmware Build"
+    entity_category: diagnostic
+
   - platform: wifi_info
     ip_address:
       name: "IP Address"
