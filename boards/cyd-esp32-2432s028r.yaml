@@ -1,56 +1,37 @@
 # "CYD" ESP32-2432S028R -- ESP32-WROOM-32E with a 2.8" 240x320 ILI9341 and
-# a resistive XPT2046 touch panel. Pair with packages/base.yaml,
-# packages/control.yaml and packages/sensors.yaml.
+# a resistive XPT2046 touch panel.
+#
+# DISPLAY ONLY. Pair with packages/base.yaml, packages/remote_display.yaml
+# and packages/chemistry.yaml -- NOT control.yaml or sensors.yaml.
 #
 # ---------------------------------------------------------------
-# Pin budget
+# Why this board runs no sensors
 # ---------------------------------------------------------------
-# Almost every GPIO on this board is spoken for internally: 12-15 display,
+# Almost every GPIO here is spoken for internally: 12-15 display,
 # 25/32/33/36/39 touch, 4/16/17 RGB LED, 21 backlight, 26 speaker,
-# 34 onboard LDR. The connectors on this revision expose:
+# 34 onboard LDR, 5/18/19/23 microSD. What reaches a connector on this
+# revision is IO35, the SPI header (IO23/19/18/27) and the UART pins.
 #
-#   3.3V / IO35 / GND          3-pin header
-#   IO23 IO19 IO18 IO27        4-pin header silkscreened SPI
-#   RXD(IO3) TXD(IO1) GND 5V   4-pin header silkscreened UART
-#   speaker (2-pin), BAT (2-pin)
+# That is barely enough for a probe, a TDS meter, a light sensor and two
+# relays, and getting there meant repurposing the microSD bus, powering
+# the light sensor off a pin that also flashes the chip, and metering the
+# speaker header to find out whether it reached the pin or an amplifier.
+# Every one of those is a real constraint fighting a real requirement.
 #
-# IO18/19/23 are the microSD bus. Nothing here uses the card, so they are
-# free GPIO -- which is what makes this build fit without the speaker
-# header. Every wire lands on a connector; nothing solders to the board.
+# So the roles are split instead. The C6 keeps the probe, the relays and
+# the control loop -- the tank is regulated by hardware bolted to it, and
+# keeps being regulated whether or not this panel is plugged in. This
+# board subscribes to the C6's values and draws them. It needs no GPIO at
+# all beyond its own screen: no pull-up, no relay wiring, no ADC pin, and
+# the microSD slot is free for use again.
 #
-#   TDS analog   IO35   3-pin header. Input-only, ADC1. ADC2 is unusable
-#                       while Wi-Fi is on, so 32-39 is the only choice and
-#                       35 is the only free one. Not negotiable.
-#   Heater relay IO27   SPI header (CS).
-#   Fan relay    IO18   SPI header (SCK).
-#   DS18B20      IO19   SPI header (MISO). 4.7k pull-up to 3V3.
-#   BH1750 SDA   IO1    UART header (TXD).
-#   BH1750 SCL   IO3    UART header (RXD).
+# The sensor pin map that used to live here is gone with the hardware it
+# described. If this board is ever converted back to a controller, the
+# assignment was: TDS IO35, heater IO27, fan IO18, DS18B20 IO19 (with a
+# 4.7k pull-up), BH1750 on IO1/IO3, and NOT IO22 -- which this revision
+# does not break out -- and NOT the speaker header, which reaches IO26
+# through the audio amplifier.
 #
-# IO23 is left spare.
-#
-# NOT IO22: it is not broken out on this board revision. An earlier version
-# of this file put the DS18B20 there, which cannot work here.
-#
-# NOT the speaker header: IO26 reaches it through the audio amplifier on
-# this revision, so it cannot drive a relay input. With three GPIOs free on
-# the SPI header there is no reason to try.
-#
-# POWER THE BH1750 FROM THE 3.3V PIN, NOT THE UART HEADER'S 5V. The GY-302
-# pulls SDA and SCL up to its own VCC, and the ESP32's GPIOs are not 5V
-# tolerant -- 5V there would drive 5V into IO1/IO3. Splice the sensor's VCC
-# with the TDS module's onto the 3.3V pin.
-#
-# The D-1584TL's inputs are optocoupled and draw little current, so its
-# grounds tie to the board's ground. 5V is available on the UART header if
-# the module needs it.
-#
-# TWO CONSEQUENCES OF PUTTING I2C ON THE UART PINS, both real:
-#   1. Serial logging is off (baud_rate: 0 below). This device is OTA-only,
-#      which is fine, but it also means no USB console if it fails to boot.
-#   2. IO1/IO3 are how the on-board CH340 talks to the ESP32, so the very
-#      first USB flash must be done with the BH1750 UNPLUGGED. After that
-#      it is OTA and the sensor can stay connected.
 esp32:
   board: esp32dev
   flash_size: 4MB
@@ -100,43 +81,7 @@ spi:
     mosi_pin: GPIO32
     miso_pin: GPIO39
 
-i2c:
-  sda: GPIO1
-  scl: GPIO3
-  scan: true
-
-one_wire:
-  - platform: gpio
-    # SPI header, silkscreened MISO. A microSD data line, free because
-    # nothing here uses the card. Needs the 4.7k pull-up to 3V3.
-    pin: GPIO19
-
-# Time-proportional heater/fan drive -- see boards/lafvin-esp32c6.yaml for
-# why the window is 900s rather than 300s (mechanical relay wear).
 output:
-  - platform: slow_pwm
-    id: heater_output
-    pin: GPIO27
-    period: 900s
-    restart_cycle_on_state_change: false
-    state_change_action:
-      - binary_sensor.template.publish:
-          id: heater_relay
-          state: !lambda "return state;"
-
-  - platform: slow_pwm
-    id: fan_output
-    # SPI header, silkscreened SCK. Another free microSD line. This used to
-    # be IO26 on the speaker header, which reaches the pin through the audio
-    # amplifier on this board revision and cannot drive a relay input.
-    pin: GPIO18
-    period: 900s
-    restart_cycle_on_state_change: false
-    state_change_action:
-      - binary_sensor.template.publish:
-          id: fan_relay
-          state: !lambda "return state;"
-
   - platform: ledc
     id: backlight_output
     pin: GPIO21
@@ -212,22 +157,6 @@ text_sensor:
     name: "Last Touch"
     id: last_touch
     entity_category: diagnostic
-
-sensor:
-  # TDS meter analog output -> GPIO35 (ADC1, input-only)
-  - platform: adc
-    pin: GPIO35
-    id: tds_voltage
-    update_interval: 500ms
-    attenuation: 12db
-    raw: false
-    internal: true
-    filters:
-      # 20 samples smoothed -- the probe output is noisy AC-excited
-      - median:
-          window_size: 20
-          send_every: 4
-          send_first_at: 4
 
 font:
   # LVGL references these by id. Glyph sets stay tight -- a 44px face with
@@ -680,9 +609,14 @@ lvgl:
                   text_color: 0x00C8FF
             on_release:
               - lambda: |-
-                  float f = id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f - 0.5f;
-                  id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
-                  id(target_temperature).publish_state(f);
+                  // Optimistic local update so the number moves under your
+                  // finger; the controller's own state topic overwrites it
+                  // a moment later and is the authority.
+                  const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f - 0.5f;
+                  id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
+                  char buf[8];
+                  snprintf(buf, sizeof(buf), "%.1f", f);
+                  id(mqtt_client).publish("${source_device}/number/target_temperature/command", buf);
 
         - label:
             id: set_value
@@ -725,9 +659,14 @@ lvgl:
                   text_color: 0x00C8FF
             on_release:
               - lambda: |-
-                  float f = id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f + 0.5f;
-                  id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
-                  id(target_temperature).publish_state(f);
+                  // Optimistic local update so the number moves under your
+                  // finger; the controller's own state topic overwrites it
+                  // a moment later and is the authority.
+                  const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f + 0.5f;
+                  id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
+                  char buf[8];
+                  snprintf(buf, sizeof(buf), "%.1f", f);
+                  id(mqtt_client).publish("${source_device}/number/target_temperature/command", buf);
 
         - obj:
             x: 14
@@ -753,7 +692,9 @@ lvgl:
                   width: 60
                   height: 20
                   on_value:
-                    - lambda: id(controller).set_learning_enabled(x);
+                    - lambda: |-
+                        id(mqtt_client).publish("${source_device}/switch/adaptive_learning/command",
+                                                x ? "ON" : "OFF");
               - switch:
                   id: sw_light
                   x: 208
@@ -1068,7 +1009,7 @@ interval:
   - interval: 2s
     then:
       - lambda: |-
-          const float sp_f = id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;
+          const float sp_f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f;
           const float t = id(water_temp).state;
           const bool ok = !isnan(t);
           const float t_f = ok ? t * 9.0f / 5.0f + 32.0f : NAN;
@@ -1085,7 +1026,7 @@ interval:
 
           uint32_t accent = 0x3ECF6E;
           const char *state = "STEADY";
-          if (!ok || id(controller).is_safety_tripped()) { accent = 0xFF4438; state = "NO PROBE"; }
+          if (!ok || id(r_fault)) { accent = 0xFF4438; state = "NO PROBE"; }
           else if (t_f < sp_f + (${temp_off_lightblue})) { accent = 0x2F80FF; state = "TOO COLD"; }
           else if (t_f < sp_f + (${temp_off_greenblue})) { accent = 0x7FC4FF; state = "COLD"; }
           else if (t_f < sp_f + (${temp_off_green})) { accent = 0x3ECFB0; state = "COOL"; }
@@ -1102,8 +1043,8 @@ interval:
           else    lv_label_set_text(id(temp_value), "--.-");
           lv_label_set_text_fmt(id(target_value), "%.1f", sp_f);
 
-          const int h = (int) id(controller).get_heater_duty();
-          const int f2 = (int) id(controller).get_fan_duty();
+          const int h = (int) id(r_heat);
+          const int f2 = (int) id(r_fan);
           lv_bar_set_value(id(heat_bar), h, LV_ANIM_ON);
           lv_bar_set_value(id(fan_bar), f2, LV_ANIM_ON);
           lv_label_set_text_fmt(id(heat_value), "%d%%", h);
@@ -1113,9 +1054,9 @@ interval:
             lv_label_set_text_fmt(id(hdr_light), "LIGHT %.0f", id(tank_lux).state);
           if (!isnan(id(tds).state))
             lv_label_set_text_fmt(id(chip_tds), "TDS %.0f", id(tds).state);
-          const float sw = id(controller).get_swing();
+          const float sw = id(r_swing_c);
           if (!isnan(sw)) lv_label_set_text_fmt(id(chip_swing), "SWING %.1f", sw * 9.0f / 5.0f);
-          lv_label_set_text_fmt(id(chip_conf), "LEARN %.0f%%", id(controller).get_confidence());
+          lv_label_set_text_fmt(id(chip_conf), "LEARN %.0f%%", id(r_conf));
 
           // --- control page ---
           lv_label_set_text_fmt(id(set_value), "%.1f", sp_f);
@@ -1130,8 +1071,8 @@ interval:
             lv_label_set_text(id(w_lux_state), id(tank_lux).state >= ${light_on_lux} ? "lights on" : "dark");
           }
           if (!isnan(sw)) lv_label_set_text_fmt(id(w_swing), "%.2f F", sw * 9.0f / 5.0f);
-          lv_label_set_text_fmt(id(w_drift), "%+.2f F/h", id(controller).get_drift_rate() * 60.0f * 9.0f / 5.0f);
-          lv_label_set_text_fmt(id(w_conf), "%.0f%%", id(controller).get_confidence());
+          lv_label_set_text_fmt(id(w_drift), "%+.2f F/h", id(r_drift_c_min) * 60.0f * 9.0f / 5.0f);
+          lv_label_set_text_fmt(id(w_conf), "%.0f%%", id(r_conf));
 
           // --- chemistry, from the flash-cached globals (never the live
           // subscription) so a broker outage shows the last reading and

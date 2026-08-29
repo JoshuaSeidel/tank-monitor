@@ -98,6 +98,9 @@ web_server:
   version: 3
 
 mqtt:
+  # id so lambdas can publish directly -- the remote display uses this to
+  # send setpoint and switch commands to the controller board's topics.
+  id: mqtt_client
   broker: !secret mqtt_broker
   port: 1883
   username: !secret tank_monitor_mqtt_username

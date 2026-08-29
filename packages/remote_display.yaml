@@ -1,0 +1,213 @@
+# Remote display/control package -- the panel half of a two-board split.
+#
+# The board that loads this runs NO sensors, NO relays and NO control loop.
+# It subscribes to another tank-monitor's MQTT topics and renders them. The
+# controller stays on the board that has the probe wired to it, which is the
+# whole point: the tank keeps being regulated by hardware that is physically
+# attached to it, and the panel is just a window onto that.
+#
+# Why this exists: an all-in-one display board spends nearly every GPIO on
+# the panel and the touch controller, so asking it to also read a probe, a
+# TDS meter, a light sensor and drive two relays fights the hardware. Split
+# the roles and the pin problem disappears entirely -- this board needs no
+# GPIO at all beyond its own screen.
+#
+# Load this INSTEAD OF packages/control.yaml and packages/sensors.yaml.
+# Loading it alongside them collides on every id below.
+#
+# ---------------------------------------------------------------------
+# Units
+# ---------------------------------------------------------------------
+# The source device publishes Fahrenheit, because that is what a human
+# reads. The globals here convert back to the units the controller's own
+# API used -- setpoint and swing in degC, drift in degC/min -- so that every
+# LVGL lambda keeps the arithmetic it already had. It looks redundant, and
+# it is: the alternative was editing the unit maths in a dozen places, which
+# is a dozen chances to introduce a conversion bug in code that currently
+# works. See boards/cyd-esp32-2432s028r.yaml.
+#
+# ---------------------------------------------------------------------
+# Stage 1 of 2
+# ---------------------------------------------------------------------
+# This carries data over MQTT, so it depends on Wi-Fi and on the broker,
+# which runs on Home Assistant. Stage 2 replaces the transport with
+# packet_transport over ESP-NOW so the panel keeps working with the router
+# and HA both down. Only the transport changes -- every id below, and every
+# lambda that reads them, stays as it is.
+
+substitutions:
+  # Topic prefix of the board that owns the sensors. This is that device's
+  # device_name, NOT this one's.
+  source_device: tank-monitor
+
+globals:
+  # restore_value so a rebooted panel shows the last known reading straight
+  # away instead of dashes until the next publish. MQTT retains these too,
+  # but the flash copy also covers a broker that is down at boot.
+  - id: r_setpoint_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_swing_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_drift_c_min
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_conf
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: r_heat
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: r_fan
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: r_fault
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Set on every inbound message; drives the staleness readout below.
+  - id: r_stamp
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+script:
+  - id: r_seen
+    then:
+      # Block scalar: a ternary's ':' is not legal in a plain YAML scalar.
+      - lambda: |-
+          id(r_stamp) = id(sntp_time).now().is_valid()
+                        ? id(sntp_time).now().timestamp
+                        : 0;
+
+sensor:
+  # ------------------------------------------------------------------
+  # The three values the UI treats as live readings. These keep the ids
+  # that packages/sensors.yaml would have defined, so the LVGL code does
+  # not know or care that they arrived over the network.
+  # ------------------------------------------------------------------
+  - platform: mqtt_subscribe
+    id: water_temp
+    # Converted back to degC on arrival. water_temp is the project's one
+    # Celsius value by convention and several lambdas assume that.
+    topic: ${source_device}/sensor/water_temperature/state
+    internal: true
+    filters:
+      - lambda: return (x - 32.0f) * 5.0f / 9.0f;
+    on_value:
+      - script.execute: r_seen
+
+  - platform: mqtt_subscribe
+    id: tds
+    topic: ${source_device}/sensor/tds/state
+    internal: true
+    on_value:
+      - script.execute: r_seen
+
+  - platform: mqtt_subscribe
+    id: tank_lux
+    topic: ${source_device}/sensor/tank_light_level/state
+    internal: true
+    on_value:
+      - script.execute: r_seen
+
+  # ------------------------------------------------------------------
+  # Controller state. Each of these replaces a tank_controller accessor
+  # the UI used to call directly, in the units that accessor returned.
+  # ------------------------------------------------------------------
+  - platform: mqtt_subscribe
+    # was: id(controller).get_setpoint()
+    id: r_sub_setpoint
+    topic: ${source_device}/number/target_temperature/state
+    internal: true
+    on_value:
+      - lambda: id(r_setpoint_c) = (x - 32.0f) * 5.0f / 9.0f;
+      - script.execute: r_seen
+
+  - platform: mqtt_subscribe
+    # was: id(controller).get_swing() -- a delta, so no 32 offset
+    id: r_sub_swing
+    topic: ${source_device}/sensor/temperature_swing_1h/state
+    internal: true
+    on_value:
+      - lambda: id(r_swing_c) = x * 5.0f / 9.0f;
+
+  - platform: mqtt_subscribe
+    # was: id(controller).get_drift_rate(), degC per minute
+    id: r_sub_drift
+    topic: ${source_device}/sensor/temperature_drift_rate/state
+    internal: true
+    on_value:
+      - lambda: id(r_drift_c_min) = x * 5.0f / 9.0f / 60.0f;
+
+  - platform: mqtt_subscribe
+    # was: id(controller).get_confidence()
+    id: r_sub_conf
+    topic: ${source_device}/sensor/model_confidence/state
+    internal: true
+    on_value:
+      - lambda: id(r_conf) = x;
+
+  - platform: mqtt_subscribe
+    # was: id(controller).get_heater_duty()
+    id: r_sub_heat
+    topic: ${source_device}/sensor/heater_output/state
+    internal: true
+    on_value:
+      - lambda: id(r_heat) = x;
+
+  - platform: mqtt_subscribe
+    # was: id(controller).get_fan_duty()
+    id: r_sub_fan
+    topic: ${source_device}/sensor/fan_output/state
+    internal: true
+    on_value:
+      - lambda: id(r_fan) = x;
+
+text_sensor:
+  # was: id(controller).is_safety_tripped(). A binary_sensor publishes the
+  # strings ON/OFF rather than a number, so this is a text subscription --
+  # mqtt_subscribe sensors parse as float and would land on NAN.
+  - platform: mqtt_subscribe
+    id: r_sub_fault
+    topic: ${source_device}/binary_sensor/temperature_fault/state
+    internal: true
+    on_value:
+      - lambda: id(r_fault) = (x == "ON" || x == "on" || x == "true");
+
+  - platform: mqtt_subscribe
+    id: r_learning
+    topic: ${source_device}/switch/adaptive_learning/state
+    internal: true
+
+  # Mirrors the source's own state text rather than recomputing it, so the
+  # panel cannot disagree with the controller about what it is doing.
+  - platform: mqtt_subscribe
+    id: r_state_text
+    topic: ${source_device}/text_sensor/controller_state/state
+    internal: true
+
+  # How stale the tank data is. The panel is only ever as current as its
+  # last packet, and a frozen screen showing plausible numbers is the one
+  # failure mode worth making visible -- the same reasoning as Chem Age.
+  - platform: template
+    name: "Link Age"
+    id: link_age
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (id(r_stamp) == 0) return {"no data"};
+      if (!id(sntp_time).now().is_valid()) return {"unknown"};
+      const uint32_t age = id(sntp_time).now().timestamp - id(r_stamp);
+      char buf[24];
+      if (age < 90)         snprintf(buf, sizeof(buf), "%us ago", age);
+      else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", age / 60);
+      else                  snprintf(buf, sizeof(buf), "%uh ago", age / 3600);
+      return {buf};
