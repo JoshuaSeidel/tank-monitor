@@ -1070,8 +1070,8 @@ interval:
           // toggle only ever shows what was last pressed here, which is
           // wrong the moment anything changes it from Home Assistant or the
           // controller's own web UI -- and wrong on every boot.
-          if (!id(r_learning).state.empty()) {
-            const bool want = (id(r_learning).state == "ON");
+          if (id(r_learn_known)) {
+            const bool want = id(r_learn_on);
             if (want != lv_obj_has_state(id(sw_learn), LV_STATE_CHECKED)) {
               id(r_sync) = true;
               if (want) lv_obj_add_state(id(sw_learn), LV_STATE_CHECKED);

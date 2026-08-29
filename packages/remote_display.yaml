@@ -107,6 +107,17 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  - id: r_learn_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # Distinguishes "learning is off" from "never heard". Without it a fresh
+  # panel would assert the controller is off when it simply has not been
+  # told yet, and then let you toggle from a state that was never real.
+  - id: r_learn_known
+    type: bool
+    restore_value: true
+    initial_value: 'false'
   # Set on every inbound message; drives the staleness readout below.
   - id: r_stamp
     type: uint32_t
@@ -217,17 +228,19 @@ text_sensor:
     on_value:
       - lambda: id(r_fault) = (x == "ON" || x == "on" || x == "true");
 
+  # Into a restored global, not just a text_sensor state. A text_sensor is
+  # empty after every boot, so if this topic's single retained message is
+  # dropped in the connect burst the toggle has nothing to show. The global
+  # keeps the last known answer across reboots, which makes a dropped
+  # retain invisible instead of wrong.
   - platform: mqtt_subscribe
     id: r_learning
     topic: ${source_device}/switch/adaptive_learning/state
     internal: true
-
-  # Mirrors the source's own state text rather than recomputing it, so the
-  # panel cannot disagree with the controller about what it is doing.
-  - platform: mqtt_subscribe
-    id: r_state_text
-    topic: ${source_device}/text_sensor/controller_state/state
-    internal: true
+    on_value:
+      - lambda: |-
+          id(r_learn_on) = (x == "ON" || x == "on" || x == "true");
+          id(r_learn_known) = true;
 
   # How stale the tank data is. The panel is only ever as current as its
   # last packet, and a frozen screen showing plausible numbers is the one
