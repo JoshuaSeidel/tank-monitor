@@ -693,6 +693,11 @@ lvgl:
                   height: 20
                   on_value:
                     - lambda: |-
+                        // r_sync is set while the interval below drives this
+                        // widget from the controller's own state. Publishing
+                        // then would command the controller with the value it
+                        // just reported, which is a loop.
+                        if (id(r_sync)) return;
                         id(mqtt_client).publish("${source_device}/switch/adaptive_learning/command",
                                                 x ? "ON" : "OFF");
               - switch:
@@ -1060,6 +1065,20 @@ interval:
 
           // --- control page ---
           lv_label_set_text_fmt(id(set_value), "%.1f", sp_f);
+
+          // Reflect the controller's actual switch state. Without this the
+          // toggle only ever shows what was last pressed here, which is
+          // wrong the moment anything changes it from Home Assistant or the
+          // controller's own web UI -- and wrong on every boot.
+          if (!id(r_learning).state.empty()) {
+            const bool want = (id(r_learning).state == "ON");
+            if (want != lv_obj_has_state(id(sw_learn), LV_STATE_CHECKED)) {
+              id(r_sync) = true;
+              if (want) lv_obj_add_state(id(sw_learn), LV_STATE_CHECKED);
+              else      lv_obj_remove_state(id(sw_learn), LV_STATE_CHECKED);
+              id(r_sync) = false;
+            }
+          }
 
           // --- water page ---
           if (!isnan(id(tds).state)) {

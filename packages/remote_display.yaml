@@ -34,6 +34,33 @@
 # packet_transport over ESP-NOW so the panel keeps working with the router
 # and HA both down. Only the transport changes -- every id below, and every
 # lambda that reads them, stays as it is.
+#
+# ---------------------------------------------------------------------
+# Known limitation of the MQTT transport: dropped retained messages
+# ---------------------------------------------------------------------
+# ESPHome's ESP32 MQTT backend holds inbound events in a fixed 32-slot
+# queue (MQTT_EVENT_QUEUE_LENGTH, a compile-time constant) and drains ONE
+# per main-loop iteration. On connect the broker delivers a retained
+# message for every subscription at once, that queue overflows, and the
+# excess is discarded -- the device logs "Dropped N inbound MQTT events".
+#
+# What that means in practice depends on how the source publishes:
+#
+#   sensors     republish every update_interval, so a dropped retained
+#               message costs one cycle and heals itself.
+#   number,
+#   switch      publish ONLY on change. Their retained message at connect
+#               is the single delivery, so dropping it means the value
+#               never arrives -- the setpoint stays blank and the switch
+#               sits at its default while the controller says otherwise.
+#
+# That asymmetry is why the setpoint and Adaptive Learning were the two
+# things missing after the first flash while everything else populated.
+# It cannot be tuned from YAML.
+#
+# Stage 2 removes the problem rather than working around it:
+# packet_transport broadcasts on an interval, so nothing depends on a
+# single delivery landing at the one moment the queue is full.
 
 substitutions:
   # Topic prefix of the board that owns the sensors. This is that device's
@@ -69,6 +96,14 @@ globals:
     restore_value: true
     initial_value: '0'
   - id: r_fault
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Set while a widget is being driven from a received value, so the
+  # widget's own on_value does not echo that back as a command. Without
+  # it, syncing the switch from the controller publishes a command to the
+  # controller, which is a loop.
+  - id: r_sync
     type: bool
     restore_value: false
     initial_value: 'false'
