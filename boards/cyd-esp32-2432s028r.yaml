@@ -32,6 +32,37 @@
 # does not break out -- and NOT the speaker header, which reaches IO26
 # through the audio amplifier.
 #
+# ---------------------------------------------------------------
+# Battery (optional)
+# ---------------------------------------------------------------
+# The BAT connector on this board feeds the charger; on this revision
+# nothing routes battery voltage to an ADC, so the panel cannot read it
+# without a divider. Two resistors from BAT+ to IO35 (free now that this
+# board runs no sensors) and battery_divider set to the ratio:
+#
+#   BAT+ ---[ R1 ]---+--- IO35
+#                    |
+#                   [ R2 ]
+#                    |
+#   BAT- / GND ------+
+#
+# 100k/100k gives a ratio of 2.0 and halves 4.2V to 2.1V, inside ADC1's
+# range at 12db. Equal resistors also mean the divider itself only draws
+# ~20uA, which will not meaningfully flatten the cell.
+#
+# With the divider fitted and no battery attached the pin reads near zero
+# through R2, which is how the indicator knows to hide itself. WITHOUT the
+# divider IO35 floats and can read anything -- there is no internal pulldown
+# on 34-39 -- so fit it before trusting the number.
+#
+# Calibrate once: meter the pack, compare with the Battery Voltage sensor,
+# and adjust battery_divider by the ratio between them. Resistor tolerance
+# is the whole error here.
+substitutions:
+  battery_divider: "2.0"
+  # Below this, assume no pack is connected and hide the indicator.
+  battery_absent_v: "2.5"
+
 esp32:
   board: esp32dev
   flash_size: 4MB
@@ -157,6 +188,89 @@ text_sensor:
     name: "Last Touch"
     id: last_touch
     entity_category: diagnostic
+
+sensor:
+  - platform: adc
+    pin: GPIO35
+    id: batt_voltage
+    name: "Battery Voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    entity_category: diagnostic
+    accuracy_decimals: 2
+    attenuation: 12db
+    update_interval: 60s
+    filters:
+      - multiply: ${battery_divider}
+      # A pack under load sags on every screen redraw; the median is what
+      # makes the percentage stop jittering between refreshes.
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+
+  - platform: template
+    id: batt_pct
+    name: "Battery Level"
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      const float v = id(batt_voltage).state;
+      if (isnan(v) || v < ${battery_absent_v}) return {};
+      // Single-cell LiPo resting curve. Voltage maps to charge very
+      // non-linearly -- the pack sits near 3.7V for most of its life and
+      // then falls off a cliff -- so a straight line from 3.0 to 4.2
+      // would read ~50% when the cell is nearly flat.
+      static const float V[] = {3.30f, 3.40f, 3.50f, 3.60f, 3.65f, 3.70f,
+                                3.75f, 3.80f, 3.85f, 3.90f, 3.95f, 4.00f,
+                                4.05f, 4.10f, 4.15f, 4.20f};
+      static const float P[] = {  0.0f,  5.0f, 11.0f, 20.0f, 27.0f, 35.0f,
+                                 42.0f, 50.0f, 58.0f, 65.0f, 72.0f, 80.0f,
+                                 85.0f, 90.0f, 95.0f,100.0f};
+      const int n = sizeof(V) / sizeof(V[0]);
+      if (v <= V[0]) return 0.0f;
+      if (v >= V[n - 1]) return 100.0f;
+      for (int i = 1; i < n; i++) {
+        if (v < V[i]) {
+          const float f = (v - V[i - 1]) / (V[i] - V[i - 1]);
+          return P[i - 1] + f * (P[i] - P[i - 1]);
+        }
+      }
+      return 100.0f;
+
+  - platform: template
+    id: batt_hours
+    name: "Battery Runtime"
+    unit_of_measurement: "h"
+    state_class: measurement
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      if (isnan(id(batt_rate_pph)) || id(batt_rate_pph) <= 0.5f) return {};
+      if (isnan(id(batt_pct).state)) return {};
+      return id(batt_pct).state / id(batt_rate_pph);
+
+globals:
+  - id: batt_pct_prev
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: batt_prev_t
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Percent per hour, positive while discharging. Restored so a panel that
+  # reboots does not forget everything it learned about the discharge rate
+  # and go back to showing no estimate for half an hour.
+  - id: batt_rate_pph
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
 
 font:
   # LVGL references these by id. Glyph sets stay tight -- a 44px face with
@@ -314,6 +428,78 @@ lvgl:
     - id: caption
       text_font: font_sm
       text_color: 0x7C8AA0
+
+  # Drawn above every page, so the battery is visible wherever you are
+  # without three copies of it drifting out of sync. Sits in the strip to
+  # the right of the nav buttons, which end at x=218.
+  #
+  # Built from plain objects rather than a font glyph on purpose: the font
+  # sets here are trimmed to the characters actually used, and a missing
+  # glyph renders as a box with no build error. A rectangle cannot go
+  # missing, and it can be filled proportionally, which a glyph cannot.
+  top_layer:
+    widgets:
+      - obj:
+          id: batt_box
+          x: 226
+          y: 206
+          width: 88
+          height: 28
+          bg_opa: TRANSP
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          clickable: false
+          hidden: true
+          widgets:
+            # body outline
+            - obj:
+                x: 0
+                y: 5
+                width: 26
+                height: 14
+                radius: 3
+                bg_opa: TRANSP
+                border_width: 2
+                border_color: 0x7C8AA0
+                pad_all: 0
+                scrollable: false
+                clickable: false
+            # charge fill -- width set from the percentage each tick
+            - obj:
+                id: batt_fill
+                x: 2
+                y: 7
+                width: 22
+                height: 10
+                radius: 1
+                bg_color: 0x3ECF6E
+                bg_opa: COVER
+                border_width: 0
+                pad_all: 0
+                scrollable: false
+                clickable: false
+            # terminal nub
+            - obj:
+                x: 26
+                y: 9
+                width: 3
+                height: 6
+                radius: 1
+                bg_color: 0x7C8AA0
+                bg_opa: COVER
+                border_width: 0
+                pad_all: 0
+                scrollable: false
+                clickable: false
+            - label:
+                id: batt_text
+                x: 33
+                y: 6
+                width: 55
+                text: ""
+                text_font: font_sm
+                text_color: 0xF2F6FC
 
   pages:
     - id: page_home
@@ -1063,6 +1249,38 @@ interval:
           if (!isnan(sw)) lv_label_set_text_fmt(id(chip_swing), "SWING %.1f", sw * 9.0f / 5.0f);
           lv_label_set_text_fmt(id(chip_conf), "LEARN %.0f%%", id(r_conf));
 
+          // --- battery, drawn over every page ---
+          {
+            const float bv = id(batt_voltage).state;
+            const float bp = id(batt_pct).state;
+            if (isnan(bv) || bv < ${battery_absent_v} || isnan(bp)) {
+              // No pack, or no divider fitted. Hidden beats a confident 0%.
+              lv_obj_add_flag(id(batt_box), LV_OBJ_FLAG_HIDDEN);
+            } else {
+              lv_obj_remove_flag(id(batt_box), LV_OBJ_FLAG_HIDDEN);
+              const int pct = (int) (bp < 0 ? 0 : (bp > 100 ? 100 : bp));
+              // 22px of inner width; keep 1px visible at 0% so the outline
+              // does not read as "no battery fitted".
+              int w = (int) (22.0f * pct / 100.0f);
+              if (w < 1) w = 1;
+              lv_obj_set_width(id(batt_fill), w);
+              const uint32_t c = pct <= 15 ? 0xFF4438
+                               : pct <= 40 ? 0xFFB020
+                                           : 0x3ECF6E;
+              lv_obj_set_style_bg_color(id(batt_fill), lv_color_hex(c), 0);
+              const float hrs = id(batt_hours).state;
+              if (!isnan(hrs) && hrs > 0.0f && hrs < 240.0f) {
+                if (hrs >= 1.0f) lv_label_set_text_fmt(id(batt_text), "%d%% %.0fh", pct, hrs);
+                else             lv_label_set_text_fmt(id(batt_text), "%d%% %.0fm", pct, hrs * 60.0f);
+              } else {
+                // No usable discharge slope yet -- takes ~20 min of
+                // readings. Showing the percentage alone beats a made-up
+                // runtime that halves on the next sample.
+                lv_label_set_text_fmt(id(batt_text), "%d%%", pct);
+              }
+            }
+          }
+
           // --- control page ---
           lv_label_set_text_fmt(id(set_value), "%.1f", sp_f);
 
@@ -1119,3 +1337,34 @@ interval:
               else                   lv_label_set_text_fmt(id(c_age), "%ud ago", age / 86400);
             }
           }
+
+  # Ten minutes between samples, because the estimate is a slope: over one
+  # minute the ADC noise is larger than the real change and the remaining
+  # time would swing wildly.
+  - interval: 10min
+    then:
+      - lambda: |-
+          const float pct = id(batt_pct).state;
+          const uint32_t now = millis() / 1000;
+          if (isnan(pct)) { id(batt_pct_prev) = NAN; return; }
+          if (!isnan(id(batt_pct_prev)) && id(batt_prev_t) != 0) {
+            const float hrs = (now - id(batt_prev_t)) / 3600.0f;
+            if (hrs > 0.05f) {
+              const float drop = id(batt_pct_prev) - pct;
+              if (drop > 0.0f) {
+                const float r = drop / hrs;
+                // Exponential smoothing: a single interval's drop is mostly
+                // quantisation, and an unsmoothed estimate jumps between
+                // "2 hours" and "40 hours" on consecutive samples.
+                id(batt_rate_pph) = isnan(id(batt_rate_pph))
+                                    ? r
+                                    : 0.75f * id(batt_rate_pph) + 0.25f * r;
+              } else if (drop < -1.0f) {
+                // Charging, or just plugged in. The discharge estimate is
+                // meaningless now, so drop it rather than show a stale one.
+                id(batt_rate_pph) = NAN;
+              }
+            }
+          }
+          id(batt_pct_prev) = pct;
+          id(batt_prev_t) = now;

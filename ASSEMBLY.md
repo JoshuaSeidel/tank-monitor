@@ -211,6 +211,44 @@ core, so using it needs an external component — worth doing for local logging
 (the Home Assistant host has no UPS, and that is what corrupts InfluxDB), but
 it is not part of this build.
 
+## Battery (optional)
+
+The BAT connector feeds the charger. On this revision nothing routes battery
+voltage to an ADC, so the panel cannot read the pack without a divider — two
+resistors from BAT+ to **IO35**, which is free now that this board runs no
+sensors:
+
+```
+BAT+ ---[ R1 ]---+--- IO35
+                 |
+                [ R2 ]
+                 |
+BAT- / GND ------+
+```
+
+100 kΩ / 100 kΩ gives a ratio of 2.0, halving 4.2 V to 2.1 V — inside ADC1's
+range at 12 db. Equal resistors also mean the divider draws only ~20 µA, so it
+won't meaningfully flatten the cell while the panel is off.
+
+**Fit the divider before trusting the reading.** IO35 is input-only with no
+internal pulldown, so an unwired pin floats and can report anything. With the
+divider fitted and no pack attached it reads near zero through R2, which is how
+the indicator knows to hide itself.
+
+**Calibrate once:** meter the pack, compare against the `Battery Voltage`
+sensor, and adjust `battery_divider` by the ratio between them. Resistor
+tolerance is essentially the whole error.
+
+**Before connecting a LiPo:** confirm this board actually charges the pack
+rather than just drawing from it, and use a cell with a protection circuit.
+An unprotected LiPo on a board that doesn't manage it is a fire risk, not a
+runtime feature.
+
+The indicator sits bottom-right, over every page, showing an icon, percentage,
+and estimated time remaining. The runtime needs about 20 minutes of readings
+before it appears — it's a measured discharge slope, not a nameplate figure, so
+it reflects your actual brightness and Wi-Fi use. It disappears while charging.
+
 ## If you ever convert it back to a controller
 
 The pin map that worked on this revision: TDS IO35, heater IO27, fan IO18,
