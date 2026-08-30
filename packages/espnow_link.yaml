@@ -53,6 +53,9 @@ espnow:
     #   SP <degF>   set target temperature
     #   AL 0 | AL 1 adaptive learning off/on
     - lambda: |-
+        // Any frame from the panel counts as proof of life, including the
+        // heartbeat, which carries nothing else.
+        id(panel_stamp_ms) = millis();
         if (size < 4 || size > 16) return;
         char buf[17];
         memcpy(buf, data, size);
@@ -128,7 +131,31 @@ sensor:
     accuracy_decimals: 1
     lambda: "return id(controller).get_fan_duty();"
 
+globals:
+  - id: panel_stamp_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
 binary_sensor:
+  # Whether the remote panel is reachable. The panel heartbeats every 30s;
+  # 100s is three missed beats.
+  #
+  # This is not symmetric with the panel's own link sensor and cannot be:
+  # ESP-NOW broadcasts are unacknowledged, so this board has no way to know
+  # its own transmissions land. It only knows the panel is still talking.
+  # A panel that can hear nothing but still transmits would show as
+  # connected here and disconnected there -- which is the correct reading
+  # of a one-way radio failure.
+  - platform: template
+    name: "Panel Link"
+    id: panel_link
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: |-
+      if (id(panel_stamp_ms) == 0) return false;
+      return (millis() - id(panel_stamp_ms)) < 100000;
+
   - platform: template
     id: link_fault
     internal: true

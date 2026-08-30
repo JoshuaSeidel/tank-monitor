@@ -123,6 +123,14 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
+  # Same event, but on millis(). Link Age wants a wall clock to say "3m
+  # ago"; the connectivity sensor must work before SNTP has synced -- and
+  # a panel that has just booted with no network is exactly when you want
+  # it to admit the link is down.
+  - id: r_stamp_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
 
 script:
   - id: r_seen
@@ -132,6 +140,7 @@ script:
           id(r_stamp) = id(sntp_time).now().is_valid()
                         ? id(sntp_time).now().timestamp
                         : 0;
+          id(r_stamp_ms) = millis();
 
 espnow:
   id: espnow_link
@@ -235,6 +244,18 @@ sensor:
       - lambda: id(r_fan) = x;
 
 binary_sensor:
+  # The controller broadcasts every 10s, so 45s is four missed rounds --
+  # long enough not to flap on a single lost frame, short enough to notice
+  # before you have made a decision based on a stale screen.
+  - platform: template
+    name: "Controller Link"
+    id: controller_link
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: |-
+      if (id(r_stamp_ms) == 0) return false;
+      return (millis() - id(r_stamp_ms)) < 45000;
+
   - platform: packet_transport
     provider: ${source_device}
     remote_id: ft
@@ -271,3 +292,14 @@ text_sensor:
       else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", age / 60);
       else                  snprintf(buf, sizeof(buf), "%uh ago", age / 3600);
       return {buf};
+
+interval:
+  # ESP-NOW broadcasts are not acknowledged, so the controller cannot tell
+  # whether anything is listening. This is the only way it can know the
+  # panel is alive: the panel says so, on a timer.
+  - interval: 30s
+    then:
+      - lambda: |-
+          static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+          const char *hb = "HB";
+          id(espnow_link).send(BCAST, (const uint8_t *) hb, 2);

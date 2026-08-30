@@ -533,13 +533,106 @@ lvgl:
             text_color: 0x5A6b83
         - label:
             id: hdr_light
-            x: 200
+            x: 110
             y: 10
-            width: 106
-            text_align: RIGHT
+            width: 100
+            text_align: CENTER
             text: "LIGHT --"
             text_font: font_sm
             text_color: 0x5A6b83
+
+        # ---- link status, top right --------------------------------
+        # Wi-Fi fan and an ESP-NOW broadcast symbol. Green connected, red
+        # not. Drawn as arcs rather than glyphs for the same reason as the
+        # battery: the font sets here are trimmed to the characters in use
+        # and a missing glyph renders as a box with no build error.
+        #
+        # The two are genuinely independent. ESP-NOW is peer to peer, so
+        # the panel keeps its tank data with Wi-Fi down -- red Wi-Fi and
+        # green radio is a working panel, not a fault. The reverse, green
+        # Wi-Fi and red radio, means the controller is unreachable and the
+        # numbers on screen are stale.
+        - arc:
+            id: wifi_a3
+            x: 246
+            y: 8
+            width: 24
+            height: 24
+            start_angle: 225
+            end_angle: 315
+            arc_width: 3
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            clickable: false
+        - arc:
+            id: wifi_a2
+            x: 250
+            y: 12
+            width: 16
+            height: 16
+            start_angle: 225
+            end_angle: 315
+            arc_width: 3
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            clickable: false
+        - obj:
+            id: wifi_dot
+            x: 256
+            y: 18
+            width: 5
+            height: 5
+            radius: 3
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            clickable: false
+
+        - arc:
+            id: now_left
+            x: 282
+            y: 10
+            width: 20
+            height: 20
+            start_angle: 135
+            end_angle: 225
+            arc_width: 3
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            clickable: false
+        - arc:
+            id: now_right
+            x: 282
+            y: 10
+            width: 20
+            height: 20
+            start_angle: 315
+            end_angle: 45
+            arc_width: 3
+            min_value: 0
+            max_value: 100
+            value: 0
+            adjustable: false
+            clickable: false
+        - obj:
+            id: now_dot
+            x: 289
+            y: 17
+            width: 6
+            height: 6
+            radius: 3
+            bg_opa: COVER
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            clickable: false
 
         # ---- temperature arc ---------------------------------------
         - arc:
@@ -1270,6 +1363,25 @@ interval:
           const float sw = id(r_swing_c);
           if (!isnan(sw)) lv_label_set_text_fmt(id(chip_swing), "SWING %.1f", sw * 9.0f / 5.0f);
           lv_label_set_text_fmt(id(chip_conf), "LEARN %.0f%%", id(r_conf));
+
+          // --- link status icons ---
+          {
+            const uint32_t GOOD = 0x3ECF6E, BAD = 0xFF4438;
+            const bool wifi_up = wifi::global_wifi_component != nullptr &&
+                                 wifi::global_wifi_component->is_connected();
+            // Same 45s window the Controller Link entity uses: four missed
+            // broadcasts, so a single lost frame does not flicker it.
+            const bool now_up = id(r_stamp_ms) != 0 &&
+                                (millis() - id(r_stamp_ms)) < 45000;
+            const uint32_t wc = wifi_up ? GOOD : BAD;
+            const uint32_t nc = now_up ? GOOD : BAD;
+            lv_obj_set_style_arc_color(id(wifi_a3), lv_color_hex(wc), LV_PART_MAIN);
+            lv_obj_set_style_arc_color(id(wifi_a2), lv_color_hex(wc), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(id(wifi_dot), lv_color_hex(wc), 0);
+            lv_obj_set_style_arc_color(id(now_left), lv_color_hex(nc), LV_PART_MAIN);
+            lv_obj_set_style_arc_color(id(now_right), lv_color_hex(nc), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(id(now_dot), lv_color_hex(nc), 0);
+          }
 
           // --- battery, drawn over every page ---
           {
