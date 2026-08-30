@@ -244,10 +244,25 @@ rather than just drawing from it, and use a cell with a protection circuit.
 An unprotected LiPo on a board that doesn't manage it is a fire risk, not a
 runtime feature.
 
-The indicator sits bottom-right, over every page, showing an icon, percentage,
-and estimated time remaining. The runtime needs about 20 minutes of readings
-before it appears — it's a measured discharge slope, not a nameplate figure, so
-it reflects your actual brightness and Wi-Fi use. It disappears while charging.
+The indicator sits bottom-right, over every page:
+
+| Shows | Meaning |
+|---|---|
+| `84% 3h` | Discharging, about 3 hours left |
+| `84%` | Discharging, not enough readings yet for an estimate |
+| `84% CHG` (blue) | Charging |
+| `FULL` (blue) | Charged |
+| hidden | No pack detected, or no divider fitted |
+
+The runtime needs about 20 minutes of readings before it appears — it's a
+measured discharge slope, not a nameplate figure, so it reflects your actual
+brightness and Wi-Fi use.
+
+Charging is detected by trend, not by a status pin — this board doesn't break
+one out. The panel samples every five minutes and looks at which way the pack
+is moving, so expect up to ten minutes before the label catches up after you
+plug in or unplug. `binary_sensor.tank_monitor_v2_battery_charging` reports the
+same thing to Home Assistant.
 
 ## If you ever convert it back to a controller
 

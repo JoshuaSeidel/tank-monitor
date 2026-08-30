@@ -271,6 +271,21 @@ globals:
     type: float
     restore_value: true
     initial_value: 'NAN'
+  - id: batt_charging
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: batt_v_prev
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+binary_sensor:
+  - platform: template
+    name: "Battery Charging"
+    device_class: battery_charging
+    entity_category: diagnostic
+    lambda: "return id(batt_charging);"
 
 font:
   # LVGL references these by id. Glyph sets stay tight -- a 44px face with
@@ -1269,7 +1284,14 @@ interval:
                                            : 0x3ECF6E;
               lv_obj_set_style_bg_color(id(batt_fill), lv_color_hex(c), 0);
               const float hrs = id(batt_hours).state;
-              if (!isnan(hrs) && hrs > 0.0f && hrs < 240.0f) {
+              if (id(batt_charging)) {
+                // Blue, and said in words. Colour alone would be ambiguous
+                // with the level bands, and a runtime estimate means
+                // nothing while the pack is filling.
+                lv_obj_set_style_bg_color(id(batt_fill), lv_color_hex(0x2F80FF), 0);
+                if (pct >= 99) lv_label_set_text(id(batt_text), "FULL");
+                else           lv_label_set_text_fmt(id(batt_text), "%d%% CHG", pct);
+              } else if (!isnan(hrs) && hrs > 0.0f && hrs < 240.0f) {
                 if (hrs >= 1.0f) lv_label_set_text_fmt(id(batt_text), "%d%% %.0fh", pct, hrs);
                 else             lv_label_set_text_fmt(id(batt_text), "%d%% %.0fm", pct, hrs * 60.0f);
               } else {
@@ -1368,3 +1390,28 @@ interval:
           }
           id(batt_pct_prev) = pct;
           id(batt_prev_t) = now;
+
+  # Charge detection, by trend. There is no charge-status pin broken out on
+  # this board, so the only evidence available is which way the pack is
+  # moving. Five minutes between samples: a 500mA charge on a small pack
+  # lifts the cell roughly 0.03V in that time, which clears the ADC noise,
+  # while one minute would not.
+  - interval: 5min
+    then:
+      - lambda: |-
+          const float v = id(batt_voltage).state;
+          if (isnan(v) || v < ${battery_absent_v}) {
+            id(batt_charging) = false;
+            id(batt_v_prev) = NAN;
+            return;
+          }
+          if (!isnan(id(batt_v_prev))) {
+            const float d = v - id(batt_v_prev);
+            // Asymmetric thresholds, deliberately. Rising needs real
+            // evidence; falling only has to be unambiguous. Between the two
+            // the previous answer stands, so a pack resting flat does not
+            // flip the label back and forth.
+            if (d > 0.02f)       id(batt_charging) = true;
+            else if (d < -0.005f) id(batt_charging) = false;
+          }
+          id(batt_v_prev) = v;
