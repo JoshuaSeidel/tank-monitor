@@ -133,115 +133,127 @@ script:
                         ? id(sntp_time).now().timestamp
                         : 0;
 
+espnow:
+  id: espnow_link
+  auto_add_peer: true
+
+packet_transport:
+  - platform: espnow
+    id: link_rx
+    espnow_id: espnow_link
+    # No top-level encryption key here. That one encrypts what this
+    # transport SENDS, and this side sends nothing -- commands go out as
+    # plain espnow.broadcast actions, not as packet_transport data. The
+    # provider key below is what decrypts the controller's broadcasts,
+    # and it must match the key on that board.
+    providers:
+      - name: ${source_device}
+        encryption: !secret espnow_key
+
 sensor:
   # ------------------------------------------------------------------
-  # The three values the UI treats as live readings. These keep the ids
-  # that packages/sensors.yaml would have defined, so the LVGL code does
-  # not know or care that they arrived over the network.
+  # Received over ESP-NOW. These keep the ids packages/sensors.yaml would
+  # have defined, so the LVGL code does not know or care that they arrived
+  # over the air rather than from a probe on this board.
+  #
+  # remote_id matches the broadcast_id set in packages/espnow_link.yaml.
   # ------------------------------------------------------------------
-  - platform: mqtt_subscribe
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: wt
     id: water_temp
-    # Converted back to degC on arrival. water_temp is the project's one
-    # Celsius value by convention and several lambdas assume that.
-    topic: ${source_device}/sensor/water_temperature/state
     internal: true
-    filters:
-      - lambda: return (x - 32.0f) * 5.0f / 9.0f;
     on_value:
       - script.execute: r_seen
 
-  - platform: mqtt_subscribe
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: td
     id: tds
-    topic: ${source_device}/sensor/tds/state
     internal: true
     on_value:
       - script.execute: r_seen
 
-  - platform: mqtt_subscribe
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: lx
     id: tank_lux
-    topic: ${source_device}/sensor/tank_light_level/state
     internal: true
     on_value:
       - script.execute: r_seen
 
   # ------------------------------------------------------------------
-  # Controller state. Each of these replaces a tank_controller accessor
-  # the UI used to call directly, in the units that accessor returned.
+  # Controller state, in the units the controller's accessors returned.
   # ------------------------------------------------------------------
-  - platform: mqtt_subscribe
-    # was: id(controller).get_setpoint()
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: sp
     id: r_sub_setpoint
-    topic: ${source_device}/number/target_temperature/state
     internal: true
     on_value:
-      - lambda: id(r_setpoint_c) = (x - 32.0f) * 5.0f / 9.0f;
+      - lambda: id(r_setpoint_c) = x;
       - script.execute: r_seen
 
-  - platform: mqtt_subscribe
-    # was: id(controller).get_swing() -- a delta, so no 32 offset
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: sw
     id: r_sub_swing
-    topic: ${source_device}/sensor/temperature_swing_1h/state
     internal: true
     on_value:
-      - lambda: id(r_swing_c) = x * 5.0f / 9.0f;
+      - lambda: id(r_swing_c) = x;
 
-  - platform: mqtt_subscribe
-    # was: id(controller).get_drift_rate(), degC per minute
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: dr
     id: r_sub_drift
-    topic: ${source_device}/sensor/temperature_drift_rate/state
     internal: true
     on_value:
-      - lambda: id(r_drift_c_min) = x * 5.0f / 9.0f / 60.0f;
+      - lambda: id(r_drift_c_min) = x;
 
-  - platform: mqtt_subscribe
-    # was: id(controller).get_confidence()
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: cf
     id: r_sub_conf
-    topic: ${source_device}/sensor/model_confidence/state
     internal: true
     on_value:
       - lambda: id(r_conf) = x;
 
-  - platform: mqtt_subscribe
-    # was: id(controller).get_heater_duty()
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: ht
     id: r_sub_heat
-    topic: ${source_device}/sensor/heater_output/state
     internal: true
     on_value:
       - lambda: id(r_heat) = x;
 
-  - platform: mqtt_subscribe
-    # was: id(controller).get_fan_duty()
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: fn
     id: r_sub_fan
-    topic: ${source_device}/sensor/fan_output/state
     internal: true
     on_value:
       - lambda: id(r_fan) = x;
 
-text_sensor:
-  # was: id(controller).is_safety_tripped(). A binary_sensor publishes the
-  # strings ON/OFF rather than a number, so this is a text subscription --
-  # mqtt_subscribe sensors parse as float and would land on NAN.
-  - platform: mqtt_subscribe
+binary_sensor:
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: ft
     id: r_sub_fault
-    topic: ${source_device}/binary_sensor/temperature_fault/state
     internal: true
-    on_value:
-      - lambda: id(r_fault) = (x == "ON" || x == "on" || x == "true");
+    on_state:
+      - lambda: id(r_fault) = x;
 
-  # Into a restored global, not just a text_sensor state. A text_sensor is
-  # empty after every boot, so if this topic's single retained message is
-  # dropped in the connect burst the toggle has nothing to show. The global
-  # keeps the last known answer across reboots, which makes a dropped
-  # retain invisible instead of wrong.
-  - platform: mqtt_subscribe
-    id: r_learning
-    topic: ${source_device}/switch/adaptive_learning/state
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: al
+    id: r_sub_learning
     internal: true
-    on_value:
+    on_state:
       - lambda: |-
-          id(r_learn_on) = (x == "ON" || x == "on" || x == "true");
+          id(r_learn_on) = x;
           id(r_learn_known) = true;
 
+text_sensor:
   # How stale the tank data is. The panel is only ever as current as its
   # last packet, and a frozen screen showing plausible numbers is the one
   # failure mode worth making visible -- the same reasoning as Chem Age.

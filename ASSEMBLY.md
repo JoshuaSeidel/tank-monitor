@@ -211,6 +211,31 @@ core, so using it needs an external component — worth doing for local logging
 (the Home Assistant host has no UPS, and that is what corrupts InfluxDB), but
 it is not part of this build.
 
+## The ESP-NOW link
+
+The panel gets its data straight from the controller over ESP-NOW — peer to
+peer, no router and no MQTT broker. Since the broker runs on Home Assistant,
+this is what lets the panel keep working with Home Assistant down.
+
+Two things have to be true:
+
+**`espnow_key` in `secrets.yaml`, identical on both boards.** Any string. A
+missing value fails the build, which is deliberate — an unencrypted link would
+work perfectly and silently accept a setpoint command from anyone in range.
+
+**The router's 2.4 GHz channel must be pinned.** ESP-NOW shares one radio with
+Wi-Fi and can only work on the channel the station is already associated on —
+ESPHome enforces this by rejecting a `channel:` setting whenever the wifi
+component is present. Both boards land on the AP's channel, so they can hear
+each other. **If the AP is ever set back to "auto" and moves, the link stops
+with no error on either board:** packets go out on a channel nobody is
+listening to. `Link Age` on the panel is what makes that visible.
+
+Home Assistant is unaffected. Every entity still publishes over MQTT exactly as
+before — this is a second path for one consumer, not a replacement. Chemistry
+still arrives by MQTT too, because it originates in Home Assistant; with HA
+down it goes stale and the panel says so.
+
 ## Battery (optional)
 
 The BAT connector feeds the charger. On this revision nothing routes battery

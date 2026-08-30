@@ -20,6 +20,9 @@ packages:
       - packages/webui.yaml
       - packages/control.yaml
       - packages/sensors.yaml
+      # Stage 2: broadcasts to the remote panel over ESP-NOW, and takes
+      # setpoint/learning commands back. MQTT is untouched.
+      - packages/espnow_link.yaml
       - boards/lafvin-esp32c6.yaml
     # refresh defaults to 1d -- that would silently build yesterday's
     # config. 0s re-fetches on every build.

@@ -1,0 +1,176 @@
+# ESP-NOW link -- the controller half of the two-board split (stage 2).
+#
+# Load this ALONGSIDE control.yaml and sensors.yaml on the board that owns
+# the probe. It broadcasts the values the remote panel needs directly over
+# ESP-NOW, and accepts setpoint and learning commands back.
+#
+# ---------------------------------------------------------------------
+# Why not just MQTT
+# ---------------------------------------------------------------------
+# The broker runs on Home Assistant. So with MQTT as the only link, Home
+# Assistant going down takes the panel's data with it -- and the panel is
+# how you see the tank when you are standing in front of it. ESP-NOW is
+# peer to peer: no router, no broker, no HA. The controller keeps
+# regulating and the panel keeps showing it with both of those offline.
+#
+# MQTT is untouched. Every entity still publishes to Home Assistant
+# exactly as before, for the recorder, InfluxDB, dashboards and alarms.
+# This is a second, parallel path for one consumer, not a replacement.
+#
+# ---------------------------------------------------------------------
+# Channel
+# ---------------------------------------------------------------------
+# ESP-NOW and Wi-Fi share one radio, so ESP-NOW can only work on the
+# channel the Wi-Fi station is already on. ESPHome enforces this: the
+# espnow component REJECTS a `channel:` setting when the wifi component
+# is present, and follows the association instead.
+#
+# So the channel is pinned at the ROUTER, not here. Both boards associate
+# with the same AP, land on the same channel, and can hear each other. If
+# the AP is ever set back to "auto" and moves channel, ESP-NOW stops
+# working with no error on either board -- the packets simply go out on a
+# channel nobody is listening to.
+#
+# ---------------------------------------------------------------------
+# Encryption
+# ---------------------------------------------------------------------
+# espnow_key must exist in secrets.yaml on both boards, identical. It is
+# a plain shared string. A missing secret fails the BUILD, which is the
+# behaviour worth having -- an unencrypted link would work perfectly and
+# silently accept a setpoint command from anyone in radio range.
+
+espnow:
+  id: espnow_link
+  # Broadcast rather than a fixed peer list, so neither board needs the
+  # other's MAC baked into its config. Nothing else here speaks ESP-NOW,
+  # and the payloads are encrypted.
+  auto_add_peer: true
+  on_broadcast:
+    # Commands from the panel. Deliberately a tiny text protocol rather
+    # than a struct: it survives a firmware version skew between the two
+    # boards, and it is readable in a log when something goes wrong.
+    #
+    #   SP <degF>   set target temperature
+    #   AL 0 | AL 1 adaptive learning off/on
+    - lambda: |-
+        if (size < 4 || size > 16) return;
+        char buf[17];
+        memcpy(buf, data, size);
+        buf[size] = '\0';
+
+        if (buf[0] == 'S' && buf[1] == 'P') {
+          const float f = atof(buf + 2);
+          // Same range as the number entity's slider. A malformed or
+          // out-of-range packet must not be able to drive the tank
+          // somewhere the UI would never allow.
+          if (f >= 70.0f && f <= 80.0f) {
+            id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
+            // Publish so Home Assistant and the number entity agree with
+            // the controller -- otherwise the dashboard keeps showing the
+            // old setpoint until something else republishes it.
+            id(target_temperature).publish_state(f);
+            ESP_LOGI("espnow", "setpoint <- %.1f F (panel)", f);
+          }
+        } else if (buf[0] == 'A' && buf[1] == 'L') {
+          const bool on = (buf[3] == '1');
+          id(controller).set_learning_enabled(on);
+          ESP_LOGI("espnow", "adaptive learning <- %s (panel)", on ? "ON" : "OFF");
+        }
+
+# The values the panel renders, in the units the controller's own API
+# returns them in. Broadcasting the raw accessor values rather than the
+# Fahrenheit display sensors keeps the conversion in exactly one place --
+# the panel's LVGL code, which already does it.
+#
+# internal: true because these are a transport detail. Home Assistant
+# already has all of this from the named sensors in control.yaml, and
+# duplicating them would just double the entity count on the dashboard.
+sensor:
+  - platform: template
+    id: link_setpoint_c
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 4
+    lambda: "return id(controller).get_setpoint();"
+
+  - platform: template
+    id: link_swing_c
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 4
+    lambda: "return id(controller).get_swing();"
+
+  - platform: template
+    id: link_drift_c_min
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 6
+    lambda: "return id(controller).get_drift_rate();"
+
+  - platform: template
+    id: link_conf
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 1
+    lambda: "return id(controller).get_confidence();"
+
+  - platform: template
+    id: link_heat
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 1
+    lambda: "return id(controller).get_heater_duty();"
+
+  - platform: template
+    id: link_fan
+    internal: true
+    update_interval: 10s
+    accuracy_decimals: 1
+    lambda: "return id(controller).get_fan_duty();"
+
+binary_sensor:
+  - platform: template
+    id: link_fault
+    internal: true
+    lambda: "return id(controller).is_safety_tripped();"
+
+  - platform: template
+    id: link_learning
+    internal: true
+    lambda: "return id(controller).get_learning_enabled();"
+
+packet_transport:
+  - platform: espnow
+    espnow_id: espnow_link
+    # 10s. The panel is a glance-at-it display, not a control loop, and
+    # every broadcast costs airtime on the same radio the Wi-Fi station
+    # is using. Faster buys nothing you can perceive on a tank whose time
+    # constant is measured in hours.
+    update_interval: 10s
+    encryption: !secret espnow_key
+    # broadcast_id is the name on the wire. Short, because the ESP-NOW
+    # payload is 250 bytes and every name is sent with every packet.
+    sensors:
+      - id: water_temp
+        broadcast_id: wt
+      - id: tds
+        broadcast_id: td
+      - id: tank_lux
+        broadcast_id: lx
+      - id: link_setpoint_c
+        broadcast_id: sp
+      - id: link_swing_c
+        broadcast_id: sw
+      - id: link_drift_c_min
+        broadcast_id: dr
+      - id: link_conf
+        broadcast_id: cf
+      - id: link_heat
+        broadcast_id: ht
+      - id: link_fan
+        broadcast_id: fn
+    binary_sensors:
+      - id: link_fault
+        broadcast_id: ft
+      - id: link_learning
+        broadcast_id: al

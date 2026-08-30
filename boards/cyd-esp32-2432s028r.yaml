@@ -815,9 +815,12 @@ lvgl:
                   // a moment later and is the authority.
                   const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f - 0.5f;
                   id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
-                  char buf[8];
-                  snprintf(buf, sizeof(buf), "%.1f", f);
-                  id(mqtt_client).publish("${source_device}/number/target_temperature/command", buf);
+                  char buf[12];
+                  snprintf(buf, sizeof(buf), "SP%.1f", f);
+                  // Broadcast address: the controller is the only listener,
+                  // and this avoids baking its MAC into the panel's config.
+                  static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+                  id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
 
         - label:
             id: set_value
@@ -865,9 +868,12 @@ lvgl:
                   // a moment later and is the authority.
                   const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f + 0.5f;
                   id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
-                  char buf[8];
-                  snprintf(buf, sizeof(buf), "%.1f", f);
-                  id(mqtt_client).publish("${source_device}/number/target_temperature/command", buf);
+                  char buf[12];
+                  snprintf(buf, sizeof(buf), "SP%.1f", f);
+                  // Broadcast address: the controller is the only listener,
+                  // and this avoids baking its MAC into the panel's config.
+                  static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+                  id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
 
         - obj:
             x: 14
@@ -899,8 +905,9 @@ lvgl:
                         // then would command the controller with the value it
                         // just reported, which is a loop.
                         if (id(r_sync)) return;
-                        id(mqtt_client).publish("${source_device}/switch/adaptive_learning/command",
-                                                x ? "ON" : "OFF");
+                        static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+                        const char *cmd = x ? "AL 1" : "AL 0";
+                        id(espnow_link).send(BCAST, (const uint8_t *) cmd, 4);
               - switch:
                   id: sw_light
                   x: 208
