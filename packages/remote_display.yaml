@@ -133,6 +133,25 @@ globals:
     initial_value: '0'
 
 script:
+  # One place that changes the setpoint, so a tap and a held button cannot
+  # drift apart. delta is in Fahrenheit.
+  - id: bump_setpoint
+    parameters:
+      delta: float
+    then:
+      - lambda: |-
+          const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f + delta;
+          // Clamp here as well as on the controller. The controller
+          // ignores anything outside 70-80, so without this the panel's
+          // optimistic copy would keep climbing past the limit and show a
+          // setpoint the tank is not being held at.
+          if (f < 70.0f || f > 80.0f) return;
+          id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
+          char buf[12];
+          snprintf(buf, sizeof(buf), "SP%.1f", f);
+          static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+          id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
+
   - id: r_seen
     then:
       # Block scalar: a ternary's ':' is not legal in a plain YAML scalar.

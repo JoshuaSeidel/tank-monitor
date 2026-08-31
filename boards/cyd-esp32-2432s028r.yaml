@@ -901,19 +901,19 @@ lvgl:
                   text: "-"
                   text_font: font_xl
                   text_color: 0x00C8FF
-            on_release:
-              - lambda: |-
-                  // Optimistic local update so the number moves under your
-                  // finger; the controller's own state topic overwrites it
-                  // a moment later and is the authority.
-                  const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f - 0.5f;
-                  id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
-                  char buf[12];
-                  snprintf(buf, sizeof(buf), "SP%.1f", f);
-                  // Broadcast address: the controller is the only listener,
-                  // and this avoids baking its MAC into the panel's config.
-                  static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-                  id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
+            # on_press, not on_release: a long press also fires release,
+            # which would add an extra step every time you finished holding.
+            on_press:
+              - script.execute:
+                  id: bump_setpoint
+                  delta: -0.1
+            # Holding repeats at the panel's long_press_repeat_time (100ms),
+            # so a hold moves about 1 F per second -- 0.1 per tap is precise
+            # but tedious over a whole degree.
+            on_long_press_repeat:
+              - script.execute:
+                  id: bump_setpoint
+                  delta: -0.1
 
         - label:
             id: set_value
@@ -954,19 +954,19 @@ lvgl:
                   text: "+"
                   text_font: font_xl
                   text_color: 0x00C8FF
-            on_release:
-              - lambda: |-
-                  // Optimistic local update so the number moves under your
-                  // finger; the controller's own state topic overwrites it
-                  // a moment later and is the authority.
-                  const float f = id(r_setpoint_c) * 9.0f / 5.0f + 32.0f + 0.5f;
-                  id(r_setpoint_c) = (f - 32.0f) * 5.0f / 9.0f;
-                  char buf[12];
-                  snprintf(buf, sizeof(buf), "SP%.1f", f);
-                  // Broadcast address: the controller is the only listener,
-                  // and this avoids baking its MAC into the panel's config.
-                  static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-                  id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
+            # on_press, not on_release: a long press also fires release,
+            # which would add an extra step every time you finished holding.
+            on_press:
+              - script.execute:
+                  id: bump_setpoint
+                  delta: 0.1
+            # Holding repeats at the panel's long_press_repeat_time (100ms),
+            # so a hold moves about 1 F per second -- 0.1 per tap is precise
+            # but tedious over a whole degree.
+            on_long_press_repeat:
+              - script.execute:
+                  id: bump_setpoint
+                  delta: 0.1
 
         - obj:
             x: 14
