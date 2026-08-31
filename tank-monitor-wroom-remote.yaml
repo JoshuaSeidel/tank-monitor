@@ -1,0 +1,36 @@
+# Thin wrapper for the plain ESP32-WROOM-32 controller.
+#
+# Put THIS file in the ESPHome dashboard. Nothing else lives locally
+# except secrets.yaml, so a push to main is all the next build needs.
+#
+# device_name MUST differ from the C6's if both run at once. It is not
+# cosmetic: it sets the MQTT topic prefix, the discovery object ids, the
+# mDNS hostname and the fallback AP name all at once. Two devices
+# answering to "tank-monitor" publish to identical topics and overwrite
+# each other's Home Assistant entities as fast as they appear.
+#
+# Secrets are NOT affected. base.yaml references fixed keys
+# (tank_monitor_mqtt_username and friends) rather than deriving them from
+# device_name, so every board shares one Wi-Fi, MQTT and OTA identity
+# with nothing to add to secrets.yaml.
+substitutions:
+  device_name: tank-monitor-w32
+  friendly_name: Tank Monitor W32
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      # Uncomment to let a remote panel read THIS board over ESP-NOW.
+      # The panel picks its source by provider name, so also point that
+      # panel's `source_device` substitution at the device_name above --
+      # otherwise it keeps listening to the C6.
+      # - packages/espnow_link.yaml
+      - boards/esp32-wroom32.yaml
+    # refresh defaults to 1d -- that would silently build yesterday's
+    # config. 0s re-fetches on every build.
+    refresh: 0s

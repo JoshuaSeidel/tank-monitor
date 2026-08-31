@@ -6,6 +6,8 @@ Two boards are covered here and they wire up differently:
   the board's pads.
 - **[CYD ESP32-2432S028R (`tank-monitor-v2`)](#cyd-esp32-2432s028r-tank-monitor-v2)** —
   display-only remote panel. No wiring at all.
+- **[ESP32-WROOM-32 (`tank-monitor-w32`)](#esp32-wroom-32-tank-monitor-w32)** —
+  headless controller. Same wiring as the C6 on different pins.
 
 Build order matters on both: power bus first, sensors one at a time, relay
 last. That way if something is wrong you know which step caused it.
@@ -296,3 +298,63 @@ DS18B20 IO19 with a 4.7 kΩ pull-up to 3V3, BH1750 SDA/SCL on IO1/IO3 powered
 from the 3-pin header's **3.3V, not the UART header's 5V**. Not IO22 — this
 revision doesn't break it out. Not the speaker header — IO26 reaches it
 through the audio amplifier.
+
+# ESP32-WROOM-32 (`tank-monitor-w32`)
+
+A controller with no screen — the same job as the C6, on a plain devkit.
+Everything solders to the board's own header pins; there is no breakout.
+
+Follow the C6 build above for technique: steps 2 (pre-tin), 3 (power splices),
+6 (the pull-up), 8 (inspect) and 10 (before it goes near water) apply
+unchanged. Only the pin numbers differ.
+
+## Pin map
+
+| Board pin | Goes to |
+|---|---|
+| GPIO34 | TDS `A` |
+| GPIO4 | DS18B20 yellow (DQ), with the 4.7 kΩ pull-up to 3V3 |
+| GPIO21 | BH1750 `SDA` |
+| GPIO22 | BH1750 `SCL` |
+| GPIO26 | Relay Ch1 `IN+` (heater) |
+| GPIO27 | Relay Ch2 `IN+` (fan) |
+| GND | `IN−` both channels, and every sensor ground |
+| 3V3 | every sensor VCC |
+
+Leave BH1750 `ADDR` unconnected — floating is 0x23, which the config expects.
+
+## Why these pins, and which ones to avoid
+
+This board has pins to spare, so the choices are about which are *safe*:
+
+- **GPIO6–11** are the flash. Using them prevents boot.
+- **GPIO0, 2, 12, 15** are strapping pins. A pull-up or pull-down at boot
+  changes boot mode — a 4.7 kΩ probe pull-up on GPIO12 stops some boards
+  booting at all, which is why the DS18B20 is on GPIO4.
+- **GPIO34–39 are input only** with no internal pull-ups. Right for the TDS
+  analog line, useless for a relay or a 1-Wire bus.
+- **ADC2 cannot be read while Wi-Fi is on.** Any analog input must be on
+  ADC1 (32–39). That is not a preference; ADC2 simply returns garbage.
+
+GPIO25, 32 and 33 are left free on purpose — 32 and 33 are the remaining ADC1
+pins, which is what a second analog probe (pH, ORP) would need.
+
+## Differences from the C6
+
+**It keeps a USB console.** The CYD has to disable serial because its I²C sits
+on the UART pins; nothing here touches GPIO1/GPIO3, so this is the easiest of
+the three boards to diagnose with `esphome logs`.
+
+**No display, no backlight.** Home Assistant, the web UI at its own IP, and the
+remote panel are the interfaces.
+
+**Give it a different `device_name`** if it runs alongside the C6. That name
+sets the MQTT topic prefix, discovery object ids, mDNS hostname and fallback AP
+name at once — two boards answering to the same name overwrite each other's
+entities as fast as they appear.
+
+To let a remote panel read this board instead of the C6, uncomment
+`packages/espnow_link.yaml` in the wrapper **and** point that panel's
+`source_device` substitution at this device's name. The panel selects its
+source by provider name, so two controllers can broadcast at once without
+colliding — but a panel only listens to the one it was told about.

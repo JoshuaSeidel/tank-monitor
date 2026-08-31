@@ -1,0 +1,137 @@
+# Plain ESP32-WROOM-32 devkit (30- or 38-pin) -- a controller with no
+# screen. Sister to boards/lafvin-esp32c6.yaml: same job, same wet-side
+# hardware, same shared packages. The only thing it does not do is draw.
+#
+# Pair with packages/base.yaml, packages/control.yaml and
+# packages/sensors.yaml. Optionally packages/espnow_link.yaml if a remote
+# panel should read this board -- see the note at the bottom.
+#
+# ---------------------------------------------------------------
+# What a board file owes the shared packages
+# ---------------------------------------------------------------
+# control.yaml and sensors.yaml are deliberately pin-free. They expect a
+# board file to supply exactly five things, and nothing else:
+#
+#   one_wire:                    -> dallas_temp (the probe)
+#   i2c:                         -> bh1750 (light)
+#   an adc sensor id: tds_voltage -> the TDS maths
+#   output id: heater_output     -> the controller's heater
+#   output id: fan_output        -> the controller's fan
+#
+# Anything satisfying those five works. That is why this file is short:
+# the control loop, the learning, the safety cutouts and every entity are
+# already written and board-agnostic.
+#
+# ---------------------------------------------------------------
+# Pin budget
+# ---------------------------------------------------------------
+# Unlike the CYD, this board has pins to spare -- nothing is spoken for
+# except flash. The choices below are about which pins are SAFE, not
+# which are free:
+#
+#   GPIO6-11    flash. Using them bricks the boot.
+#   GPIO0,2,12,15  strapping. A pull-up or pull-down on these at boot
+#               changes boot mode, and a 4.7k probe pull-up on GPIO12
+#               in particular stops some boards booting at all.
+#   GPIO34-39   INPUT ONLY, and no internal pull-ups. Fine for the TDS
+#               analog line, useless for a relay or a 1-Wire bus.
+#   ADC2 (0,2,4,12-15,25-27) cannot be read while Wi-Fi is on. Every
+#               analog input must be ADC1: 32-39.
+#
+#   TDS analog   GPIO34  ADC1, input-only -- exactly what it is for, and
+#                        it keeps an output-capable pin free.
+#   DS18B20      GPIO4   4.7k pull-up to 3V3. Not a strapping pin, so the
+#                        pull-up is harmless here.
+#   BH1750 SDA   GPIO21  the devkit's default I2C pair, so it matches
+#   BH1750 SCL   GPIO22  every pinout diagram printed for this board.
+#   Heater relay GPIO26  adjacent to 27 on the header, so the two relay
+#   Fan relay    GPIO27  wires land side by side.
+#
+# GPIO25 and GPIO32/33 are left free deliberately: 25 is the other DAC
+# pin and 32/33 are the remaining ADC1 pins, which is what a second
+# analog probe (pH, ORP) would need.
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4
+
+# Time-proportional heater/fan drive. See boards/lafvin-esp32c6.yaml for
+# why the window is 900s rather than 300s -- it is mechanical relay wear,
+# not control quality.
+output:
+  - platform: slow_pwm
+    id: heater_output
+    pin: GPIO26
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return state;"
+
+  - platform: slow_pwm
+    id: fan_output
+    pin: GPIO27
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
+
+sensor:
+  # TDS meter analog output -> GPIO34 (ADC1, input-only).
+  # Internal only; feeds the TDS calculation in packages/sensors.yaml.
+  - platform: adc
+    pin: GPIO34
+    id: tds_voltage
+    update_interval: 500ms
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      # 20 samples smoothed -- the probe output is noisy AC-excited
+      - median:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+
+# ---------------------------------------------------------------
+# No display, and no backlight output
+# ---------------------------------------------------------------
+# The C6 board file defines a `display_backlight` light. Nothing in the
+# shared packages references it -- it belongs to that board's panel -- so
+# its absence here costs nothing. This board is headless: Home Assistant,
+# the web UI on its own IP, and the remote panel are the interfaces.
+#
+# ---------------------------------------------------------------
+# Serial logging stays on
+# ---------------------------------------------------------------
+# The CYD has to run baud_rate: 0 because its I2C sits on the UART pins.
+# Nothing here touches GPIO1/GPIO3, so this board keeps a USB console --
+# which makes it the easiest of the three to diagnose when a probe is
+# misbehaving.
+#
+# ---------------------------------------------------------------
+# Two controllers at once
+# ---------------------------------------------------------------
+# If this board runs alongside the C6, give it a different device_name in
+# its wrapper. That name sets the MQTT topic prefix, the discovery object
+# ids, the mDNS hostname and the fallback AP name all at once -- two
+# devices answering to the same name overwrite each other's Home
+# Assistant entities as fast as they appear.
+#
+# If it should also feed a remote panel, add packages/espnow_link.yaml.
+# The panel selects by provider name, so two controllers broadcasting at
+# once do not collide -- but a panel only listens to the one provider
+# named in its remote_display config.
