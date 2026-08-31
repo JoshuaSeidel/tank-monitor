@@ -56,7 +56,7 @@ espnow:
         // Any frame from the panel counts as proof of life, including the
         // heartbeat, which carries nothing else.
         id(panel_stamp_ms) = millis();
-        if (size < 4 || size > 16) return;
+        if (size < 2 || size > 16) return;
         char buf[17];
         memcpy(buf, data, size);
         buf[size] = '\0';
@@ -74,6 +74,11 @@ espnow:
             id(target_temperature).publish_state(f);
             ESP_LOGI("espnow", "setpoint <- %.1f F (panel)", f);
           }
+        } else if (buf[0] == 'R' && buf[1] == 'Q') {
+          // The panel has just booted, or has gone quiet long enough to
+          // suspect it missed something. Send now rather than making it
+          // wait out the broadcast interval.
+          id(link_push).execute();
         } else if (buf[0] == 'A' && buf[1] == 'L') {
           const bool on = (buf[3] == '1');
           id(controller).set_learning_enabled(on);
@@ -131,6 +136,21 @@ sensor:
     accuracy_decimals: 1
     lambda: "return id(controller).get_fan_duty();"
 
+script:
+  # Refresh the derived values, then push a packet immediately. Updating
+  # the sensors first matters on a cold start: their template lambdas may
+  # not have run yet, and sending stale or empty values would defeat the
+  # point of asking.
+  - id: link_push
+    then:
+      - component.update: link_setpoint_c
+      - component.update: link_swing_c
+      - component.update: link_drift_c_min
+      - component.update: link_conf
+      - component.update: link_heat
+      - component.update: link_fan
+      - component.update: link_tx
+
 globals:
   - id: panel_stamp_ms
     type: uint32_t
@@ -168,6 +188,7 @@ binary_sensor:
 
 packet_transport:
   - platform: espnow
+    id: link_tx
     espnow_id: espnow_link
     # 10s. The panel is a glance-at-it display, not a control loop, and
     # every broadcast costs airtime on the same radio the Wi-Fi station

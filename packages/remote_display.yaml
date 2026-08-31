@@ -303,3 +303,24 @@ interval:
           static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
           const char *hb = "HB";
           id(espnow_link).send(BCAST, (const uint8_t *) hb, 2);
+
+  # Ask for data instead of waiting for the next scheduled broadcast.
+  #
+  # Two things delay a cold start otherwise. ESP-NOW shares the radio with
+  # Wi-Fi and cannot reliably receive until the station has associated --
+  # until then the radio is scanning channels -- and once it can, the
+  # controller is on its own 10s timer with no idea anyone just arrived.
+  # Together that is the 40-50s of blank screen after plugging in.
+  #
+  # Asking every 3s while there is no data collapses that to about as long
+  # as the association takes. It stops on its own once data flows, and
+  # resumes if the feed goes quiet, so it doubles as link recovery.
+  - interval: 3s
+    then:
+      - lambda: |-
+          const bool stale = id(r_stamp_ms) == 0 ||
+                             (millis() - id(r_stamp_ms)) > 20000;
+          if (!stale) return;
+          static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+          const char *rq = "RQ";
+          id(espnow_link).send(BCAST, (const uint8_t *) rq, 2);

@@ -125,8 +125,8 @@ sensor:
     lambda: "if (isnan(id(chem_gh))) return {}; return id(chem_gh);"
   - platform: template
     name: "Chem KH"
-    unit_of_measurement: "ppm"
-    accuracy_decimals: 0
+    unit_of_measurement: "dKH"
+    accuracy_decimals: 1
     update_interval: 30s
     entity_category: diagnostic
     lambda: "if (isnan(id(chem_kh))) return {}; return id(chem_kh);"
