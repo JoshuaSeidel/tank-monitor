@@ -764,14 +764,14 @@ lvgl:
             y: 186
             text: "SWING --"
             styles: caption
-        - label:
-            id: chip_conf
-            x: 210
-            y: 186
-            width: 96
-            text_align: RIGHT
-            text: "LEARN --"
-            styles: caption
+        # No LEARN chip here. The only free space on this row is x210-306,
+        # which is inside card_fan (x190-308, y150-202) -- it was drawn on
+        # top of the card, and was only ever hidden by the duty bar that
+        # used to occupy that strip. The left of the row is the temperature
+        # arc's bounding box, and three captions do not fit before x190.
+        #
+        # The value is not lost: the Water & Model page shows it as LEARNED,
+        # and it is Model Confidence / Model Health in Home Assistant.
 
         # ---- page nav ----------------------------------------------
         # Buttons, not swipes. Resistive touch resolves a tap reliably and
@@ -1343,7 +1343,6 @@ interval:
             lv_label_set_text_fmt(id(chip_tds), "TDS %.0f", id(tds).state);
           const float sw = id(r_swing_c);
           if (!isnan(sw)) lv_label_set_text_fmt(id(chip_swing), "SWING %.1f", sw * 9.0f / 5.0f);
-          lv_label_set_text_fmt(id(chip_conf), "LEARN %.0f%%", id(r_conf));
 
           // --- link status icons ---
           {
