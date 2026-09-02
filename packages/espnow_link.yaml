@@ -222,3 +222,10 @@ packet_transport:
         broadcast_id: ft
       - id: link_learning
         broadcast_id: al
+      # The actual relay contacts, not the commanded duty. The panel shows
+      # these as ON/OFF: a plug has no partial setting, and a percentage
+      # reads as a fault when the fan is silent mid-cycle.
+      - id: heater_relay
+        broadcast_id: hr
+      - id: fan_relay
+        broadcast_id: fr

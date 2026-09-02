@@ -107,6 +107,16 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Actual relay contact states, as opposed to r_heat / r_fan, which are
+  # the commanded duty over the 15-minute window.
+  - id: r_heat_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: r_fan_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
   - id: r_learn_on
     type: bool
     restore_value: true
@@ -282,6 +292,22 @@ binary_sensor:
     internal: true
     on_state:
       - lambda: id(r_fault) = x;
+
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: hr
+    id: r_sub_heat_on
+    internal: true
+    on_state:
+      - lambda: id(r_heat_on) = x;
+
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: fr
+    id: r_sub_fan_on
+    internal: true
+    on_state:
+      - lambda: id(r_fan_on) = x;
 
   - platform: packet_transport
     provider: ${source_device}

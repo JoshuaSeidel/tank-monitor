@@ -719,11 +719,11 @@ lvgl:
                   styles: caption
               - label:
                   id: heat_value
-                  x: 70
+                  x: 60
                   y: 0
-                  width: 30
+                  width: 40
                   text_align: RIGHT
-                  text: "0%"
+                  text: "OFF"
                   styles: caption
               - bar:
                   id: heat_bar
@@ -758,11 +758,11 @@ lvgl:
                   styles: caption
               - label:
                   id: fan_value
-                  x: 70
+                  x: 60
                   y: 0
-                  width: 30
+                  width: 40
                   text_align: RIGHT
-                  text: "0%"
+                  text: "OFF"
                   styles: caption
               - bar:
                   id: fan_bar
@@ -1349,12 +1349,21 @@ interval:
           else    lv_label_set_text(id(temp_value), "--.-");
           lv_label_set_text_fmt(id(target_value), "%.1f", sp_f);
 
+          // ON/OFF is the real contact state; the bar underneath is the
+          // commanded duty over the 15-minute window. A plug has no partial
+          // setting, so a percentage as the headline reads as a fault
+          // whenever the fan is silent between cycles -- which at 40% duty
+          // is most of the time.
           const int h = (int) id(r_heat);
           const int f2 = (int) id(r_fan);
           lv_bar_set_value(id(heat_bar), h, LV_ANIM_ON);
           lv_bar_set_value(id(fan_bar), f2, LV_ANIM_ON);
-          lv_label_set_text_fmt(id(heat_value), "%d%%", h);
-          lv_label_set_text_fmt(id(fan_value), "%d%%", f2);
+          lv_label_set_text(id(heat_value), id(r_heat_on) ? "ON" : "OFF");
+          lv_label_set_text(id(fan_value),  id(r_fan_on)  ? "ON" : "OFF");
+          lv_obj_set_style_text_color(id(heat_value),
+              lv_color_hex(id(r_heat_on) ? 0xFFB020 : 0x5A6B83), 0);
+          lv_obj_set_style_text_color(id(fan_value),
+              lv_color_hex(id(r_fan_on) ? 0x2F80FF : 0x5A6B83), 0);
 
           if (!isnan(id(tank_lux).state))
             lv_label_set_text_fmt(id(hdr_light), "LIGHT %.0f", id(tank_lux).state);
