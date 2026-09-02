@@ -719,28 +719,12 @@ lvgl:
                   styles: caption
               - label:
                   id: heat_value
-                  x: 60
-                  y: 0
-                  width: 40
-                  text_align: RIGHT
-                  text: "OFF"
-                  styles: caption
-              - bar:
-                  id: heat_bar
                   x: 0
-                  y: 22
-                  width: 100
-                  height: 10
-                  min_value: 0
-                  max_value: 100
-                  value: 0
-                  bg_color: 0x1B2739
-                  radius: 5
-                  indicator:
-                    bg_color: 0xFFB020
-                    bg_grad_color: 0xFF7A00
-                    bg_grad_dir: HOR
-                    radius: 5
+                  y: 18
+                  width: 106
+                  text: "OFF"
+                  text_font: font_md
+                  text_color: 0x5A6B83
 
         # ---- right column: fan -------------------------------------
         - obj:
@@ -758,28 +742,12 @@ lvgl:
                   styles: caption
               - label:
                   id: fan_value
-                  x: 60
-                  y: 0
-                  width: 40
-                  text_align: RIGHT
-                  text: "OFF"
-                  styles: caption
-              - bar:
-                  id: fan_bar
                   x: 0
-                  y: 22
-                  width: 100
-                  height: 10
-                  min_value: 0
-                  max_value: 100
-                  value: 0
-                  bg_color: 0x1B2739
-                  radius: 5
-                  indicator:
-                    bg_color: 0x00C8FF
-                    bg_grad_color: 0x0077FF
-                    bg_grad_dir: HOR
-                    radius: 5
+                  y: 18
+                  width: 106
+                  text: "OFF"
+                  text_font: font_md
+                  text_color: 0x5A6B83
 
         # ---- footer chips ------------------------------------------
         - label:
@@ -1354,10 +1322,12 @@ interval:
           // setting, so a percentage as the headline reads as a fault
           // whenever the fan is silent between cycles -- which at 40% duty
           // is most of the time.
-          const int h = (int) id(r_heat);
-          const int f2 = (int) id(r_fan);
-          lv_bar_set_value(id(heat_bar), h, LV_ANIM_ON);
-          lv_bar_set_value(id(fan_bar), f2, LV_ANIM_ON);
+          // No duty bar. A part-filled bar is a percentage whether or not
+          // a number is printed beside it, so "OFF" next to a 41%-filled
+          // bar contradicts itself. Controller State already says whether
+          // the tank is heating, cooling or holding, which is what the bar
+          // actually conveyed; the commanded duty stays in Home Assistant
+          // as a diagnostic for anyone who wants the number.
           lv_label_set_text(id(heat_value), id(r_heat_on) ? "ON" : "OFF");
           lv_label_set_text(id(fan_value),  id(r_fan_on)  ? "ON" : "OFF");
           lv_obj_set_style_text_color(id(heat_value),
