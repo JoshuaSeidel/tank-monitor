@@ -59,7 +59,16 @@ substitutions:
   # emergency, and both would have been wrong. GH and KH carry that
   # verdict, in Home Assistant, against targets you can adjust.
   # Above this the tank lights count as on, and the top strip goes amber.
-  light_on_lux: "50"
+  # Measured, not guessed. Over 24h this tank reads 5-10 lux with the
+  # aquarium light off (2026-08-31 22:2x) and 25-47 lux with it at or near
+  # peak (2026-09-01 11:00-12:15). 50 sat ABOVE the daytime maximum, so the
+  # "lights on / dark" readout on both panels said dark around the clock
+  # and had done since it was written.
+  #
+  # 18 splits the two populations with margin on each side. Re-measure if
+  # the light's schedule or the sensor's position changes -- this number is
+  # only meaningful against one particular sensor in one particular spot.
+  light_on_lux: "18"
   # K-value for the TDS probe. 1.0 is the factory default.
   # Calibrate with a known solution (e.g. 707ppm / 1413us-cm standard).
   tds_k_factor: "1.0"
