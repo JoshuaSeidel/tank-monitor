@@ -714,14 +714,15 @@ lvgl:
             widgets:
               - label:
                   x: 0
-                  y: 0
+                  y: 10
                   text: "HEATER"
                   styles: caption
               - label:
                   id: heat_value
-                  x: 0
-                  y: 18
-                  width: 106
+                  x: 56
+                  y: 7
+                  width: 46
+                  text_align: RIGHT
                   text: "OFF"
                   text_font: font_md
                   text_color: 0x5A6B83
@@ -737,14 +738,15 @@ lvgl:
             widgets:
               - label:
                   x: 0
-                  y: 0
+                  y: 10
                   text: "FAN"
                   styles: caption
               - label:
                   id: fan_value
-                  x: 0
-                  y: 18
-                  width: 106
+                  x: 56
+                  y: 7
+                  width: 46
+                  text_align: RIGHT
                   text: "OFF"
                   text_font: font_md
                   text_color: 0x5A6B83
