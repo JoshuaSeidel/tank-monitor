@@ -39,6 +39,36 @@ static const float FAN_STALL_FALL = 0.05f;         // degC
 // acted on.
 static const float BIAS_EMA_W = 0.2f;
 
+// ---------------------------------------------------------------------
+// Model health: does this model still describe this tank?
+// ---------------------------------------------------------------------
+// get_confidence() counts learning steps. It only ever rises, so a model
+// that has seen a day of data is trusted completely and permanently --
+// including after the tank physically changes. That happened here: a
+// canister filter added a continuous heat load, and the controller went
+// on predicting a falling tank, at 100% confidence, while it sat 0.9 degF
+// above setpoint with the integral capped too low to overrule it.
+//
+// STALE_DEADBAND is the residual below which a persistent error is just
+// sensor quantisation. One DS18B20 LSB over a 5 minute window is
+// 1.35 degF/h == 0.0125 degC/min, so anything under a few thousandths is
+// noise, not evidence -- the mistake an earlier version of this file made
+// by acting on a single drift sample.
+//
+// STALE_SCALE is how much sustained one-directional error it takes to
+// stop believing the model entirely. 0.02 degC/min is 2.2 degF/h, which
+// is roughly the whole cooling authority of the fan: if the model is
+// wrong by that much, it is not describing this tank.
+static const float STALE_DEADBAND = 0.004f;
+static const float STALE_SCALE = 0.020f;
+// Per-step covariance re-inflation while the model looks stale. RLS gain
+// shrinks as P converges, which is right for a fixed plant and wrong for
+// one that just changed -- by the time the tank changes, P is small and
+// the correction crawls. 2% per step recovers the prior covariance in a
+// couple of hundred steps, fast enough to matter and slow enough not to
+// destabilise a model that is merely being rained on by noise.
+static const float P_REINFLATE = 1.02f;
+
 // Ceiling on what the integral term alone may command, as a fraction of
 // heater duty. See the clamp for why this is not a fixed rate.
 static const float INTEGRAL_AUTHORITY = 0.3f;
@@ -332,6 +362,18 @@ void TankController::learn_(float dt_min, float measured_rate) {
   // next time, and worth keeping out of the control path until something
   // more than one sample justifies it.
   this->bias_ = (1.0f - BIAS_EMA_W) * this->bias_ + BIAS_EMA_W * err;
+
+  // A model that is wrong in one direction, step after step, is stale --
+  // random noise averages to zero here, a changed tank does not. While
+  // that holds, re-inflate the covariance so RLS corrects at the speed it
+  // had when it was new, capped at the prior so it cannot run away.
+  if (this->get_model_health() < 1.0f) {
+    for (uint8_t i = 0; i < N_PARAMS; i++) {
+      const float lim = P_PRIOR[i];
+      if (this->model_.p[i][i] < lim)
+        this->model_.p[i][i] = std::fmin(this->model_.p[i][i] * P_REINFLATE, lim);
+    }
+  }
 
   ESP_LOGD(TAG, "learn: rate=%.4f pred=%.4f err=%.4f kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", measured_rate, pred, err,
            this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
@@ -635,11 +677,31 @@ float TankController::get_time_constant() const {
   return ka > 1e-4f ? 1.0f / ka : NAN;  // minutes
 }
 
+float TankController::get_model_health() const {
+  // 1.0 while the residual is indistinguishable from sensor noise, falling
+  // to 0.0 as a persistent one-directional error grows to the size of the
+  // fan's whole authority. Uses the SIGNED error EMA, not the magnitude:
+  // noise cancels in the EMA and a genuinely wrong model does not, so this
+  // measures staleness rather than noisiness.
+  const float e = std::fabs(this->bias_);
+  if (e <= STALE_DEADBAND)
+    return 1.0f;
+  return clampf(1.0f - (e - STALE_DEADBAND) / STALE_SCALE, 0.0f, 1.0f);
+}
+
 float TankController::get_confidence() const {
-  // Two full learning windows per 10 minutes of data; call it settled after
-  // roughly a day of observations.
+  // Two things have to be true before the feedforward is trusted: enough
+  // data, and predictions that still match the tank. The first alone is
+  // what let a stale model keep full authority after the tank changed.
+  //
+  // Reported as one number because that is what it means to a reader --
+  // "how much should I believe this model" -- and because a confidence
+  // that silently stays at 100 while the tank drifts is the failure this
+  // is fixing. It falls when the model goes wrong and recovers by itself
+  // once RLS catches up, with no reset needed.
   const float target = (24.0f * 60.0f) / (LEARN_WINDOW_MS / 60000.0f);
-  return clampf(100.0f * this->model_.updates / target, 0.0f, 100.0f);
+  const float data = clampf(100.0f * this->model_.updates / target, 0.0f, 100.0f);
+  return data * this->get_model_health();
 }
 
 void TankController::dump_config() {

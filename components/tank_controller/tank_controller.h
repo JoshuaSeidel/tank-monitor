@@ -96,6 +96,10 @@ class TankController : public PollingComponent {
   float get_light_gain() const { return this->model_.theta[3]; }
   float get_time_constant() const;
   float get_confidence() const;
+  // 1.0 = predictions match the tank, 0.0 = persistently wrong. Scales the
+  // confidence above, so a model that stops describing the tank loses its
+  // authority instead of keeping it forever.
+  float get_model_health() const;
   // Running bias of the model's own predictions, degC/min. Positive means
   // the tank is warmer than the model keeps saying it will be. Diagnostic
   // only -- it does not gate anything.

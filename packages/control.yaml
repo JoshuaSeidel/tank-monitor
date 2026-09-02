@@ -296,6 +296,21 @@ sensor:
     lambda: "return id(controller).get_model_bias() * 60.0f * 9.0f / 5.0f;"
 
   - platform: template
+    name: "Model Health"
+    id: model_health
+    unit_of_measurement: "%"
+    icon: "mdi:heart-pulse"
+    state_class: measurement
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: "return id(controller).get_model_health() * 100.0f;"
+
+  # Model Confidence is now Model Health multiplied by how much data the
+  # model has seen, so it falls when the tank changes and recovers as RLS
+  # catches up. Health on its own is the diagnostic: it isolates "the model
+  # is wrong" from "the model is new", which the combined number cannot.
+  - platform: template
     name: "Model Confidence"
     unit_of_measurement: "%"
     icon: "mdi:brain"
