@@ -59,8 +59,23 @@ static const float BIAS_EMA_W = 0.2f;
 // stop believing the model entirely. 0.02 degC/min is 2.2 degF/h, which
 // is roughly the whole cooling authority of the fan: if the model is
 // wrong by that much, it is not describing this tank.
-static const float STALE_DEADBAND = 0.004f;
-static const float STALE_SCALE = 0.020f;
+// Both were set far too tight on the first attempt, and the tank showed it
+// immediately: a residual of 0.046 degC/min (4.96 degF/h) is normal while
+// RLS is converging, and the original 0.020 scale called that a worthless
+// model. Health floored at 0 and stayed there.
+//
+// Deadband is now the documented quantisation floor: one DS18B20 LSB over a
+// 5 minute window is 1.35 degF/h == 0.0125 degC/min, so nothing below that
+// is evidence of anything. Scale is 0.05 degC/min (5.4 degF/h) -- more than
+// twice the fan's entire authority, so health only reaches zero when the
+// model is wrong by more than the actuators could correct even in principle.
+static const float STALE_DEADBAND = 0.0125f;
+static const float STALE_SCALE = 0.050f;
+// A slow EMA, separate from bias_. bias_ uses BIAS_EMA_W = 0.2 -- about a
+// five sample memory -- which is right for a dashboard reading and far too
+// jumpy to gate control authority on. This one averages over roughly fifty
+// steps, so a single disturbed reading cannot swing the feedforward.
+static const float STALE_EMA_W = 0.02f;
 // Per-step covariance re-inflation while the model looks stale. RLS gain
 // shrinks as P converges, which is right for a fixed plant and wrong for
 // one that just changed -- by the time the tank changes, P is small and
@@ -68,6 +83,12 @@ static const float STALE_SCALE = 0.020f;
 // couple of hundred steps, fast enough to matter and slow enough not to
 // destabilise a model that is merely being rained on by noise.
 static const float P_REINFLATE = 1.02f;
+// Below this, phi' P phi says the step carries no usable information: the
+// actuators are idle and the tank is sitting where it was. Learning from
+// those steps is learning from noise. Sized against an idle regressor with
+// P at the prior, which lands near 1e-5, versus a step with the heater or
+// fan actually running, which is an order of magnitude above it.
+static const float INFO_MIN = 5e-5f;
 
 // Ceiling on what the integral term alone may command, as a fraction of
 // heater duty. See the clamp for why this is not a fixed rate.
@@ -102,7 +123,9 @@ static const float LAMBDA = 0.9995f;
 // closed-loop identification from running off into nonsense when the
 // controller isn't exciting the system much.
 // theta[4] (the constant) sets where the model thinks the tank settles:
-// equilibrium = TEMP_REF + theta[4]/ka. At +/-0.05 with a typical ka that
+// equilibrium = TEMP_REF + theta[4]/ka (TEMP_REF is now the operating
+// point, so theta[4] is the drift AT that point rather than relative to a
+// distant 20 C). At +/-0.05 with a typical ka that
 // spans only ~17-23 C, so a 24 C room could not be represented at all and
 // even a trained model would stay biased toward cooling. +/-0.15 covers
 // roughly 10-30 C, which brackets any room this tank will sit in.
@@ -116,7 +139,11 @@ static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.1
 static const float THETA_MAX[N_PARAMS] = {0.300f, -0.002f, -0.001f, 0.050f, 0.150f};
 
 // Starting guesses: a typical 100-200W heater in a tens-of-gallons tank.
-static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, 0.0f};
+// theta[4] is no longer 0: with TEMP_REF at the operating point rather
+// than 20 C, the assumption that an unheated tank cools has to live here
+// instead of in the centring. -0.030 degC/min is the ~3.3 degF/h this
+// tank sheds unaided, measured.
+static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0.030f};
 // Prior covariance -- how wrong we think the prior is, per parameter.
 static const float P_PRIOR[N_PARAMS] = {1e-3f, 1e-3f, 1e-4f, 1e-5f, 1e-5f};
 
@@ -144,7 +171,7 @@ void TankController::load_prior_() {
 void TankController::setup() {
   this->load_prior_();
 
-  this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model_v2"));
+  this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model_v3"));
   this->light_pref_ = global_preferences->make_preference<LightProfile>(fnv1_hash("tank_light"));
   this->setpoint_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_setpoint"));
 
@@ -185,6 +212,7 @@ void TankController::reset_learning() {
   this->load_prior_();
   this->integral_ = 0.0f;
   this->bias_ = 0.0f;
+  this->stale_ = 0.0f;
   // Windows in flight were accumulated against the old model; carrying
   // them over would fold pre-reset data into the first new learning step.
   this->learn_anchor_temp_ = NAN;
@@ -326,9 +354,28 @@ void TankController::learn_(float dt_min, float measured_rate) {
     for (uint8_t j = 0; j < N_PARAMS; j++)
       p_phi[i] += this->model_.p[i][j] * phi[j];
 
-  float denom = LAMBDA;
+  // phi' P phi -- how much this step actually tells us. Near zero when the
+  // actuators are idle and the tank is sitting still, which is most of the
+  // time on a well-controlled tank.
+  float info = 0.0f;
   for (uint8_t i = 0; i < N_PARAMS; i++)
-    denom += phi[i] * p_phi[i];
+    info += phi[i] * p_phi[i];
+
+  // Forget ONLY on informative steps. This is covariance windup, and it is
+  // the defect that made the model wander: with lambda < 1 applied every
+  // step, P grows by 1/lambda whenever there is nothing to learn. At 0.9995
+  // and a step every 5 minutes that is 2.7x per week, unbounded -- the clamp
+  // at P_PRIOR*10 stops it diverging but parks it at maximum gain, so the
+  // estimate tracks sensor noise instead of the tank. Holding lambda at 1
+  // when a step carries no information leaves P where it is.
+  //
+  // It is also self-limiting in the other direction: info scales with P, so
+  // as the model converges and P shrinks, steps stop qualifying and P stops
+  // shrinking further. The model cannot become so certain that it ignores
+  // new evidence.
+  const float lambda = info > INFO_MIN ? LAMBDA : 1.0f;
+
+  const float denom = lambda + info;
   if (!(denom > 1e-9f))
     return;
 
@@ -337,7 +384,7 @@ void TankController::learn_(float dt_min, float measured_rate) {
 
   for (uint8_t i = 0; i < N_PARAMS; i++)
     for (uint8_t j = 0; j < N_PARAMS; j++)
-      this->model_.p[i][j] = (this->model_.p[i][j] - (p_phi[i] * p_phi[j]) / denom) / LAMBDA;
+      this->model_.p[i][j] = (this->model_.p[i][j] - (p_phi[i] * p_phi[j]) / denom) / lambda;
 
   // P is symmetric by construction but drifts with float rounding over
   // thousands of updates, and an asymmetric covariance can make the gain
@@ -362,12 +409,13 @@ void TankController::learn_(float dt_min, float measured_rate) {
   // next time, and worth keeping out of the control path until something
   // more than one sample justifies it.
   this->bias_ = (1.0f - BIAS_EMA_W) * this->bias_ + BIAS_EMA_W * err;
+  this->stale_ = (1.0f - STALE_EMA_W) * this->stale_ + STALE_EMA_W * err;
 
   // A model that is wrong in one direction, step after step, is stale --
   // random noise averages to zero here, a changed tank does not. While
   // that holds, re-inflate the covariance so RLS corrects at the speed it
   // had when it was new, capped at the prior so it cannot run away.
-  if (this->get_model_health() < 1.0f) {
+  if (info > INFO_MIN && this->get_model_health() < 1.0f) {
     for (uint8_t i = 0; i < N_PARAMS; i++) {
       const float lim = P_PRIOR[i];
       if (this->model_.p[i][i] < lim)
@@ -553,7 +601,11 @@ void TankController::update() {
   // At zero confidence this collapses to plain feedback on the measured
   // error, which cannot be wrong about the sign. The prediction phases in
   // over roughly a day as the model earns it.
-  const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f);
+  // Two independent gates, multiplied: has the model had enough data, and
+  // do its predictions still match the tank. Either one being low pulls the
+  // feedforward out and leaves plain feedback on measured error, which
+  // cannot be wrong about the sign.
+  const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f) * this->get_model_health();
   const float passive = passive_raw * trust;
 
   const float error = this->setpoint_ - t;
@@ -683,25 +735,24 @@ float TankController::get_model_health() const {
   // fan's whole authority. Uses the SIGNED error EMA, not the magnitude:
   // noise cancels in the EMA and a genuinely wrong model does not, so this
   // measures staleness rather than noisiness.
-  const float e = std::fabs(this->bias_);
+  const float e = std::fabs(this->stale_);
   if (e <= STALE_DEADBAND)
     return 1.0f;
   return clampf(1.0f - (e - STALE_DEADBAND) / STALE_SCALE, 0.0f, 1.0f);
 }
 
 float TankController::get_confidence() const {
-  // Two things have to be true before the feedforward is trusted: enough
-  // data, and predictions that still match the tank. The first alone is
-  // what let a stale model keep full authority after the tank changed.
+  // Purely how much data the model has seen -- deliberately NOT multiplied
+  // by health. Folding the two together made this read 0 for a full day
+  // after a reset, because a freshly reset model IS inaccurate by
+  // definition, and that destroyed the only signal that says whether
+  // learning is progressing at all.
   //
-  // Reported as one number because that is what it means to a reader --
-  // "how much should I believe this model" -- and because a confidence
-  // that silently stays at 100 while the tank drifts is the failure this
-  // is fixing. It falls when the model goes wrong and recovers by itself
-  // once RLS catches up, with no reset needed.
+  // The two are separate measurements answering separate questions: this
+  // one is "has it had time", get_model_health() is "is it right". Both
+  // gate the feedforward, at the trust site in update().
   const float target = (24.0f * 60.0f) / (LEARN_WINDOW_MS / 60000.0f);
-  const float data = clampf(100.0f * this->model_.updates / target, 0.0f, 100.0f);
-  return data * this->get_model_health();
+  return clampf(100.0f * this->model_.updates / target, 0.0f, 100.0f);
 }
 
 void TankController::dump_config() {

@@ -27,20 +27,40 @@ static const uint8_t N_PARAMS = 5;
 // Light profile resolution: 96 slots of 15 minutes covers one day.
 static const uint8_t N_SLOTS = 96;
 
-// The model is written around this reference temperature so the regressors
-// stay small and the RLS stays well conditioned.
+// Reference temperature the ambient term is measured against. It is a
+// centring constant, and the value matters far more than it looks.
 //
-// It is not an arbitrary centring constant: with theta[4] (the constant
-// term) starting at zero, the prior implies the tank drifts toward
-// TEMP_REF. Setting it to 25 meant a tank sitting at 22.6 was predicted to
-// warm on its own, which cancelled the demand and held the heater at 0%
-// while the water sat 2 F below target.
+// The regressors are [heater, fan, (T - TEMP_REF), light, 1]. With
+// TEMP_REF = 20 and a tank living at 24.1 +/- 0.2 C, the third regressor
+// was 4.1 +/- 0.2 -- a large mean with a tiny variance, sitting next to a
+// literal constant. Those two columns are then almost perfectly collinear,
+// and RLS cannot separate ka from c: only their combination is identified,
+// and how it splits between them is decided by noise.
 //
-// 20 C encodes the assumption that actually holds for every heated
-// aquarium: the room is cooler than the tank, so the tank always loses
-// heat. RLS corrects the exact value from there, and theta[4]'s clamp of
-// +/-0.05 lets the learned equilibrium land anywhere from ~17 to ~23 C.
-static const float TEMP_REF = 20.0f;
+// The numbers say it is not close. The identifiable signal for ka is its
+// coefficient times the variation in T -- 0.015 * 0.2 = 0.003 degC/min --
+// against a quantisation floor of one DS18B20 LSB over a 5 minute window,
+// 0.0125 degC/min. The information is four times smaller than one bit of
+// the sensor. That is why Tank Time Constant wandered 206 -> 366 -> 93
+// minutes across a day: it was not learning, it was random-walking, with c
+// absorbing whatever ka did.
+//
+// Centring on the operating point makes (T - TEMP_REF) about 0.1 +/- 0.2 --
+// small, zero-mean, and no longer a near-duplicate of the constant column.
+// c then carries the well-identified equilibrium term cleanly, and ka
+// degrades to a small correction on deviations, which is all the data can
+// support.
+//
+// The old comment here argued for 20 C on the grounds that an untrained
+// model must assume the tank loses heat -- setting it to 25 once predicted
+// a 22.6 C tank would warm on its own and held the heater at 0%. That
+// reasoning was right and the fix is kept, but it belongs in the prior, not
+// the centring: THETA_PRIOR[4] now carries the cooling assumption
+// (-0.030 degC/min, the ~3.3 degF/h this tank sheds unaided). The sign of
+// the untrained prediction is therefore unchanged, and it is doubly
+// covered now that the feedforward is gated by confidence AND health, both
+// of which are zero on an untrained model.
+static const float TEMP_REF = 24.0f;
 
 struct ThermalModel {
   // theta[0] = kh   heater gain, degC/min at 100% duty        (>0)
@@ -173,6 +193,10 @@ class TankController : public PollingComponent {
   // Exponentially-averaged residual from learn_(). Published as a
   // diagnostic; not persisted, and not part of the control path.
   float bias_{0.0f};
+  // Slow EMA of the same residual, used to gate control authority. Separate
+  // from bias_ because that one is tuned for a dashboard, not for deciding
+  // how much to believe the model.
+  float stale_{0.0f};
 
   // Learning is done over a slow window: a DS18B20 quantises to 0.0625 degC,
   // which swamps the real drift rate if you differentiate every control tick.
