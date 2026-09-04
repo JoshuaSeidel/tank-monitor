@@ -593,25 +593,9 @@ lvgl:
             scrollable: false
             clickable: false
 
-        # BLE. A "BT" label, not an arc-drawn Bluetooth rune: that rune needs
-        # a glyph the trimmed font sets here do not carry, and a missing
-        # glyph renders as a box with NO build error. B and T are already in
-        # font_sm's set.
-        #
-        # Grey is the correct phase-1 state, not a fault: the BLE stack is up
-        # but ${controller_ble_mac} is a placeholder that does not exist, so
-        # there is nothing to connect to until the new controller is built.
-        # Red would claim a failure that has not happened.
-        - label:
-            id: hdr_ble
-            x: 268
-            y: 12
-            text: "BT"
-            text_font: font_sm
-
         - arc:
             id: now_left
-            x: 288
+            x: 282
             y: 10
             width: 20
             height: 20
@@ -625,7 +609,7 @@ lvgl:
             clickable: false
         - arc:
             id: now_right
-            x: 288
+            x: 282
             y: 10
             width: 20
             height: 20
@@ -639,7 +623,7 @@ lvgl:
             clickable: false
         - obj:
             id: now_dot
-            x: 295
+            x: 289
             y: 17
             width: 6
             height: 6
@@ -1378,11 +1362,6 @@ interval:
             lv_obj_set_style_arc_color(id(now_right), lv_color_hex(nc), LV_PART_MAIN);
             lv_obj_set_style_bg_color(id(now_dot), lv_color_hex(nc), 0);
 
-            // BLE: grey until a peer exists. See the widget comment -- in
-            // phase 1 there is deliberately no peer, so grey is success.
-            const uint32_t IDLE = 0x555C66;
-            lv_obj_set_style_text_color(id(hdr_ble),
-                lv_color_hex(id(r_ble_connected) ? GOOD : IDLE), 0);
           }
 
           // --- battery, drawn over every page ---

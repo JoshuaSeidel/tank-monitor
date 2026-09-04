@@ -63,10 +63,6 @@
 # single delivery landing at the one moment the queue is full.
 
 substitutions:
-  # Placeholder until phase 2. This address intentionally does not exist,
-  # so ble_client scans and never connects -- which is the radio activity
-  # the coexistence test needs.
-  controller_ble_mac: "AA:BB:CC:DD:EE:FF"
   # Topic prefix of the board that owns the sensors. This is that device's
   # device_name, NOT this one's.
   source_device: tank-monitor
@@ -305,13 +301,6 @@ sensor:
       - lambda: id(r_fan) = x;
 
 binary_sensor:
-  - platform: template
-    name: "BLE Link"
-    id: ble_link_up
-    device_class: connectivity
-    entity_category: diagnostic
-    lambda: "return id(r_ble_connected);"
-
   # The controller broadcasts every 10s, so 45s is four missed rounds --
   # long enough not to flap on a single lost frame, short enough to notice
   # before you have made a decision based on a stale screen.
@@ -430,40 +419,25 @@ interval:
           id(espnow_link).send(BCAST, (const uint8_t *) rq, 2);
 
 # ====================================================================
-# BLE link -- PHASE 1: coexistence test, carries no data
+# BLE link -- REMOVED 2026-09-04 after the phase 1 coexistence test FAILED
 # ====================================================================
-# Lives HERE rather than in its own package on purpose. A separate file
-# would have to be added to the CYD wrapper, and that wrapper is the one
-# file NOT pulled from git -- three separate changes in this project have
-# silently not taken because a wrapper edit did not happen. Anything that
-# must load reliably goes in a file the wrapper already includes.
+# The test ran and gave a clear negative result, which is what it was for.
+# With esp32_ble_tracker scanning at 1100ms/100ms passive -- already the
+# gentlest useful setting -- alongside WiFi and ESP-NOW on this board's
+# single 2.4 GHz radio, the panel lost its ESP-NOW link and then stopped
+# answering HTTP altogether. Not degraded: gone.
 #
-# WHY BLE AT ALL: ESP-NOW inherits the WiFi station channel and cannot be
-# pinned independently -- ESPHome's schema is cv.OnlyWithout(CONF_CHANNEL,
-# CONF_WIFI), so the espnow channel: option is rejected on any device with
-# a wifi component. Both boards need wifi. When the AP drops and the
-# station scans to reconnect, ESP-NOW packets are lost: the link degrades
-# during exactly the outage it exists to survive.
+# So BLE and ESP-NOW do NOT coexist on the CYD at any duty cycle worth
+# having. Compiling together proved nothing, which is exactly why phase 1
+# existed as a separate step rather than being folded into the real work.
 #
-# PHASE 1 CARRIES NO DATA. It answers one question compiling cannot: do
-# WiFi, ESP-NOW and BLE coexist at RUNTIME on one shared 2.4 GHz radio?
-
-esp32_ble_tracker:
-  scan_parameters:
-    # Deliberately low duty cycle. BLE is not separate hardware here -- it
-    # time-slices the same radio as WiFi and ESP-NOW, which is the exact
-    # contention being measured. A default 320/30 active scan is the worst
-    # case, so start gentle: coexisting at this rate proves the design, and
-    # the rate can be raised later with evidence rather than starting
-    # aggressive and not knowing which variable broke it.
-    interval: 1100ms
-    window: 100ms
-    active: false
-
-ble_client:
-  - id: ctrl_ble
-    mac_address: ${controller_ble_mac}
-    on_connect:
-      - lambda: id(r_ble_connected) = true;
-    on_disconnect:
-      - lambda: id(r_ble_connected) = false;
+# WHAT SURVIVES, and why it was kept:
+#   - Link Source and the r_src plumbing. Useful with one transport too:
+#     Link Age can say the feed is fresh without saying what feeds it.
+#   - r_ble_connected, unused for now, so re-adding BLE is additive.
+#
+# WHAT THIS MEANS FOR THE PLAN: BLE-MIGRATION-PLAN.md assumed the CYD would
+# carry both transports during the changeover. It cannot. Any BLE future
+# needs a different panel-side answer -- most likely a hard cutover where
+# the panel drops ESP-NOW in the same flash that the new controller
+# arrives, so the two radios are never live together.
