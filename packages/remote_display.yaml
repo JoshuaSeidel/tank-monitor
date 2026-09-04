@@ -194,26 +194,6 @@ script:
 espnow:
   id: espnow_link
   auto_add_peer: true
-  # ---- TEMPORARY: WiFi+BLE isolation test, 2026-09-04 ----
-  # Compiled in but the radio never starts. This is the ONE variable being
-  # changed: phase 1 ran WiFi + ESP-NOW + BLE together and the panel lost
-  # ESP-NOW and then HTTP, but all three were on at once so it could not
-  # say WHICH pairing broke.
-  #
-  # WiFi + BLE is almost certainly fine on its own -- ESPHome ships
-  # bluetooth_proxy, whose whole job is WiFi plus continuous BLE scanning,
-  # and plenty of people run it on this exact board. ESP-NOW + BLE is the
-  # suspect: ESP-NOW is a WiFi-MAC protocol that must be listening on its
-  # channel at arbitrary moments, and Espressif's coexistence work targets
-  # WiFi-station + Bluetooth, not ESP-NOW.
-  #
-  # If this build is stable, the hard cutover is viable -- after it, NEITHER
-  # device runs ESP-NOW, so the suspect pairing never exists.
-  #
-  # EXPECTED WHILE TESTING: no tank data. Link Source reads "none", Link Age
-  # climbs, the temperature is stale. That is the test working, not failing.
-  # Revert this commit to get the panel back.
-  enable_on_boot: false
 
 packet_transport:
   - platform: espnow
@@ -321,13 +301,6 @@ sensor:
       - lambda: id(r_fan) = x;
 
 binary_sensor:
-  - platform: template
-    name: "BLE Link"
-    id: ble_link_up
-    device_class: connectivity
-    entity_category: diagnostic
-    lambda: "return id(r_ble_connected);"
-
   # The controller broadcasts every 10s, so 45s is four missed rounds --
   # long enough not to flap on a single lost frame, short enough to notice
   # before you have made a decision based on a stale screen.
@@ -469,21 +442,26 @@ interval:
 # the panel drops ESP-NOW in the same flash that the new controller
 # arrives, so the two radios are never live together.
 
-# ---- TEMPORARY: WiFi+BLE isolation test, 2026-09-04 ----
-# Identical scan settings to the phase 1 attempt on purpose. If this build
-# is stable where that one was not, ESP-NOW is the culprit and not BLE.
-esp32_ble_tracker:
-  scan_parameters:
-    interval: 1100ms
-    window: 100ms
-    active: false
-
-ble_client:
-  - id: ctrl_ble
-    # Placeholder -- nothing to connect to. Scanning is the radio activity
-    # under test; a successful connection is not required.
-    mac_address: "AA:BB:CC:DD:EE:FF"
-    on_connect:
-      - lambda: id(r_ble_connected) = true;
-    on_disconnect:
-      - lambda: id(r_ble_connected) = false;
+# ====================================================================
+# BLE: removed. Both tests are done and the answers are recorded.
+# ====================================================================
+# Phase 1 -- WiFi + ESP-NOW + BLE together: the panel lost ESP-NOW and then
+# stopped answering HTTP entirely, at 1100ms/100ms passive scanning, already
+# the gentlest useful setting. Three radios on one 2.4 GHz antenna is too
+# many for this board.
+#
+# Isolation test -- WiFi + BLE with the ESP-NOW radio disabled: WiFi stayed
+# up and the panel remained reachable. So BLE is NOT the problem on this
+# board; the ESP-NOW + BLE pairing is. That matches the prior -- ESPHome
+# ships bluetooth_proxy, which is WiFi plus continuous BLE scanning, and
+# ESP-NOW is a WiFi-MAC protocol that must be listening on its channel at
+# arbitrary moments while Espressif's coexistence work targets WiFi-station
+# plus Bluetooth.
+#
+# CONSEQUENCE: a device may run WiFi + ESP-NOW, or WiFi + BLE. Never all
+# three. That rule is what BLE-MIGRATION-PLAN.md is built around, and it is
+# why the new round panel joins on ESP-NOW and switches to BLE in a single
+# flash rather than ever carrying both.
+#
+# KEPT: Link Source and the r_src plumbing, useful with one transport too;
+# and r_ble_connected, unused, so re-adding BLE stays additive.
