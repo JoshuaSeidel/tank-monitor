@@ -1,0 +1,241 @@
+# ESP32-S3 "mini" class boards -- a headless controller in 23 x 18 mm.
+#
+# One file, two boards. They are the same silicon (ESP32-S3FH4R2: dual
+# core at 240 MHz, 4 MB flash, 2 MB quad PSRAM in package) on the same
+# footprint, and the pin map below is chosen to be valid on both:
+#
+#   Waveshare ESP32-S3-Zero    23.5 x 18 mm, castellated, vendor wiki
+#   generic "ESP32-S3 SuperMini"  22.5 x 18 mm, breaks out GPIO1-13 + TX/RX
+#
+# Sister to boards/esp32-wroom32.yaml: same job, same wet-side hardware,
+# same shared packages, a third of the board area. Pair with
+# packages/base.yaml, packages/control.yaml, packages/sensors.yaml and
+# packages/ph.yaml. Optionally packages/espnow_link.yaml if a remote panel
+# should read this board.
+#
+# ---------------------------------------------------------------
+# READ THIS BEFORE YOU BUY: the antenna is the weak part
+# ---------------------------------------------------------------
+# Nothing in this file can fix it, so it belongs at the top.
+#
+# Both boards use a small 2.4 GHz ceramic antenna, and both have a
+# documented history of poor range and brownout reboots under Wi-Fi TX
+# load. On the S3-Zero specifically, a paired-RSSI test against an
+# unmodified board measured at least +10 dB from a wire-antenna mod --
+# roughly double the usable range -- and thermal imaging showed the
+# regulator running hot on the stock board from reflected power.
+# Third-party pinout guides also report SuperMini units shipping with the
+# ceramic antenna soldered on backwards.
+#
+# That matters more here than on a typical project:
+#
+#   - This board is the ESP-NOW provider for the remote panel. ESP-NOW
+#     follows the Wi-Fi association, which is why the AP is pinned to one
+#     channel -- see packages/espnow_link.yaml. A marginal link degrades
+#     the panel and MQTT together.
+#   - The control loop itself survives a Wi-Fi outage; it runs on-device.
+#     Brownout REBOOTS are the real cost: the model, light profile and
+#     setpoint all persist (tank_controller.cpp), but each reboot restarts
+#     the 900 s heater window mid-cycle and blanks the hourly swing
+#     history for ten minutes.
+#
+# Two cheap mitigations, both worth doing:
+#
+#   1. 100 uF electrolytic + 100 nF ceramic across 3V3 and GND, as close
+#      to the board as you can get them. This is the reboot fix.
+#   2. The wire-antenna mod, if range is short or RSSI is worse than about
+#      -70 dBm where the tank is.
+#
+# If neither appeals, a XIAO ESP32-S3 is smaller again (21 x 17.5 mm) and
+# has a U.FL connector with an external antenna in the box, which removes
+# the problem instead of mitigating it. It breaks out 11 GPIO against the
+# eight used below, so it fits -- with no room for a second I2C device
+# that does not share the bus.
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  # The FH4R2 has 4 MB, not the 8 MB the devkitc-1 board definition
+  # assumes. Getting this wrong builds a partition table that overruns
+  # the flash and fails the OTA rather than the build.
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+# No `psram:` block on purpose. This is a headless build -- there is no
+# framebuffer to hold, and 512 KB of SRAM is more than the controller and
+# the web UI need. Leaving PSRAM unconfigured also keeps GPIO33-37 out of
+# the picture entirely: ESPHome only warns about those pins when octal
+# PSRAM is enabled, and nothing here goes near them either way.
+
+# ---------------------------------------------------------------
+# Serial logging over native USB
+# ---------------------------------------------------------------
+# Overrides packages/base.yaml, which sets only the level.
+#
+# Neither board has a USB-UART bridge -- the USB-C port is wired straight
+# to the S3's USB-Serial-JTAG peripheral. The default UART0 console would
+# come out on GPIO43/44, where nothing is listening, so `esphome logs`
+# over USB would show an open port and no output.
+#
+# This consumes GPIO19 and GPIO20. Neither board breaks them out, so it
+# costs nothing here.
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+# ---------------------------------------------------------------
+# What a board file owes the shared packages
+# ---------------------------------------------------------------
+# control.yaml, sensors.yaml and ph.yaml are pin-free. They expect a board
+# file to supply exactly six things:
+#
+#   one_wire:                     -> dallas_temp (the probe)
+#   i2c:                          -> bh1750 (light)
+#   an adc sensor id: tds_voltage -> the TDS maths
+#   an adc sensor id: ph_voltage  -> the pH maths
+#   output id: heater_output      -> the controller's heater
+#   output id: fan_output         -> the controller's fan
+#
+# ---------------------------------------------------------------
+# Pin budget
+# ---------------------------------------------------------------
+# Only GPIO1-13 are used, because that is the range BOTH boards break out.
+# The Zero also exposes 15-18, 21 and 43/44; the SuperMini does not, and a
+# shared pin map is worth more than four spare pins on one of them.
+#
+# Which pins are safe comes from ESPHome's own validator
+# (gpio_esp32_s3.py), not from seller pinout diagrams:
+#
+#   GPIO26-32   flash and quad PSRAM. Hard error in ESPHome. No mini board
+#               breaks these out, which is exactly why.
+#   GPIO0,3,45,46  strapping. Only GPIO3 is on the header here, so GPIO3
+#               is the one pin in 1-13 left alone.
+#   GPIO19,20   USB-Serial-JTAG, claimed by the logger above.
+#   GPIO22-25   not in the IO mux. Unusable on any S3.
+#   GPIO33-37   octal PSRAM only. Irrelevant on the FH4R2 (quad).
+#
+# Note what is NOT on that list: GPIO9-14. Several widely-copied pinout
+# guides label them "flash-dedicated" -- that is carried over from octal
+# S3 modules and is wrong for this chip. GPIO9 carries the fan relay below.
+#
+#   ADC1 is GPIO1-10. ADC2 (GPIO11-20) cannot be read while Wi-Fi is on,
+#               so every analog probe must land in 1-10. Three of the seven
+#               free ADC1 pins are spoken for; four are spare.
+#
+#   TDS analog   GPIO1   ADC1_CH0
+#   pH analog    GPIO2   ADC1_CH1
+#   (ORP later)  GPIO4   ADC1_CH3, reserved -- GPIO3 skipped, strapping
+#   DS18B20      GPIO5   4.7k pull-up to 3V3. Not strapping, so the
+#                        pull-up cannot change boot mode.
+#   BH1750 SDA   GPIO6
+#   BH1750 SCL   GPIO7
+#   Heater relay GPIO8   adjacent to 9 on the header, so the two relay
+#   Fan relay    GPIO9   wires land side by side.
+#
+# GPIO10-13 are left free. GPIO10 is the last ADC1 pin, so it is the one
+# to take for a fourth analog probe.
+#
+# The relays are deliberately NOT on GPIO43/44. Those are free -- the
+# console is on USB now -- but the ROM bootloader prints on TX at every
+# reset, and a few milliseconds of that on an optocoupled relay input is
+# an audible click of the heater on every boot.
+
+i2c:
+  sda: GPIO6
+  scl: GPIO7
+  scan: true
+
+one_wire:
+  - platform: gpio
+    pin: GPIO5
+
+# Time-proportional heater/fan drive. See boards/lafvin-esp32c6.yaml for
+# why the window is 900s rather than 300s -- it is mechanical relay wear,
+# not control quality.
+output:
+  - platform: slow_pwm
+    id: heater_output
+    pin: GPIO8
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return state;"
+
+  - platform: slow_pwm
+    id: fan_output
+    pin: GPIO9
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
+
+sensor:
+  # TDS meter analog output -> GPIO1 (ADC1_CH0).
+  # Internal only; feeds the TDS calculation in packages/sensors.yaml.
+  - platform: adc
+    pin: GPIO1
+    id: tds_voltage
+    update_interval: 500ms
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      # 20 samples smoothed -- the probe output is noisy AC-excited
+      - median:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+
+  # pH probe (DFRobot Gravity industrial SEN0169-V2) -> packages/ph.yaml.
+  #
+  # GPIO2 is ADC1 (so Wi-Fi does not corrupt it) and not a strapping pin.
+  # NOT GPIO3, which is the JTAG-select strapping pin on this chip, and
+  # not GPIO0 -- the BOOT button sits on it.
+  #
+  # The S3's ADC is a different part from the classic ESP32's, with its
+  # own offset and curve. ph_v_neutral and ph_v_acid in packages/ph.yaml
+  # are volts measured through THIS board's converter, so they do not
+  # carry over from a C6 or WROOM build. Recalibrate against pH 7.00 and
+  # 4.00 buffer after moving boards, and recheck the TDS k_factor the
+  # same way. A copied calibration is a wrong reading that looks right.
+  - platform: adc
+    pin: GPIO2
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
+# ---------------------------------------------------------------
+# No display, and no backlight output
+# ---------------------------------------------------------------
+# The C6 board file defines a `display_backlight` light. Nothing in the
+# shared packages references it -- it belongs to that board's panel -- so
+# its absence here costs nothing. This board is headless: Home Assistant,
+# the web UI on its own IP, and the remote panel are the interfaces.
+#
+# The S3-Zero's WS2812 (GPIO21) is left undefined for the same reason. It
+# is on the board, nothing needs it, and claiming it would break the
+# shared pin map with the SuperMini for a status LED nobody reads.
+#
+# ---------------------------------------------------------------
+# Running alongside another controller
+# ---------------------------------------------------------------
+# Give it a different device_name in its wrapper. That name sets the MQTT
+# topic prefix, the discovery object ids, the mDNS hostname and the
+# fallback AP name all at once -- two devices answering to the same name
+# overwrite each other's Home Assistant entities as fast as they appear.
+#
+# If it should also feed a remote panel, add packages/espnow_link.yaml.
+# The panel selects by provider name, so two controllers broadcasting at
+# once do not collide -- but a panel only listens to the one provider
+# named in its remote_display config.

@@ -1,6 +1,6 @@
 # Assembly
 
-Two boards are covered here and they wire up differently:
+Four boards are covered here and they wire up differently:
 
 - **[ESP32-C6 (`tank-monitor`)](#esp32-c6-tank-monitor)** — solder directly to
   the board's pads.
@@ -8,6 +8,8 @@ Two boards are covered here and they wire up differently:
   display-only remote panel. No wiring at all.
 - **[ESP32-WROOM-32 (`tank-monitor-w32`)](#esp32-wroom-32-tank-monitor-w32)** —
   headless controller. Same wiring as the C6 on different pins.
+- **[ESP32-S3 mini (`tank-monitor-s3`)](#esp32-s3-mini-tank-monitor-s3)** —
+  headless controller in 23 × 18 mm. Solder directly to the board.
 
 Build order matters on both: power bus first, sensors one at a time, relay
 last. That way if something is wrong you know which step caused it.
@@ -358,3 +360,132 @@ To let a remote panel read this board instead of the C6, uncomment
 `source_device` substitution at this device's name. The panel selects its
 source by provider name, so two controllers can broadcast at once without
 colliding — but a panel only listens to the one it was told about.
+
+
+# ESP32-S3 mini (`tank-monitor-s3`)
+
+A controller with no screen, on a board the size of a postage stamp. Covers
+both the **Waveshare ESP32-S3-Zero** (23.5 × 18 mm) and the generic
+**"ESP32-S3 SuperMini"** (22.5 × 18 mm) — same chip, same pin map, one
+config in `boards/esp32s3-mini.yaml`.
+
+Follow the C6 build above for technique: steps 2 (pre-tin), 3 (power
+splices), 6 (the pull-up), 8 (inspect) and 10 (before it goes near water)
+apply unchanged. Only the pin numbers and the two extra parts differ.
+
+## Two parts the other boards do not need
+
+| Part | Why |
+|---|---|
+| 100 µF electrolytic + 100 nF ceramic | across `3V3` and `GND`, as close to the board as they will sit. These boards brown out and reboot under Wi-Fi transmit load; this is the fix |
+| 31 mm of 1.0 mm silver-plated wire | *optional* antenna mod — see below. Skip it until you have measured RSSI |
+
+## Pin map
+
+| Board pin | Goes to |
+|---|---|
+| GPIO1 | TDS `A` |
+| GPIO2 | pH board analog out (blue on the Gravity cable) |
+| GPIO5 | DS18B20 yellow (DQ), with the 4.7 kΩ pull-up to 3V3 |
+| GPIO6 | BH1750 `SDA` |
+| GPIO7 | BH1750 `SCL` |
+| GPIO8 | Relay Ch1 `IN+` (heater) |
+| GPIO9 | Relay Ch2 `IN+` (fan) |
+| GND | `IN−` both channels, every sensor ground, and the caps |
+| 3V3 | every sensor VCC, and the caps |
+
+Leave BH1750 `ADDR` unconnected — floating is 0x23, which the config expects.
+
+`GPIO4` is left free on purpose: it is the reserved ADC1 pin for an ORP
+probe. `GPIO10` is the last ADC1 pin after that, then 11–13 for digital.
+
+That is four wires on the 3V3 splice and six on GND — one more of each than
+the C6 build, because of the pH board and the decoupling caps. Ten
+conductors is past what one twisted joint holds reliably, so make it two
+splices per rail joined by a short link, not one bundle.
+
+**The pH board goes to 3V3, not 5V.** The SEN0169-**V2** is the
+wide-voltage edition and outputs 0–3 V. The classic SEN0169 outputs 0–5 V
+and will damage GPIO2. Check the board you actually received.
+
+## Why these pins, and which ones to avoid
+
+Only GPIO1–13 are used, because that is the range *both* boards break out.
+The Zero also exposes 15–18, 21 and 43/44; the SuperMini does not.
+
+Which pins are safe comes from ESPHome's validator (`gpio_esp32_s3.py`),
+not from seller pinout diagrams:
+
+- **GPIO26–32** are the in-package flash and PSRAM. ESPHome rejects them
+  outright. No mini board breaks them out, which is why.
+- **GPIO0, 3, 45, 46** are strapping. Only GPIO3 is on this header, so it
+  is the one pin in 1–13 left alone. GPIO0 is the BOOT button.
+- **GPIO19, 20** are USB-Serial-JTAG, which is this board's only console.
+- **GPIO22–25** are not in the IO mux at all. Unusable on any S3.
+- **ADC2 (GPIO11–20) cannot be read while Wi-Fi is on.** Every analog
+  probe must be on ADC1, which is GPIO1–10. Not a preference — ADC2
+  returns garbage.
+
+**GPIO9–14 are ordinary GPIOs.** Several widely-copied pinout guides label
+them "flash-dedicated"; that is carried over from octal-PSRAM S3 modules
+and is wrong for the FH4R2. The fan relay sits on GPIO9.
+
+The relays are deliberately **not** on GPIO43/44. Those are free now that
+the console is on USB, but the ROM bootloader prints on TX at every reset,
+and a few milliseconds of that on an optocoupled relay input is an audible
+click of the heater on every boot.
+
+## The antenna, which is the weak part
+
+Both boards use a small 2.4 GHz ceramic antenna with a documented history
+of short range and dropped links. On the S3-Zero, a paired-RSSI test
+against an unmodified board measured **at least +10 dB** from a wire
+antenna — roughly double the usable range — and thermal imaging showed the
+stock regulator running hot from reflected power. SuperMini units have
+also been reported shipping with the ceramic antenna mounted backwards.
+
+This board is the ESP-NOW provider for the remote panel, and ESP-NOW
+follows the Wi-Fi association, so a marginal link degrades the panel and
+MQTT together. The control loop itself is unaffected — it runs on-device
+and keeps regulating with the network down. Brownout *reboots* are the
+real cost: the model, light profile and setpoint all persist, but each
+reboot restarts the 900 s heater window mid-cycle and blanks the hourly
+swing history for ten minutes.
+
+So: fit the caps always, and check RSSI once the board is where the tank
+is. Below about −70 dBm, do the wire mod — a 5 mm loop at the bottom of a
+31 mm length, the loop fitted around both ends of the original antenna.
+
+If neither appeals, a **XIAO ESP32-S3** is smaller again (21 × 17.5 mm) and
+has a U.FL connector with an external antenna in the box, which removes the
+problem rather than mitigating it. It breaks out 11 GPIO against the eight
+used here, so it fits — with no room for a second I²C device that does not
+share the bus.
+
+## Differences from the C6
+
+**No USB-UART bridge.** The USB-C port is wired straight to the S3's
+USB-Serial-JTAG peripheral, so the board file sets
+`logger: hardware_uart: USB_SERIAL_JTAG`. Without it the console would go
+out on GPIO43/44 where nothing is listening — an open port and no output.
+If the dashboard does not offer the port on first flash, hold BOOT while
+plugging it in.
+
+**Recalibrate pH and TDS.** `ph_v_neutral` and `ph_v_acid` are volts
+measured through *this board's* ADC, and the S3's converter is not the
+C6's. Copying the numbers from another wrapper gives a wrong reading that
+looks right — which is the exact failure that made the old monitor
+useless. Redo the two-point calibration against pH 7.00 and 4.00 buffer,
+and recheck the TDS `k_factor` the same way.
+
+**No display, no backlight.** Home Assistant, the web UI at its own IP, and
+the remote panel are the interfaces.
+
+**Give it a different `device_name`** if it runs alongside the C6. That
+name sets the MQTT topic prefix, discovery object ids, mDNS hostname and
+fallback AP name at once — two boards answering to the same name overwrite
+each other's entities as fast as they appear.
+
+To let a remote panel read this board instead of the C6, uncomment
+`packages/espnow_link.yaml` in the wrapper **and** point that panel's
+`source_device` substitution at this device's name.

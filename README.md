@@ -105,7 +105,7 @@ DFRobot themselves will tell you if you ask.
 | ESP32-2432S028R "CYD" | a second board as a remote touch panel — see `boards/cyd-esp32-2432s028r.yaml` | [search](https://www.amazon.com/s?k=ESP32-2432S028R+CYD+2.8+inch+display) |
 | Seachem Ammonia Alert | a passive colorimetric disc, ~$10, lasts a year. **The best value item on this page** — there is no usable electronic ammonia sensor for a tank | [search](https://www.amazon.com/s?k=Seachem+Ammonia+Alert) |
 | TCS34725 colour sensor | reads that disc so the ESP32 can log and alarm on it | [search](https://www.amazon.com/s?k=TCS34725+RGB+color+sensor) |
-| DFRobot ORP probe | oxidation-reduction potential — the only practical measure of dissolved organic load. `GPIO33` is reserved for it on the WROOM-32 board | [DFRobot](https://www.dfrobot.com/product-1071.html) |
+| DFRobot ORP probe | oxidation-reduction potential — the only practical measure of dissolved organic load. `GPIO33` is reserved for it on the WROOM-32 board, `GPIO4` on the S3 | [DFRobot](https://www.dfrobot.com/product-1071.html) |
 
 ### Test kits you cannot skip
 
@@ -491,13 +491,17 @@ in `boards/`.
 | `packages/base.yaml` | Identity, Wi-Fi, OTA, MQTT, SNTP, the display palette, the tuning substitutions |
 | `packages/control.yaml` | The `tank_controller` component and every entity derived from it |
 | `packages/sensors.yaml` | DS18B20, BH1750 and the TDS maths — expressed without pins |
+| `packages/ph.yaml` | The pH maths and its two-point calibration — also without pins |
 | `boards/lafvin-esp32c6.yaml` | LAFVIN ESP32-C6, 1.47" 172×320 ST7789V |
 | `boards/cyd-esp32-2432s028r.yaml` | "CYD" ESP32-2432S028R, 2.8" 240×320 ILI9341 + touch |
+| `boards/esp32-wroom32.yaml` | Plain ESP32-WROOM-32 devkit, headless |
+| `boards/esp32s3-mini.yaml` | ESP32-S3-Zero / "S3 SuperMini", headless, 23×18 mm |
 
 The board file supplies the buses and ids the shared packages expect —
-`water_temp`, `tank_lux`, `tds_voltage`, `heater_output`, `fan_output` — so
-a new board is one new file in `boards/` and one changed line in the
-wrapper. A change to the control loop lands on every board from one push.
+`tds_voltage`, `ph_voltage`, `heater_output`, `fan_output`, plus the
+`one_wire` and `i2c` buses — so a new board is one new file in `boards/`
+and one changed line in the wrapper. A change to the control loop lands on
+every board from one push.
 
 Files are merged in listed order and later entries win, so the board file
 gets the last word. That is how the CYD file switches serial logging off

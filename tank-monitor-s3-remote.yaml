@@ -1,0 +1,50 @@
+# Thin wrapper for the ESP32-S3 mini controller (S3-Zero or SuperMini).
+#
+# Put THIS file in the ESPHome dashboard. Nothing else lives locally
+# except secrets.yaml, so a push to main is all the next build needs.
+#
+# device_name MUST differ from the C6's if both run at once. It is not
+# cosmetic: it sets the MQTT topic prefix, the discovery object ids, the
+# mDNS hostname and the fallback AP name all at once. Two devices
+# answering to "tank-monitor" publish to identical topics and overwrite
+# each other's Home Assistant entities as fast as they appear.
+#
+# Secrets are NOT affected. base.yaml references fixed keys
+# (tank_monitor_mqtt_username and friends) rather than deriving them from
+# device_name, so every board shares one Wi-Fi, MQTT and OTA identity
+# with nothing to add to secrets.yaml.
+#
+# First flash is over USB-C, and the board enumerates as a native USB
+# device rather than a serial bridge -- hold BOOT while plugging it in if
+# the dashboard does not offer the port.
+substitutions:
+  device_name: tank-monitor-s3
+  friendly_name: Tank Monitor S3
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - packages/ph.yaml
+      # Uncomment to let a remote panel read THIS board over ESP-NOW.
+      # The panel picks its source by provider name, so also point that
+      # panel's `source_device` substitution at the device_name above --
+      # otherwise it keeps listening to the C6.
+      # - packages/espnow_link.yaml
+      - boards/esp32s3-mini.yaml
+    # refresh defaults to 1d -- that would silently build yesterday's
+    # config. 0s re-fetches on every build.
+    refresh: 0s
+
+# pH calibration is per-board: ph_v_neutral and ph_v_acid are volts read
+# through this board's ADC, and the S3's converter is not the C6's. Do not
+# copy them from another wrapper -- measure them here, against buffer.
+# See packages/ph.yaml for the procedure.
+#
+# substitutions:
+#   ph_v_neutral: "1.500"
+#   ph_v_acid: "2.032"
