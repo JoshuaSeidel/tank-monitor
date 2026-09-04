@@ -1,151 +1,124 @@
-# BLE link migration plan
+# Panel and link migration plan
 
-Goal: move the controller↔panel link from ESP-NOW to BLE, because ESP-NOW rides
-the WiFi channel and loses it during exactly the outage the link exists to survive.
-The CYD must speak **both** during the transition, so the existing C6 keeps working
-until it is replaced.
-
-Status: **plan only. Nothing built.**
+**Rewritten 2026-09-04** after the phase 1 coexistence test failed and a
+Waveshare ESP32-S3 1.75" round AMOLED was ordered to replace the CYD. The
+earlier version of this plan assumed the CYD would carry two transports at
+once. It cannot, and it no longer needs to.
 
 ---
 
-## 1. Why BLE at all
+## 1. The one rule everything follows
 
-ESP-NOW inherits the WiFi station channel. When the AP goes down, an ESPHome device
-scans across channels to reconnect and ESP-NOW packets sent meanwhile are lost.
+**No device ever runs three radios.**
 
-There is **no config-level fix**. ESPHome's own schema:
+That is the whole lesson of phase 1. WiFi + ESP-NOW + BLE together on the CYD
+killed the ESP-NOW link and then the web server. Every arrangement below keeps
+each device to two.
 
-```python
-cv.OnlyWithout(CONF_CHANNEL, CONF_WIFI): validate_channel
-```
-
-The ESP-NOW `channel:` option is only accepted on a device with **no WiFi component
-at all**. Both boards need WiFi. So the channel cannot be pinned independently.
-
-BLE has its own channel hopping and no dependency on the AP. Caveat worth keeping
-in view: ESP32 WiFi and BLE **share one radio** and time-slice — BLE is not on
-separate hardware. It is immune to the AP's channel, not to WiFi contention.
-
----
-
-## 2. Measured feasibility
-
-Every figure below is a real compile of this firmware, not an estimate.
-
-| Board | Role | Transport | Flash | RAM |
-|---|---|---|---|---|
-| C6 | controller | ESP-NOW | 68.9% | 35.7% |
-| C6 | controller | **+ BLE** | **97.8%** ❌ | 44.2% |
-| WROOM-32 | controller | BLE | **73.9%** ✅ | 60.7% |
-| **XIAO ESP32-S3** | controller | BLE | **33.7%** ✅ | 41.9% |
-| CYD | panel | ESP-NOW | 69.1% | 31.6% |
-| **CYD** | panel | **BLE + ESP-NOW** | **90.7%** ✅ | 64.7% |
-
-Three things follow:
-
-- **The C6 cannot take BLE.** 40 KB spare. It stays ESP-NOW for its remaining life,
-  and is never reflashed for this work.
-- **The CYD can carry both transports.** 90.7% flash — that figure already includes
-  ESP-NOW, LVGL, the web UI and the chemistry mirror.
-- **On WROOM-32 and CYD the binding constraint is RAM, not flash.** BLE reserves
-  DRAM pools, cutting reportable RAM to ~124 KB total. Both land near 60–65% of it,
-  so roughly 45 KB free. Watch this more closely than the flash bar.
-
-The XIAO figure omits the web UI and ESP-NOW packages and carries no display fonts;
-adding those is about one point on its 3.93 MB partition.
-
----
-
-## 3. Link design
-
-### One characteristic, not thirteen
-
-The ESP-NOW link currently carries ~13 values. The obvious BLE translation is 13
-characteristics. **Don't.**
-
-- **Telemetry, controller → panel:** ONE notify characteristic carrying a compact
-  delimited payload. The panel parses it in a lambda.
-- **Commands, panel → controller:** ONE write characteristic, carrying the existing
-  tiny text protocol unchanged (`SP <degF>`, `AL 0|1`).
-
-Every lens agrees on this one. Fewer characteristics is less flash and less config;
-a single payload is an **atomic snapshot**, where 13 independent characteristics
-would let the panel show temperature from one moment beside TDS from three seconds
-later; one payload has one age, which is better provenance; and a delimited string
-is readable in a log where a UUID is not. It also matches the command protocol's
-existing design rationale — text, so a firmware version skew between boards
-degrades gracefully instead of misparsing a struct.
-
-### Dual transport on the panel is additive, not a rewrite
-
-The panel already caches every received value into a `restore_value` global with an
-arrival timestamp, and the display reads the **globals**, never the transport. So a
-second transport writes into the same globals and the entire LVGL layer is untouched.
-
-- `Link Age` becomes age of the newest update from **either** transport.
-- Add a `Link Source` text sensor — `espnow` / `ble` / `none`.
-- Commands go out on whichever transport is currently live, decided by `Link Source`.
-
----
-
-## 4. Phases
-
-Each phase leaves a working tank.
-
-| Phase | Change | C6 touched? |
+| Device | Radios | Ever three? |
 |---|---|---|
-| **0** | Today: C6 ↔ CYD over ESP-NOW | — |
-| **1** | Add BLE client to the CYD **alongside** ESP-NOW. No peer yet, so it idles. Confirm nothing regresses | No |
-| **2** | Build the new controller (XIAO S3 preferred, WROOM-32 viable) with BLE server. Bench it. Panel now has a live BLE peer **and** its ESP-NOW link to the C6 | No |
-| **3** | Move probes and relays to the new controller. Seed the learned thermal model across via the existing `tank-seed/<device>/model` path. Retire the C6 | Retired |
-| **4** | Optionally drop ESP-NOW from the CYD and recover the flash and RAM | — |
+| C6 controller | WiFi + ESP-NOW | no |
+| CYD panel (today) | WiFi + ESP-NOW | no |
+| AMOLED panel (phase A) | WiFi + ESP-NOW | no |
+| AMOLED panel (phase B) | WiFi + BLE | no |
+| S3 controller (phase B) | WiFi + BLE | no |
 
-**Phase 1 is the only one that must come first.** 2 and 3 can wait for hardware.
-
----
-
-## 5. Open risks — verify before building, not after
-
-1. **Runtime coexistence.** WiFi + ESP-NOW + BLE all share one 2.4 GHz radio on the
-   CYD. They *compile* together; that is not evidence they *work* together. This
-   needs a bench test in phase 1 and is the single largest unknown.
-2. **Payload length vs MTU.** Default BLE MTU is 23 bytes. A 13-value delimited
-   payload is ~100. Needs MTU negotiation or a longer characteristic; confirm what
-   ESPHome's `max_length` actually permits before committing to one characteristic.
-3. **Reconnect behaviour.** Does `ble_client` re-establish cleanly after the
-   controller reboots, without a panel restart? Untested.
-4. **S3 ADC quality.** Not a BLE issue but it lands in the same build: the S3's
-   internal ADC is likely not good enough for a ~100 MΩ pH electrode at ±0.1. An
-   **ADS1115** on the existing I²C bus is the answer, and it should be decided
-   *before* the board file is written, not bolted on after.
-5. **Headless controller.** Neither the XIAO nor the WROOM-32 has a screen. The C6's
-   display is currently the last readout standing when WiFi, HA and the panel are all
-   down. A small I²C OLED restores that for a few dollars — decide in phase 2.
+The awkward transitional state is gone because **the new panel is a new
+device**. It does not have to become BLE on the same day the controller does.
 
 ---
 
-## 6. Provisional XIAO ESP32-S3 pin map
+## 2. Phases
 
-From the compiled probe build. ADC1 on the S3 is GPIO1–10 and the XIAO exposes
-GPIO1–9, so **every broken-out pin is ADC-capable** — the opposite of the C6, where
-GPIO0 was the last analog pin left.
+### Phase A — build the AMOLED panel on ESP-NOW
 
-| Function | Pin | Note |
-|---|---|---|
-| TDS | GPIO1 (A0) | ADC1 |
-| pH | GPIO2 (A1) | ADC1 — or move to ADS1115, see risk 4 |
-| DS18B20 | GPIO3 | 4.7 kΩ pull-up to 3V3 |
-| I²C SDA / SCL | GPIO5 / GPIO6 | BH1750, plus ADS1115 and OLED if adopted |
-| Heater relay | GPIO7 | |
-| Fan relay | GPIO8 | |
-| **Spare** | GPIO4, GPIO9 | both ADC1 — ORP fits here |
+The new panel joins as a **second** display speaking the transport that
+already works. Nothing else changes.
+
+- New board file, new round UI (see §3)
+- Reuses `packages/remote_display.yaml` **unchanged** — the ESP-NOW receive
+  path, the cached globals, `Link Age`, `Link Source`
+- **The CYD is untouched and keeps working.** Two panels showing the same
+  tank, which is genuinely useful while the new UI is being built
+- No controller change. No BLE. No new failure mode
+
+This is the phase that can start the day the board arrives.
+
+### Phase B — S3 controller, panel switches to BLE, CYD retires
+
+- Build the S3 controller (XIAO ESP32-S3, measured at 33.7% flash with BLE)
+- Panel swaps ESP-NOW for BLE **in one flash** — it never runs both
+- Learned thermal model carries across via the existing
+  `tank-seed/<device>/model` path
+- C6 and CYD retire together
 
 ---
 
-## 7. Not decided here
+## 3. The round UI is a redesign, not a port
 
-- XIAO ESP32-S3 vs WROOM-32 as the replacement controller. Both work; the XIAO has
-  far more headroom, the WROOM-32 has more GPIO and is already in hand.
-- Whether to add the ADS1115 and the OLED.
-- Whether phase 4 ever happens, or the CYD keeps ESP-NOW permanently as a fallback.
+466 × 466 on a **circular** face. The CYD layout is a rectangular grid — a
+header bar with radio icons at its ends, cards left and right, nav buttons
+along the bottom. **On a circle every one of those corners is physically
+absent.** None of it survives.
+
+That constraint pushes the design where it should have gone anyway:
+
+- ~44.5 mm across at 466 px is a **0.095 mm pitch**, roughly twice as fine
+  as the CYD
+- A centred temperature at ~45% of the diameter is about **20 mm tall**,
+  against 11 mm on the C6 and ~8 mm on the CYD. **Smaller panel, bigger
+  number**, because a round face has no room for furniture
+- AMOLED contrast beats the CYD's TN panel at a glance and off-axis, which
+  matters as much as size for reading across a room
+- The arc gauge already built for the CYD home page — temperature arc,
+  value in the centre, colour through the band — was always wanting to be
+  round. That concept ports; its coordinates do not
+
+**Build it with proportional positioning, not absolute pixels.** The current
+layout is hard-coded to 320×240 and that is why this is a rewrite rather than
+a resize. Doing it again the same way just moves the debt.
+
+---
+
+## 4. On arrival — verify before designing
+
+1. **PSRAM.** The preset carries `requires={"psram"}`; the framebuffer is
+   466×466×2 = **424 KB** and cannot live in internal RAM. Confirm the board
+   is the S3**R8** variant.
+2. **Touch controller.** Probably FT3168 or CST816, but that is a guess, and
+   guesses have cost real time in this project. Read it off the board or its
+   docs before writing config.
+3. **Round-safe bounds.** Nothing drawn outside the inscribed circle. Corner
+   coordinates that compile fine are simply invisible.
+
+Preset facts already confirmed from ESPHome:
+`WAVESHARE-ESP32-S3-TOUCH-AMOLED-1.75`, CO5300 controller, 466×466, 16-bit,
+`offset_width: 6`, `cs_pin: 12`, `reset_pin: 39`.
+
+---
+
+## 5. Phase 1's result, and what it still means
+
+Recorded so it is not re-learned: **WiFi + ESP-NOW + BLE on the CYD fails.**
+The panel lost ESP-NOW, then stopped answering HTTP entirely, at
+1100ms/100ms passive scanning — already the gentlest useful setting.
+
+A follow-up test (commit `5e02610`) disables the ESP-NOW radio to isolate
+whether BLE or the ESP-NOW pairing was at fault.
+
+**That test is now informative rather than blocking.** Under this plan no
+device ever runs BLE and ESP-NOW together, so its answer no longer gates
+anything. It is still worth knowing — a clean WiFi + BLE result on 2016
+silicon makes phase B near-certain on the S3 — but the CYD can be reverted to
+its working ESP-NOW build at any time without holding the plan up.
+
+---
+
+## 6. Still open
+
+- Whether the S3 controller is the XIAO ESP32-S3 or the WROOM-32. Both
+  measured and both fit; the XIAO has far more headroom, the WROOM-32 more
+  GPIO and is already in hand.
+- Whether to add an ADS1115 for pH, and a small OLED so the controller is
+  not blind. Both should be decided **before** the controller board file is
+  written rather than bolted on after.
