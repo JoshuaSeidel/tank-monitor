@@ -26,7 +26,6 @@ class Config:
     ha_url: str
     ha_token: str
     device: str
-    seneye_prefix: str
     default_echo: str
     api_token: str
     port: int
@@ -72,7 +71,6 @@ def load() -> Config:
         ha_url=_env("TANK_MCP_HA_URL", "http://supervisor/core").rstrip("/"),
         ha_token=_env("TANK_MCP_HA_TOKEN"),
         device=_env("TANK_MCP_DEVICE", "tank_monitor"),
-        seneye_prefix=_env("TANK_MCP_SENEYE_PREFIX", "seneye_spec_16"),
         default_echo=_env("TANK_MCP_DEFAULT_ECHO", "media_player.office"),
         api_token=_resolve_api_token(),
         port=int(_env("TANK_MCP_PORT", "8099")),

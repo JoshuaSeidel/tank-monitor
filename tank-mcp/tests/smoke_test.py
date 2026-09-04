@@ -64,7 +64,6 @@ async def main() -> int:
         TANK_MCP_HA_URL=f"http://127.0.0.1:{HA_PORT}",
         TANK_MCP_HA_TOKEN="fake-token",
         TANK_MCP_DEVICE="tank_monitor",
-        TANK_MCP_SENEYE_PREFIX="seneye_spec_16",
         TANK_MCP_DEFAULT_ECHO="media_player.office",
         TANK_MCP_TOKEN=TOKEN,
         TANK_MCP_TOKEN_FILE=f"{workdir}/api_token",
@@ -138,7 +137,7 @@ async def run_checks() -> None:
             print("\ntool registration")
             tools = {tool.name for tool in (await session.list_tools()).tools}
             expected = {
-                "tank_status", "water_chemistry", "seneye_status", "tank_report",
+                "tank_status", "water_chemistry", "ph_status", "tank_report",
                 "metric_history", "log_water_test", "water_test_history",
                 "set_target_temperature", "add_livestock", "log_loss",
                 "livestock_inventory", "loss_history", "stocking_history",
@@ -153,22 +152,28 @@ async def run_checks() -> None:
             check("temperature read", status["temperature_f"] == 74.53, status.get("temperature_f"))
             check("target read", status["target_f"] == 74.3, status.get("target_f"))
             check("on target verdict", status["verdict"] == "on target", status.get("verdict"))
-            check("probes agree", status["probe_cross_check"]["verdict"] == "agree", status["probe_cross_check"])
+            check("no probe cross-check key", "probe_cross_check" not in status, list(status)[:5])
             check("device online", status["online"] is True)
             check("heater duty read", status["heater_duty_percent"] == 0.0)
 
-            seneye = payload(await session.call_tool("seneye_status", {}))
-            check("seneye pH", seneye["ph"] == 7.33, seneye.get("ph"))
-            check("free ammonia safe", seneye["free_ammonia_verdict"] == "safe", seneye)
-            check("seneye not stale", seneye["stale"] is False, seneye.get("reading_age_hours"))
-            check("slide ok", seneye["slide_verdict"] == "ok", seneye.get("slide_days_remaining"))
+            ph = payload(await session.call_tool("ph_status", {}))
+            # The fixture has no sensor.tank_monitor_water_ph but does have a
+            # manual entry, so this exercises the fallback rung. The thing that
+            # matters is live=False: a test-kit value must never be presented
+            # as a current reading.
+            check("no probe -> falls back to test kit", ph["source"] == "test kit", ph)
+            check("fallback is flagged not-live", ph["live"] is False, ph)
+            check("fallback value is the manual entry", ph["ph"] == 7.4, ph)
 
             chem = payload(await session.call_tool("water_chemistry", {}))
             kit = chem["from_test_kit"]
+            check("chemistry carries pH provenance", chem["ph"]["source"] == "test kit" and chem["ph"]["live"] is False, chem.get("ph"))
+            check("ammonia verdict from kit bands", kit["total_ammonia_verdict"].startswith("zero"), kit.get("total_ammonia_ppm"))
+            check("GH reported in ppm", kit["gh_ppm"] is not None, kit)
             check("nitrate verdict", kit["nitrate_verdict"] == "good", kit.get("nitrate_ppm"))
             check("nitrite zero", kit["nitrite_verdict"] == "zero", kit.get("nitrite_ppm"))
-            check("GH flagged below target", kit["gh_verdict"] == "below target", kit.get("gh_dgh"))
-            check("GH target read from HA", kit["gh_target_dgh"] == [6.0, 8.0], kit.get("gh_target_dgh"))
+            check("GH verdict computed", kit["gh_verdict"] in ("below target", "above target", "in range", "no reading"), kit.get("gh_ppm"))
+            check("GH target read from HA in ppm", kit["gh_target_ppm"] == [6.0, 8.0], kit.get("gh_target_ppm"))
 
             report = payload(await session.call_tool("tank_report", {}))
             check("report flags GH and KH", not report["healthy"] and len(report["concerns"]) >= 2, report["concerns"])

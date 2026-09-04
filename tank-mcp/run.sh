@@ -7,7 +7,6 @@ export TANK_MCP_TOKEN_FILE="/data/api_token"
 
 export TANK_MCP_TOKEN="$(bashio::config 'api_token')"
 export TANK_MCP_DEVICE="$(bashio::config 'device')"
-export TANK_MCP_SENEYE_PREFIX="$(bashio::config 'seneye_prefix')"
 export TANK_MCP_DEFAULT_ECHO="$(bashio::config 'default_echo')"
 export TANK_MCP_PUBLISH_MQTT="$(bashio::config 'publish_livestock_to_mqtt')"
 export TANK_MCP_LOG_LEVEL="$(bashio::config 'log_level')"

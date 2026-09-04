@@ -2,7 +2,7 @@
 
 An MCP server for the aquarium, running as a Home Assistant App. It gives an
 AI assistant a set of tools for the tank specifically -- read the controller
-and the Seneye, type in a test-kit result, keep a record of fish and shrimp
+type in a test-kit result, keep a record of fish and shrimp
 that have died, and say any of it out loud on an Echo.
 
 It is not a general Home Assistant bridge. Every tool answers a tank question,
@@ -38,7 +38,6 @@ container port stays 8099; only the host port moves.
 |---|---|---|
 | `api_token` | *(generated)* | Bearer token MCP clients must send. Left empty, one is generated into `/data/api_token` and logged. |
 | `device` | `tank_monitor` | Which controller the tools read and command — `tank_monitor` or `tank_monitor_v2`. |
-| `seneye_prefix` | `seneye_spec_16` | Object-id prefix of the Seneye sensors. |
 | `default_echo` | `media_player.office` | Echo used by `announce` when no target is given. |
 | `publish_livestock_to_mqtt` | `true` | Mirror the livestock ledger into Home Assistant as sensors. |
 | `log_level` | `info` | |
@@ -67,7 +66,7 @@ claude mcp add --transport http tank \
 | `tank_report` | "How is the tank?" — everything, plus a ranked list of what is wrong. Start here. |
 | `tank_status` | Temperature against setpoint, heater and fan duty, TDS, faults, probe cross-check. |
 | `water_chemistry` | Every chemistry value with a verdict; GH/KH in both degrees and ppm. |
-| `seneye_status` | Seneye readings, how stale they are, slide expiry. |
+| `ph_status` | Current pH and **where it came from** — `probe`, `test kit` or `unavailable`. |
 | `metric_history` | Min/max/mean of one metric over N hours. |
 | `water_test_history` | Past manual tests recorded through this app. |
 
@@ -157,7 +156,9 @@ tetras, scaleless kuhli loaches, blue-eyes, and Neocaridina shrimp:
 - Cold floor 73.4 °F, matching the ESP32's blue band and the Home Assistant
   cold-floor alarm.
 - On-target means within 0.5 °F of the setpoint.
-- Free ammonia: elevated at 0.02 mg/L, toxic at 0.05 (Seneye's own bands).
+- Total ammonia (API kit): anything above 0 is worth acting on, 0.5 ppm is high.
+  These are TOTAL ammonia bands, not the free-NH3 ones a Seneye slide reported —
+  they are an order of magnitude apart, so do not mix them up.
 - pH 6.5–7.8.
 - Nitrate good below 20 ppm, water change due above 40.
 - GH and KH are read from the `input_number.aquarium_*_target_*` helpers

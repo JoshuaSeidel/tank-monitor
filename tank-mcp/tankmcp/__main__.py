@@ -76,7 +76,7 @@ def main() -> int:
 
     _LOGGER.info("Tank MCP listening on http://0.0.0.0:%s/mcp", cfg.port)
     _LOGGER.info("API token: %s", cfg.api_token)
-    _LOGGER.info("Controller: %s   Seneye: %s", cfg.device, cfg.seneye_prefix)
+    _LOGGER.info("Controller: %s", cfg.device)
 
     try:
         uvicorn.run(

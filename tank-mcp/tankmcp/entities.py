@@ -11,13 +11,17 @@ from dataclasses import dataclass
 
 # --- Water chemistry bands ------------------------------------------------
 #
-# Free ammonia bands are Seneye's own (its slide reports NH3, not total
-# ammonia). Nitrite/nitrate are standard freshwater figures. The pH window is
-# set for this tank's stock -- soft-water tetras, scaleless kuhli loaches and
-# Neocaridina -- not a generic community range.
+# Ammonia is TOTAL ammonia from the API Freshwater Master kit, typed in by
+# hand. It used to be free NH3 from a Seneye slide, whose bands (0.02/0.05
+# mg/L) were an order of magnitude tighter because at planted-tank pH most
+# ammonia is non-toxic NH4+. Do not mix the two scales up.
+#
+# In a cycled tank ANY detectable total ammonia is worth acting on -- the
+# filter should consume it faster than the kit can resolve. 0.25 ppm is the
+# kit's first visible band.
 
-FREE_AMMONIA_CAUTION = 0.02  # mg/L
-FREE_AMMONIA_TOXIC = 0.05
+TOTAL_AMMONIA_CAUTION = 0.0  # ppm; anything visible at all
+TOTAL_AMMONIA_HIGH = 0.5
 
 NITRITE_CAUTION = 0.0  # ppm; anything measurable is a cycle problem
 NITRITE_HIGH = 0.25
@@ -25,7 +29,10 @@ NITRITE_HIGH = 0.25
 NITRATE_GOOD = 20.0  # ppm
 NITRATE_HIGH = 40.0
 
-PH_MIN = 6.5
+# The floor is set by the emerald dwarf danios (Danio erythromicron), an Inle
+# Lake fish wanting 7.0-8.0. Every other species here tolerates lower, so one
+# fish caps how far CO2 injection can take the pH down.
+PH_MIN = 7.0
 PH_MAX = 7.8
 
 # Kuhli loaches and blue-eyes set the cold floor; it matches the ESP32's blue
@@ -33,9 +40,10 @@ PH_MAX = 7.8
 TEMP_COLD_FLOOR_F = 73.4
 TEMP_BAND_F = 0.5  # how far from setpoint still counts as on-target
 
-# Probe cross-check bands, matching homeassistant/README.md.
-PROBE_AGREE_F = 0.5
-PROBE_DRIFT_F = 1.5
+# There is no probe cross-check any more. The Seneye that provided the second
+# temperature reading was returned on 2026-09-04 after its pH proved ~0.45 low
+# against an API liquid test. The controller drives the heater from one
+# DS18B20 and nothing independently checks it -- verify by hand occasionally.
 
 # Test strips read GH/KH in ppm; the Home Assistant helpers and their target
 # ranges are stored in degrees. One degree of hardness is 17.9 ppm CaCO3.
@@ -132,30 +140,17 @@ class TankEntities:
     def ip_address(self) -> str:
         return f"sensor.{self.prefix}_ip_address"
 
-
-@dataclass(frozen=True)
-class SeneyeEntities:
-    prefix: str
-
     @property
     def ph(self) -> str:
-        return f"sensor.{self.prefix}_ph"
+        """DFRobot SEN0169-V2 glass electrode on the controller.
 
-    @property
-    def free_ammonia(self) -> str:
-        return f"sensor.{self.prefix}_free_ammonia"
-
-    @property
-    def temperature(self) -> str:
-        return f"sensor.{self.prefix}_temperature"
-
-    @property
-    def last_reading(self) -> str:
-        return f"sensor.{self.prefix}_last_reading"
-
-    @property
-    def slide_expires(self) -> str:
-        return f"sensor.{self.prefix}_slide_expires"
+        This entity does not exist until that probe is wired and calibrated,
+        so every reader here must tolerate it being absent rather than
+        assuming a number. That is deliberate: the previous continuous pH
+        source could not be calibrated, and trusting it over a liquid test
+        cost this project three days of wrong conclusions.
+        """
+        return f"sensor.{self.prefix}_water_ph"
 
 
 # Manual test-kit helpers. These already exist in Home Assistant and are

@@ -42,7 +42,6 @@ class TankServer:
         self.ha = HomeAssistant(cfg.ha_url, cfg.ha_token)
         self.store = Store(cfg.db_path)
         self.tank = E.TankEntities(cfg.device)
-        self.seneye = E.SeneyeEntities(cfg.seneye_prefix)
         self.publisher: LivestockPublisher | None = None
         if cfg.mqtt_enabled:
             self.publisher = LivestockPublisher(
@@ -117,26 +116,34 @@ class TankServer:
 
             Water temperature against setpoint, what the heater and fan are
             doing, TDS and conductivity, light level, controller faults, and a
-            cross-check of the controller's probe against the Seneye's.
+            There is no second temperature probe, so nothing independently
+            checks the DS18B20 this reports.
             Temperatures are Fahrenheit.
             """
-            return await readings.tank_status(self.ha, self.tank, self.seneye)
+            return await readings.tank_status(self.ha, self.tank)
 
         @mcp.tool()
         async def water_chemistry() -> dict[str, Any]:
             """Every chemistry value the tank has, with a verdict on each.
 
-            pH and free ammonia come from the Seneye. Total ammonia, nitrite,
+            pH comes from the controller's glass electrode if one is wired,
+            otherwise from your last test-kit entry - check the source field.
+            Total ammonia, nitrite,
             nitrate, GH, KH and TDS come from the last test kit entry. GH and
             KH are given in both degrees and ppm, and each is judged against
             the target range configured in Home Assistant.
             """
-            return await readings.water_chemistry(self.ha, self.seneye)
+            return await readings.water_chemistry(self.ha, self.tank)
 
         @mcp.tool()
-        async def seneye_status() -> dict[str, Any]:
-            """Seneye monitor readings, how stale they are, and slide expiry."""
-            return await readings.seneye_status(self.ha, self.seneye)
+        async def ph_status() -> dict[str, Any]:
+            """Current pH, and crucially where it came from.
+
+            source is "probe" (live, calibratable), "test kit" (your last
+            manual entry, with its age) or "unavailable". Never present a
+            test-kit value as if it were live.
+            """
+            return await readings.ph_status(self.ha, self.tank)
 
         @mcp.tool()
         async def tank_report() -> dict[str, Any]:
@@ -146,18 +153,17 @@ class TankServer:
             anything currently wrong. Use this rather than three separate
             calls when the question is general.
             """
-            status = await readings.tank_status(self.ha, self.tank, self.seneye)
-            chemistry = await readings.water_chemistry(self.ha, self.seneye)
-            seneye = await readings.seneye_status(self.ha, self.seneye)
-            problems = readings.concerns(status, chemistry, seneye)
+            status = await readings.tank_status(self.ha, self.tank)
+            chemistry = await readings.water_chemistry(self.ha, self.tank)
+            problems = readings.concerns(status, chemistry)
             return {
                 "healthy": not problems,
                 "concerns": problems,
                 "tank": status,
                 "chemistry": chemistry,
-                "seneye": seneye,
+                "ph": chemistry.get("ph"),
                 "livestock": self.livestock_summary(),
-                "spoken_summary": speech.tank_report(status, chemistry, seneye, problems),
+                "spoken_summary": speech.tank_report(status, chemistry, problems),
             }
 
         @mcp.tool()
@@ -297,7 +303,7 @@ class TankServer:
                 "ledger_id": row_id,
                 "written": written,
                 "unchanged": [k for k in writes if k not in written],
-                "chemistry_now": await readings.water_chemistry(self.ha, self.seneye),
+                "chemistry_now": await readings.water_chemistry(self.ha, self.tank),
             }
 
         @mcp.tool()
@@ -462,11 +468,10 @@ class TankServer:
         @mcp.tool()
         async def speak_tank_report(target: str | None = None) -> dict[str, Any]:
             """Read the current tank status aloud on an Echo."""
-            status = await readings.tank_status(self.ha, self.tank, self.seneye)
-            chemistry = await readings.water_chemistry(self.ha, self.seneye)
-            seneye = await readings.seneye_status(self.ha, self.seneye)
-            problems = readings.concerns(status, chemistry, seneye)
-            message = speech.tank_report(status, chemistry, seneye, problems)
+            status = await readings.tank_status(self.ha, self.tank)
+            chemistry = await readings.water_chemistry(self.ha, self.tank)
+            problems = readings.concerns(status, chemistry)
+            message = speech.tank_report(status, chemistry, problems)
             result = await self._announce(message, target)
             result["concerns"] = problems
             return result

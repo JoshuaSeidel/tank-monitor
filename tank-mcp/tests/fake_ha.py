@@ -42,6 +42,8 @@ def reset() -> None:
     _set("binary_sensor.tank_monitor_fan", "off")
     _set("sensor.tank_monitor_heater_output", 0.0)
     _set("sensor.tank_monitor_fan_output", 0.0)
+    # No pH probe wired yet, so the entity is deliberately absent: exercises
+    # the "unavailable" path that used to be a Seneye reading.
     _set("sensor.tank_monitor_tds", 482)
     _set("sensor.tank_monitor_electrical_conductivity", 964)
     _set("sensor.tank_monitor_tank_light_level", 596)
@@ -57,11 +59,6 @@ def reset() -> None:
     _set("sensor.tank_monitor_wi_fi_signal", -50)
     _set("sensor.tank_monitor_ip_address", "192.168.8.137")
 
-    _set("sensor.seneye_spec_16_ph", 7.33)
-    _set("sensor.seneye_spec_16_free_ammonia", 0.004)
-    _set("sensor.seneye_spec_16_temperature", 74.066)
-    _set("sensor.seneye_spec_16_last_reading", (NOW - timedelta(minutes=25)).isoformat())
-    _set("sensor.seneye_spec_16_slide_expires", (NOW + timedelta(days=17)).isoformat())
 
     _set("input_number.aquarium_total_ammonia", 0.0)
     _set("input_number.aquarium_nitrite", 0.0)

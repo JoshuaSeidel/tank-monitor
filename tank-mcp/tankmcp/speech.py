@@ -19,7 +19,6 @@ def _plural(count: int, singular: str, plural: str | None = None) -> str:
 def tank_report(
     status: dict[str, Any],
     chemistry: dict[str, Any],
-    seneye: dict[str, Any],
     problems: list[str],
 ) -> str:
     if status.get("online") is False:
@@ -48,12 +47,13 @@ def tank_report(
     elif state:
         parts.append(f"The controller is {state}.")
 
-    ph = seneye.get("ph")
-    nh3 = seneye.get("free_ammonia_mg_l")
+    ph_block = chemistry.get("ph", {})
+    ph = ph_block.get("ph")
+    nh3 = chemistry.get("from_test_kit", {}).get("total_ammonia_ppm")
     if ph is not None:
-        parts.append(f"pH is {ph:.2f}, {seneye.get('ph_verdict')}.")
+        parts.append(f"pH is {ph:.2f}, {ph_block.get('verdict')}" + ("." if ph_block.get("live") else ", from a test kit."))
     if nh3 is not None:
-        verdict = seneye.get("free_ammonia_verdict")
+        verdict = chemistry.get("from_test_kit", {}).get("total_ammonia_verdict")
         if verdict == "safe":
             parts.append("Free ammonia is safe.")
         else:
