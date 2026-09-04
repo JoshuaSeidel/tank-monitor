@@ -1,0 +1,92 @@
+# Seeed XIAO ESP32-S3 -- controller (sensors + relays), headless.
+#
+# WHY THIS BOARD
+# Measured, not assumed: this firmware plus pH plus a BLE server compiles at
+# 33.7% flash here against 97.8% on the C6, which does not fit at all. The
+# 8MB part gets a 3.93MB app partition with dual OTA against the C6's 1.8MB.
+# Dual-core also puts the BLE stack off the app loop; the C6 is single core.
+#
+# WHAT THIS FILE OWES THE SHARED PACKAGES -- the whole board contract:
+#   one_wire bus                 -> the DS18B20
+#   i2c bus                      -> BH1750, and an ADS1115/OLED later
+#   adc sensor id: tds_voltage   -> packages/sensors.yaml
+#   adc sensor id: ph_voltage    -> packages/ph.yaml
+#   output id: heater_output     -> the controller's heater
+#   output id: fan_output        -> the controller's fan
+#
+# PIN BUDGET -- the opposite of the C6's problem.
+# ESP32-S3 ADC1 is GPIO1-10 and this board breaks out GPIO1-9, so EVERY
+# exposed pin is ADC1-capable. ADC2 is unusable while WiFi is on, which is
+# what made the C6 so cramped; here it never comes up. Seven pins used,
+# GPIO4 and GPIO9 spare and both analog.
+#
+# TWO THINGS DELIBERATELY NOT DECIDED HERE, see BLE-MIGRATION-PLAN.md:
+#   - An ADS1115 for pH. The S3's internal ADC is likely not good enough for
+#     a ~100 MOhm electrode at +/-0.1. If adopted, pH moves off GPIO2 onto
+#     the I2C bus and GPIO2 frees up.
+#   - A small I2C OLED. This board is headless, and on the C6 the local
+#     screen is the last readout standing when WiFi, HA and the panel are
+#     all down. Worth a few dollars to not lose that.
+
+esp32:
+  board: seeed_xiao_esp32s3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+one_wire:
+  - platform: gpio
+    # 4.7k pull-up to 3V3 at the BOARD end of the run, not out at the probe.
+    pin: GPIO3
+
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+
+sensor:
+  # Raw TDS probe voltage. Internal only; packages/sensors.yaml does the maths.
+  - platform: adc
+    pin: GPIO1
+    id: tds_voltage
+    update_interval: 500ms
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      # The probe output is AC-excited and noisy; median rejects spikes
+      # without lagging a value that moves over minutes anyway.
+      - median:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+
+  # pH electrode. See the ADS1115 note above -- this pin is provisional.
+  - platform: adc
+    pin: GPIO2
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
+output:
+  # Time-proportional over a 15 minute window. These are mechanical relay
+  # contacts: a shorter window would give finer control at the cost of
+  # burning through switching cycles. Pinned full-on or full-off costs
+  # nothing, so the wear only happens at partial duty.
+  - platform: slow_pwm
+    id: heater_output
+    pin: GPIO7
+    period: 900s
+
+  - platform: slow_pwm
+    id: fan_output
+    pin: GPIO8
+    period: 900s

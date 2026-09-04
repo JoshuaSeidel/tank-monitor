@@ -1,0 +1,33 @@
+# Waveshare ESP32-S3-Touch-AMOLED-1.75 round panel. Put THIS in the dashboard.
+#
+# PHASE A: joins on ESP-NOW as a SECOND panel beside the CYD, which is left
+# untouched and keeps working. Two panels showing the same tank while the new
+# UI is built. No controller change, no BLE, no new failure mode.
+#
+# PHASE B swaps remote_display.yaml's ESP-NOW for BLE in one flash, when the
+# S3 controller exists. This board never runs both -- that is the rule that
+# came out of the phase 1 coexistence failure on the CYD.
+#
+# device_name must NOT collide with the CYD. Same name means the same MQTT
+# topic prefix, discovery ids, hostname and LWT, and the two boards overwrite
+# each other's entities.
+substitutions:
+  device_name: tank-monitor-round
+  friendly_name: Tank Monitor Round
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      # Display-only: this REPLACES control.yaml and sensors.yaml. Loading
+      # either alongside it collides on every id.
+      - packages/remote_display.yaml
+      - packages/chemistry.yaml
+      - boards/waveshare-amoled-175.yaml
+    refresh: 0s
+
+mqtt:
+  discovery_unique_id_generator: mac

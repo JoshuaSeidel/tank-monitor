@@ -1,0 +1,362 @@
+# Waveshare ESP32-S3-Touch-AMOLED-1.75 -- round remote panel.
+#
+# Display-only, exactly like the CYD: no probes, no relays, no control loop.
+# It subscribes to the controller's broadcasts and renders them, so the tank
+# stays regulated whatever this board is doing.
+#
+# ---------------------------------------------------------------
+# Why round changes the design rather than the dimensions
+# ---------------------------------------------------------------
+# 466x466 CIRCULAR. The CYD layout is a rectangular grid -- a header bar with
+# radio icons at its ends, cards left and right, nav buttons along the bottom.
+# Every one of those lives in a corner that physically does not exist here.
+# None of it ports.
+#
+# So everything below is positioned with LVGL's align: system -- CENTER,
+# TOP_MID, BOTTOM_MID with offsets -- and NOT absolute x/y. The CYD layout is
+# hard-coded to 320x240, which is precisely why moving to this panel is a
+# rewrite instead of a resize. Doing it the same way again would just move
+# that debt to the next screen.
+#
+# The constraint helps. At ~44.5mm across and 466px the pitch is 0.095mm,
+# roughly twice as fine as the CYD, and a round face has no room for
+# furniture -- so one big centred number gets the space the CYD spends on
+# chrome. That is the readability the whole panel exists for.
+#
+# ---------------------------------------------------------------
+# Verified, not assumed
+# ---------------------------------------------------------------
+# Pins are from Waveshare's own HARDWARE_REFERENCE.md. CS=12 and RESET=39
+# independently match ESPHome's built-in preset, which cross-validates it.
+#   QSPI: SCLK 38, D0 4, D1 5, D2 6, D3 7, CS 12, RESET 39
+#   Touch I2C: SDA 15, SCL 14, INT 11, RST 40  (CST9217)
+#
+# CST9217 is handled by ESPHome's cst9220 driver -- that driver explicitly
+# accepts both 0x9220 and 0x9217 chip ids, so this is supported rather than
+# hopeful.
+#
+# PSRAM is MANDATORY: the framebuffer is 466*466*2 = 424 KB and cannot live
+# in internal RAM. The model preset carries requires={"psram"}, so a board
+# without it fails at config time rather than mysteriously at runtime.
+
+esp32:
+  board: esp32s3box
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+spi:
+  - id: amoled_bus
+    type: quad
+    clk_pin: GPIO38
+    data_pins: [GPIO4, GPIO5, GPIO6, GPIO7]
+
+i2c:
+  - id: touch_bus
+    sda: GPIO15
+    scl: GPIO14
+    scan: true
+
+display:
+  - platform: mipi_spi
+    id: amoled
+    model: WAVESHARE-ESP32-S3-TOUCH-AMOLED-1.75
+    spi_id: amoled_bus
+    dimensions: {width: 466, height: 466}
+    auto_clear_enabled: false
+    update_interval: never
+    # AMOLED is emissive -- there is no backlight to dim, so brightness is a
+    # display register on the CO5300 rather than a PWM output. The CYD's
+    # monochromatic light/output pattern does not apply and there is no
+    # output.mipi_spi platform to bind it to.
+    brightness: 0xD0
+
+touchscreen:
+  - platform: cst9220
+    id: amoled_touch
+    i2c_id: touch_bus
+    interrupt_pin: GPIO11
+    reset_pin: GPIO40
+
+font:
+  # Sized for a 466px circle, not carried over from the CYD. A centred
+  # number at ~45% of the diameter is about 20mm tall -- against 11mm on the
+  # C6 and ~8mm on the CYD. Smaller panel, bigger number.
+  #
+  # Glyph sets are trimmed to what is actually drawn, because a 190px face
+  # with the full ASCII range is a lot of flash. A MISSING GLYPH RENDERS AS A
+  # BOX WITH NO BUILD ERROR -- that has bitten this project twice, so if you
+  # add a string here, check every character is in the set below.
+  - file: "gfonts://Roboto@900"
+    id: r_xxl
+    size: 190
+    glyphs: "0123456789.-"
+  - file: "gfonts://Roboto@700"
+    id: r_lg
+    size: 46
+    glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°/|"
+  - file: "gfonts://Roboto@500"
+    id: r_md
+    size: 30
+    glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°/|"
+  - file: "gfonts://Roboto@500"
+    id: r_sm
+    size: 22
+    glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°/|"
+
+lvgl:
+  displays: [amoled]
+  touchscreens: [amoled_touch]
+  # Small buffer: PSRAM holds the framebuffer, this is the draw scratch.
+  buffer_size: 25%
+  bg_color: 0x000000
+
+  # ---------------------------------------------------------------
+  # Navigation: tap ANYWHERE cycles pages.
+  # ---------------------------------------------------------------
+  # The CYD uses three nav buttons along the bottom edge. On a circle that
+  # edge is a chord through empty space -- the corners those buttons sit in
+  # do not exist. A whole-face tap target needs no chrome, is impossible to
+  # miss, and works with a fingertip on a 44mm screen where a 60px button
+  # would not.
+  pages:
+    - id: p_temp
+      bg_color: 0x0B0F14
+      widgets:
+        # Rim gauge. Spans the setpoint-relative band from packages/base.yaml,
+        # so it follows the setpoint rather than fixed temperatures.
+        - arc:
+            id: t_arc
+            align: CENTER
+            width: 452
+            height: 452
+            start_angle: 130
+            end_angle: 50
+            arc_width: 16
+            min_value: 0
+            max_value: 100
+            value: 50
+            adjustable: false
+            clickable: false
+
+        - label:
+            id: t_val
+            align: CENTER
+            y: -18
+            text: "--.-"
+            text_font: r_xxl
+            text_color: 0xE8EDF2
+
+        - label:
+            id: t_unit
+            align: CENTER
+            y: 86
+            text: "F"
+            text_font: r_md
+            text_color: 0x8A94A6
+
+        - label:
+            id: t_state
+            align: CENTER
+            y: 128
+            text: "STARTING"
+            text_font: r_lg
+            text_color: 0x8A94A6
+
+        - label:
+            id: t_target
+            align: CENTER
+            y: -150
+            text: "TARGET --"
+            text_font: r_sm
+            text_color: 0x8A94A6
+
+        # Transparent, full-face, LAST so it is topmost and catches every tap.
+        - obj:
+            align: CENTER
+            width: 466
+            height: 466
+            bg_opa: TRANSP
+            border_width: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next
+
+    - id: p_water
+      bg_color: 0x0B0F14
+      widgets:
+        - label:
+            align: CENTER
+            y: -150
+            text: "WATER"
+            text_font: r_sm
+            text_color: 0x8A94A6
+        - label:
+            id: w_tds
+            align: CENTER
+            y: -60
+            text: "TDS --"
+            text_font: r_lg
+            text_color: 0xE8EDF2
+        - label:
+            id: w_light
+            align: CENTER
+            y: 0
+            text: "LIGHT --"
+            text_font: r_md
+            text_color: 0x8A94A6
+        - label:
+            id: w_swing
+            align: CENTER
+            y: 48
+            text: "SWING --"
+            text_font: r_md
+            text_color: 0x8A94A6
+        - label:
+            id: w_heat
+            align: CENTER
+            y: 96
+            text: "IDLE"
+            text_font: r_md
+            text_color: 0x8A94A6
+        - obj:
+            align: CENTER
+            width: 466
+            height: 466
+            bg_opa: TRANSP
+            border_width: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next
+
+    - id: p_chem
+      bg_color: 0x0B0F14
+      widgets:
+        - label:
+            align: CENTER
+            y: -150
+            text: "TEST KIT"
+            text_font: r_sm
+            text_color: 0x8A94A6
+        - label:
+            id: c_ph
+            align: CENTER
+            y: -70
+            text: "pH --"
+            text_font: r_lg
+            text_color: 0xE8EDF2
+        - label:
+            id: c_gh
+            align: CENTER
+            y: -12
+            text: "GH --"
+            text_font: r_md
+            text_color: 0x8A94A6
+        - label:
+            id: c_kh
+            align: CENTER
+            y: 30
+            text: "KH --"
+            text_font: r_md
+            text_color: 0x8A94A6
+        # Provenance, not decoration. Every value on this page is as fresh as
+        # the last manual test, and a panel that shows a stale number without
+        # saying so is the exact failure that cost this project three days.
+        - label:
+            id: c_age
+            align: CENTER
+            y: 96
+            text: "--"
+            text_font: r_sm
+            text_color: 0x8A94A6
+        - label:
+            id: c_link
+            align: CENTER
+            y: 140
+            text: "LINK --"
+            text_font: r_sm
+            text_color: 0x8A94A6
+        - obj:
+            align: CENTER
+            width: 466
+            height: 466
+            bg_opa: TRANSP
+            border_width: 0
+            clickable: true
+            on_click:
+              - lvgl.page.next
+
+interval:
+  # One redraw path for every page. Reads the cached globals that
+  # packages/remote_display.yaml fills, never the transport -- which is why
+  # swapping ESP-NOW for BLE later touches none of this.
+  - interval: 2s
+    then:
+      - lambda: |-
+          const float t   = id(water_temp).state;
+          const float sp  = id(r_setpoint_c);
+          const bool  ok  = !isnan(t) && !id(r_fault);
+
+          // Setpoint-relative bands from packages/base.yaml. Offsets, not
+          // fixed temperatures, so moving the target moves the colours.
+          const float f    = ok ? t * 9.0f / 5.0f + 32.0f : 0.0f;
+          const float spf  = isnan(sp) ? f : sp * 9.0f / 5.0f + 32.0f;
+          const float off  = f - spf;
+
+          uint32_t col; const char *word;
+          if (!ok)                            { col = 0xFF4438; word = "PROBE FAULT"; }
+          else if (off < ${temp_off_lightblue}) { col = 0x2F6FED; word = "TOO COLD"; }
+          else if (off < ${temp_off_greenblue}) { col = 0x4FA3FF; word = "COLD"; }
+          else if (off < ${temp_off_green})     { col = 0x3ECFB0; word = "COOL"; }
+          else if (off < ${temp_off_amber})     { col = 0x3ECF6E; word = "STEADY"; }
+          else if (off < ${temp_off_red})       { col = 0xFFB020; word = "WARM"; }
+          else                                  { col = 0xFF4438; word = "TOO WARM"; }
+
+          char buf[32];
+          if (ok) snprintf(buf, sizeof(buf), "%.1f", f);
+          else    snprintf(buf, sizeof(buf), "--.-");
+          lv_label_set_text(id(t_val), buf);
+          lv_obj_set_style_text_color(id(t_val), lv_color_hex(col), 0);
+          lv_label_set_text(id(t_state), word);
+          lv_obj_set_style_text_color(id(t_state), lv_color_hex(col), 0);
+          lv_obj_set_style_arc_color(id(t_arc), lv_color_hex(col), LV_PART_INDICATOR);
+
+          snprintf(buf, sizeof(buf), "TARGET %.1f", spf);
+          lv_label_set_text(id(t_target), buf);
+
+          // Arc position across the band, clamped so an excursion pins the
+          // needle rather than wrapping it back round and reading as fine.
+          const float lo = ${temp_off_lightblue}, hi = ${temp_off_red};
+          float pct = (off - lo) / (hi - lo) * 100.0f;
+          if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+          lv_arc_set_value(id(t_arc), (int) pct);
+
+          // ---- water page ----
+          const float tds_v = id(tds).state;
+          if (!isnan(tds_v)) { snprintf(buf, sizeof(buf), "TDS %.0f", tds_v); lv_label_set_text(id(w_tds), buf); }
+          const float lux = id(tank_lux).state;
+          if (!isnan(lux)) { snprintf(buf, sizeof(buf), "LIGHT %.0f", lux); lv_label_set_text(id(w_light), buf); }
+          const float sw = id(r_swing_c);
+          if (!isnan(sw)) { snprintf(buf, sizeof(buf), "SWING %.1f", sw * 9.0f / 5.0f); lv_label_set_text(id(w_swing), buf); }
+
+          if (id(r_heat) > 0.5f)      snprintf(buf, sizeof(buf), "HEATING %.0f%%", id(r_heat));
+          else if (id(r_fan) > 0.5f)  snprintf(buf, sizeof(buf), "COOLING %.0f%%", id(r_fan));
+          else                        snprintf(buf, sizeof(buf), "IDLE");
+          lv_label_set_text(id(w_heat), buf);
+
+          // ---- chemistry page ----
+          if (!isnan(id(chem_ph)))  { snprintf(buf, sizeof(buf), "pH %.2f", id(chem_ph)); lv_label_set_text(id(c_ph), buf); }
+          if (!isnan(id(chem_gh)))  { snprintf(buf, sizeof(buf), "GH %.0f ppm", id(chem_gh)); lv_label_set_text(id(c_gh), buf); }
+          if (!isnan(id(chem_kh)))  { snprintf(buf, sizeof(buf), "KH %.0f ppm", id(chem_kh)); lv_label_set_text(id(c_kh), buf); }
+
+          // Link freshness. Stale beats loyal -- if nothing has arrived
+          // recently say so rather than showing a plausible frozen number.
+          const bool stale = id(r_stamp_ms) == 0 || (millis() - id(r_stamp_ms)) > 45000;
+          lv_label_set_text(id(c_link), stale ? "LINK STALE" : "LINK OK");
+          lv_obj_set_style_text_color(id(c_link),
+              lv_color_hex(stale ? 0xFF4438 : 0x3ECF6E), 0);

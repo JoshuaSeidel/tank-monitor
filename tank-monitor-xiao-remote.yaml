@@ -1,0 +1,36 @@
+# XIAO ESP32-S3 controller. Put THIS in the ESPHome dashboard.
+#
+# Everything below packages: is pulled from git on every build. The one file
+# that is NOT is this wrapper, so anything that must load reliably belongs in
+# a packages/ file rather than here -- three changes in this project have
+# silently not taken because a wrapper edit did not happen.
+#
+# device_name is deliberately NOT tank-monitor. Running this alongside the C6
+# on the same name would collide on MQTT topic prefix, discovery object ids,
+# mDNS hostname and the LWT topic, and the two would overwrite each other's
+# entities. Rename only when the C6 is retired.
+substitutions:
+  device_name: tank-monitor-s3
+  friendly_name: Tank Monitor S3
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - packages/ph.yaml
+      - packages/espnow_link.yaml
+      - boards/xiao-esp32s3.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s
+
+# ESPHome's default MQTT unique_id generator is "legacy": ESP + type +
+# object_id, with no device name in it. Two boards publishing "Water
+# Temperature" would generate identical unique_ids and Home Assistant would
+# silently drop the second. That cost a long debugging session on the CYD.
+mqtt:
+  discovery_unique_id_generator: mac
