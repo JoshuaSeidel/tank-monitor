@@ -103,6 +103,18 @@ globals:
   # widget's own on_value does not echo that back as a command. Without
   # it, syncing the switch from the controller publishes a command to the
   # controller, which is a loop.
+  # Which transport last delivered data. Not restored: after a reboot the
+  # honest answer is "nothing has arrived yet", and claiming the previous
+  # source would be a small lie of exactly the kind this project keeps
+  # getting bitten by.
+  - id: r_src
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: r_ble_connected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   - id: r_sync
     type: bool
     restore_value: false
@@ -162,7 +174,14 @@ script:
           static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
           id(espnow_link).send(BCAST, (const uint8_t *) buf, strlen(buf));
 
+  # Every transport funnels through here. Adding BLE beside ESP-NOW meant
+  # this had to learn WHICH transport stamped it -- otherwise Link Age can
+  # say the feed is fresh without being able to say what is feeding it,
+  # and during the transition that is the question you actually have.
+  #   src: 1 = ESP-NOW, 2 = BLE
   - id: r_seen
+    parameters:
+      src: int
     then:
       # Block scalar: a ternary's ':' is not legal in a plain YAML scalar.
       - lambda: |-
@@ -170,6 +189,7 @@ script:
                         ? id(sntp_time).now().timestamp
                         : 0;
           id(r_stamp_ms) = millis();
+          id(r_src) = src;
 
 espnow:
   id: espnow_link
@@ -202,7 +222,9 @@ sensor:
     id: water_temp
     internal: true
     on_value:
-      - script.execute: r_seen
+      - script.execute:
+          id: r_seen
+          src: 1
 
   - platform: packet_transport
     provider: ${source_device}
@@ -210,7 +232,9 @@ sensor:
     id: tds
     internal: true
     on_value:
-      - script.execute: r_seen
+      - script.execute:
+          id: r_seen
+          src: 1
 
   - platform: packet_transport
     provider: ${source_device}
@@ -218,7 +242,9 @@ sensor:
     id: tank_lux
     internal: true
     on_value:
-      - script.execute: r_seen
+      - script.execute:
+          id: r_seen
+          src: 1
 
   # ------------------------------------------------------------------
   # Controller state, in the units the controller's accessors returned.
@@ -230,7 +256,9 @@ sensor:
     internal: true
     on_value:
       - lambda: id(r_setpoint_c) = x;
-      - script.execute: r_seen
+      - script.execute:
+          id: r_seen
+          src: 1
 
   - platform: packet_transport
     provider: ${source_device}
