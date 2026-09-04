@@ -8,7 +8,7 @@
 # ---------------------------------------------------------------
 # The two substitutions below are DFRobot's factory defaults, NOT your
 # probe. An uncalibrated electrode can read a full pH unit out -- which is
-# precisely the failure we are replacing the Seneye to escape.
+# precisely the failure that made the previous continuous monitor useless.
 #
 #   1. Rinse the probe in distilled water and BLOT dry. Never wipe the
 #      glass bulb: it builds a static charge that takes minutes to bleed

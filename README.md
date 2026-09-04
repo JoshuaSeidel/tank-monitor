@@ -67,24 +67,67 @@ nothing. Avoid `22` as well (exposed, but it's also the LCD backlight net),
 
 ## Parts list
 
-| Part | Notes |
+Manufacturer links are verified. Amazon entries are **searches**, not
+specific listings — ASINs for commodity parts churn constantly and a dead
+link is worse than none.
+
+### Required — the controller
+
+| Part | Notes | Where |
+|---|---|---|
+| **LAFVIN / Waveshare ESP32-C6-LCD-1.47** | the controller and its display. Any ESP32 works — see `boards/` | [search](https://www.amazon.com/s?k=ESP32-C6+1.47+inch+LCD+development+board) |
+| **DS18B20 waterproof probe** | water temperature. The one measurement the whole control loop depends on | [search](https://www.amazon.com/s?k=DS18B20+waterproof+temperature+probe) |
+| **4.7 kΩ resistor, ¼ W** | **required** pull-up for the DS18B20, and the one part that arrives in none of the boxes | [assortment kit](https://www.amazon.com/Resistor-Assortment-Resistance-Electric-Projects/dp/B07N1ZK8CC) |
+| **CZH-Labs D-1584TL** | 2-channel relay outlet module, ~$49. Two *independently* switched outlets — a single-channel IoT Relay cannot run a heater and a fan | [Amazon](https://www.amazon.com/Two-Channel-Control-Module-Arduino-Raspberry/dp/B0GR85JF68) · [direct](https://czh-labs.com/products/ac-power-2-channel-iot-relay-outlet-module-din-rail-or-screw-mounting) |
+| 26–28 AWG stranded wire | hookup, silicone jacket is easiest | [search](https://www.amazon.com/s?k=26+AWG+silicone+stranded+hookup+wire) |
+| Heat shrink, 2 mm and 3 mm | joints and splices | [search](https://www.amazon.com/s?k=heat+shrink+tubing+assortment+2mm+3mm) |
+
+### Strongly recommended — pH
+
+The controller cannot regulate what it cannot measure, and pH is the number
+that tells you whether CO₂ is safe. **Buy the industrial version**: the
+standard Gravity kit's electrode is not rated for permanent immersion, which
+DFRobot themselves will tell you if you ask.
+
+| Part | Notes | Where |
+|---|---|---|
+| **DFRobot SEN0169-V2**, *wide voltage* edition | $64.90. 3.3–5.5 V supply and **0–3 V output** — the classic edition outputs 0–5 V and would damage an ESP32 ADC pin | [DFRobot](https://www.dfrobot.com/product-2069.html) · [wiki](https://wiki.dfrobot.com/sen0169-v2/) |
+| **pH 4.00 and 7.00 buffer sachets** | the sensor is meaningless uncalibrated | [search](https://www.amazon.com/s?k=pH+4.00+7.00+calibration+buffer+solution+sachets) |
+| **KCl storage solution** | the electrode must never dry out. A dried probe is a dead probe | [search](https://www.amazon.com/s?k=pH+probe+KCl+storage+solution) |
+| Suction-cup probe holder | fixes angle and depth; the bulb must point down | [search](https://www.amazon.com/s?k=aquarium+pH+probe+holder+suction+cup) |
+
+### Optional — the rest
+
+| Part | What it buys you | Where |
+|---|---|---|
+| Keyestudio TDS meter | dissolved solids. Useful for *trend*, not absolute — it ships uncalibrated | [search](https://www.amazon.com/s?k=Keyestudio+TDS+meter+sensor) |
+| GY-302 / BH1750 module | ambient light, which the model uses to pre-compensate for the lights' heat | [search](https://www.amazon.com/s?k=GY-302+BH1750+light+sensor+module) |
+| ESP32-2432S028R "CYD" | a second board as a remote touch panel — see `boards/cyd-esp32-2432s028r.yaml` | [search](https://www.amazon.com/s?k=ESP32-2432S028R+CYD+2.8+inch+display) |
+| Seachem Ammonia Alert | a passive colorimetric disc, ~$10, lasts a year. **The best value item on this page** — there is no usable electronic ammonia sensor for a tank | [search](https://www.amazon.com/s?k=Seachem+Ammonia+Alert) |
+| TCS34725 colour sensor | reads that disc so the ESP32 can log and alarm on it | [search](https://www.amazon.com/s?k=TCS34725+RGB+color+sensor) |
+| DFRobot ORP probe | oxidation-reduction potential — the only practical measure of dissolved organic load. `GPIO33` is reserved for it on the WROOM-32 board | [DFRobot](https://www.dfrobot.com/product-1071.html) |
+
+### Test kits you cannot skip
+
+No electronic sensor replaces these, and this project has twice chased a
+phantom because a continuous reading was trusted over a liquid test.
+
+| Kit | For |
 |---|---|
-| LAFVIN / Waveshare ESP32-C6-LCD-1.47 | the controller and display |
-| DS18B20 waterproof probe | water temperature |
-| Keyestudio TDS meter | dissolved solids |
-| GY-302 / BH1750 module | ambient light |
-| CZH-Labs D-1584TL | 2-channel relay outlet module, ~$49 |
-| **4.7 kΩ resistor, 1/4 W** | **required** for the DS18B20 — see below |
-| 26–28 AWG stranded wire | hookup |
-| Heat shrink, 2 mm and 3 mm | one size for joints, one for splices |
+| **API Freshwater Master Test Kit** | pH (low **and** high range), ammonia, nitrite, nitrate |
+| **API GH & KH Test Kit** | sold separately. KH is what makes CO₂ injection safe or unsafe |
 
-The resistor is the one part that's easy to overlook because it doesn't come
-in any of the boxes. **Anything from 2.2 kΩ to 10 kΩ works** — 4.7 kΩ is the
-convention, not a requirement. Check your DS18B20 first: some waterproof
-probes ship with a small adapter board that already has it.
+Test strips read GH and KH low and cannot resolve the range that matters
+here. Use the drop tests.
 
-**If you don't have one yet**, the C6's internal pull-up will get you through
-a bench test. Replace the `one_wire` block with:
+### About the 4.7 kΩ resistor
+
+**Anything from 2.2 kΩ to 10 kΩ works** — 4.7 kΩ is convention, not a
+requirement. Check your DS18B20 first: some waterproof probes ship with a
+small adapter board that already has one.
+
+**If you don't have one yet**, the C6's internal pull-up will get you
+through a bench test. Replace the `one_wire` block with:
 
 ```yaml
 one_wire:
@@ -98,11 +141,9 @@ one_wire:
         pullup: true
 ```
 
-This is a stopgap, not a fix. The internal pull-up is ~45 kΩ, about ten times
-weaker than 1-Wire wants. On a short lead it often works; on a 2-3 m
-waterproof probe cable it usually gives intermittent CRC errors and dropouts
-— which on this build means the controller sees a probe fault and cuts the
-heater. Use it to prove the wiring, then fit a real resistor.
+It is roughly 45 kΩ, ten times weaker than spec. Fine on a short lead on the
+bench; on a long waterproof probe cable it gives intermittent dropouts, which
+this firmware reads as a probe fault and answers by cutting the heater.
 
 ## Wiring
 
@@ -610,10 +651,10 @@ stale number.
 | Failure | Caught by | Response |
 |---|---|---|
 | Probe stops responding | controller, after 120 s | heater cut, `Temperature Fault`, HA alert |
-| Probe reads wrong but plausible | Seneye cross-check on the HA dashboard | comparison card goes amber/red |
+| Probe reads wrong but plausible | **Nothing.** There is no second temperature probe — verify against a reference thermometer by hand | — |
 | Heater dead, unplugged, or relay channel not wired | `Heater Not Responding`, after 45 min at full duty with no rise | HA alert; the tank is drifting cold |
 | Heater stuck on | hard `max_temperature` cutout, then HA runaway alarm | heater off, fan full |
-| Controller offline entirely | HA sees the MQTT status go offline; Seneye backstop alarms | HA alert |
+| Controller offline entirely | HA sees the MQTT status go offline | HA alert |
 | Wi-Fi or HA down | nothing needed | control loop is on-device and unaffected |
 | Learned model goes wrong | feedforward is weighted by confidence | falls back toward plain feedback |
 
@@ -659,7 +700,7 @@ datasource setup. See [grafana/README.md](grafana/README.md).
 ## Asking the tank questions (Tank MCP)
 
 [`tank-mcp/`](tank-mcp/) is a Home Assistant App that serves an **MCP server**
-for this tank: an AI assistant gets tools for the controller, the Seneye,
+for this tank: an AI assistant gets tools for the controller,
 manual test entry, and a record of fish and shrimp lost — plus the ability to
 say any of it out loud on an Echo.
 

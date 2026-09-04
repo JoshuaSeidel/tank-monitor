@@ -19,11 +19,6 @@
         },
         {
           "type": "entity",
-          "entity": "sensor.seneye_spec_16_ph",
-          "show_name": true
-        },
-        {
-          "type": "entity",
           "entity": "sensor.tank_monitor_controller_state",
           "show_name": true
         }
@@ -131,35 +126,7 @@
             },
             {
               "type": "markdown",
-              "content": "| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('sensor.seneye_spec_16_ph') }} | 7.2 \u2013 7.5 |\n| **TDS** | {{ states('sensor.tank_monitor_tds') }} ppm | 180 \u2013 250 |\n| **GH** | {{ states('sensor.aquarium_gh_log') }} | 7 \u2013 8 |\n| **KH** | {{ states('sensor.aquarium_kh_log') }} | 3 \u2013 4 |\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} \u00b0F | 75.8 \u2013 76.5 |\n"
-            },
-            {
-              "type": "tile",
-              "entity": "sensor.seneye_spec_16_ph",
-              "grid_options": {
-                "columns": 6
-              },
-              "name": "pH (Seneye)",
-              "features": [
-                {
-                  "type": "trend-graph",
-                  "hours_to_show": 24
-                }
-              ]
-            },
-            {
-              "type": "tile",
-              "entity": "sensor.seneye_spec_16_free_ammonia",
-              "grid_options": {
-                "columns": 6
-              },
-              "name": "Free ammonia",
-              "features": [
-                {
-                  "type": "trend-graph",
-                  "hours_to_show": 24
-                }
-              ]
+              "content": "| | Now | Target |\n|---|---|---|\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} °F | {{ states('number.tank_monitor_target_temperature') }} °F |\n| **TDS** | {{ states('sensor.tank_monitor_tds') }} ppm | informational |\n| **pH** | {{ states('input_number.aquarium_ph_manual') }} | 7.0 – 7.5 |\n| **GH** | {{ states('input_number.aquarium_gh') }} ppm | {{ states('input_number.aquarium_gh_target_min') }} – {{ states('input_number.aquarium_gh_target_max') }} |\n| **KH** | {{ states('input_number.aquarium_kh') }} ppm | {{ states('input_number.aquarium_kh_target_min') }} – {{ states('input_number.aquarium_kh_target_max') }} |\n| **NO3** | {{ states('input_number.aquarium_nitrate') }} ppm | under 20 |\n\n*Temp and TDS are live from the controller. Everything below them is your last manual API-kit entry.*"
             },
             {
               "type": "tile",
@@ -217,24 +184,6 @@
               "icon": "mdi:heart-pulse"
             },
             {
-              "type": "markdown",
-              "content": "{% set a = states('sensor.tank_monitor_water_temperature') | float(-999) %}{% set b = states('sensor.seneye_spec_16_temperature') | float(-999) %}{% if a < -900 or b < -900 %}\u26a0\ufe0f **A probe is not reporting** \u2014 controller {{ states('sensor.tank_monitor_water_temperature') }}, Seneye {{ states('sensor.seneye_spec_16_temperature') }}\n{% else %}{% set d = (a - b) | abs | round(2) %}{% if d <= 0.5 %}\u2705 **Probes agree** \u2014 {{ d }} \u00b0F apart\n{% elif d <= 1.5 %}\ud83d\udfe1 **Probes drifting apart** \u2014 {{ d }} \u00b0F\n{% else %}\ud83d\udd34 **Probes disagree by {{ d }} \u00b0F** \u2014 one has failed or drifted\n{% endif %}\nController {{ a }} \u00b0F \u00b7 Seneye {{ b }} \u00b0F{% endif %}"
-            },
-            {
-              "type": "tile",
-              "entity": "sensor.seneye_spec_16_temperature",
-              "grid_options": {
-                "columns": 6
-              },
-              "name": "Seneye temp",
-              "features": [
-                {
-                  "type": "trend-graph",
-                  "hours_to_show": 24
-                }
-              ]
-            },
-            {
               "type": "tile",
               "entity": "binary_sensor.tank_monitor_temperature_fault",
               "grid_options": {
@@ -264,22 +213,6 @@
                   "max": 100
                 }
               ]
-            },
-            {
-              "type": "tile",
-              "entity": "sensor.seneye_spec_16_slide_expires",
-              "grid_options": {
-                "columns": 6
-              },
-              "name": "Slide expires"
-            },
-            {
-              "type": "tile",
-              "entity": "sensor.seneye_spec_16_last_reading",
-              "grid_options": {
-                "columns": 6
-              },
-              "name": "Seneye last seen"
             },
             {
               "type": "tile",
@@ -502,7 +435,8 @@
             }
           ]
         }
-      ]
+      ],
+      "badges": []
     },
     {
       "title": "Trends",
@@ -523,7 +457,7 @@
             {
               "type": "markdown",
               "text_only": true,
-              "content": "`Swing (1h)` is the number that says whether this worked. It started near 3 \u00b0F. Under 0.5 \u00b0F is the goal."
+              "content": "`Swing (1h)` is the number that says whether this worked. It started near 3 °F. Under 0.5 °F is the goal."
             },
             {
               "type": "history-graph",
@@ -543,11 +477,6 @@
                   "entity": "number.tank_monitor_target_temperature",
                   "name": "Target",
                   "color": "#3ECF6E"
-                },
-                {
-                  "entity": "sensor.seneye_spec_16_temperature",
-                  "name": "Seneye",
-                  "color": "#FFB020"
                 }
               ]
             },
@@ -616,18 +545,13 @@
             },
             {
               "type": "history-graph",
-              "title": "pH \u2014 probe vs test kit",
+              "title": "pH — probe vs test kit",
               "hours_to_show": 168,
               "grid_options": {
                 "columns": "full",
                 "rows": 4
               },
               "entities": [
-                {
-                  "entity": "sensor.seneye_spec_16_ph",
-                  "name": "Seneye",
-                  "color": "#00C8FF"
-                },
                 {
                   "entity": "sensor.aquarium_ph_manual_log",
                   "name": "Test kit",
@@ -637,7 +561,7 @@
             },
             {
               "type": "history-graph",
-              "title": "TDS \u2014 probe vs test kit",
+              "title": "TDS — probe vs test kit",
               "hours_to_show": 168,
               "grid_options": {
                 "columns": "full",
@@ -653,21 +577,6 @@
                   "entity": "sensor.aquarium_tds_log",
                   "name": "Test kit",
                   "color": "#FFB020"
-                }
-              ]
-            },
-            {
-              "type": "history-graph",
-              "title": "Free ammonia",
-              "hours_to_show": 168,
-              "grid_options": {
-                "columns": "full",
-                "rows": 4
-              },
-              "entities": [
-                {
-                  "entity": "sensor.seneye_spec_16_free_ammonia",
-                  "name": "Free NH3"
                 }
               ]
             },
@@ -715,7 +624,8 @@
             }
           ]
         }
-      ]
+      ],
+      "badges": []
     }
   ]
 }

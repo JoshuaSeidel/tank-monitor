@@ -13,20 +13,25 @@ Three views:
 | **Manual tests** | Type test-kit results, press one button to log them |
 | **Trends** | History: is the swing actually falling? |
 
-### The probe cross-check
+### No probe cross-check any more
 
-The Tank view compares the ESP32's DS18B20 against the Seneye's own
-temperature probe. Two independent sensors in the same water should agree;
-when they don't, one has drifted or failed.
+There used to be one here: the ESP32's DS18B20 was compared against a Seneye
+Reef/Pond monitor, on the principle that two sensors in the same water should
+agree. That monitor was returned on 2026-09-04 after its pH proved ~0.45 LOW
+against an API liquid test — it had this project chasing a CO2 crisis and then
+a KH crash, neither of which was real.
 
-- **≤ 0.5 °F apart** — agree
-- **0.5–1.5 °F** — drifting
-- **> 1.5 °F** — one has failed
+**So there is no second sensor now, and the gap is worth stating plainly:**
+the controller drives the heater from the DS18B20 alone. If that probe reads
+low, the controller will happily cook the tank while reporting the target, and
+nothing in Home Assistant will notice. Check it against a reference
+thermometer occasionally, by hand.
 
-This matters more than it looks: the controller drives the heater from the
-DS18B20 alone. If that probe reads low, the controller happily cooks the
-tank while reporting the target. The Seneye is the only independent check
-on it.
+The lesson generalises past this one device. A continuous reading that cannot
+be calibrated is not more trustworthy than an intermittent one that can — it
+is less, because it is wrong more often and more confidently. That is why pH
+is moving to a DFRobot glass electrode on the controller: it can be stood in
+pH 7.00 buffer and proven right.
 
 ### Manual entry
 

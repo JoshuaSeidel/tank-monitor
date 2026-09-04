@@ -1,7 +1,7 @@
 # Water chemistry pulled in from Home Assistant over MQTT.
 #
 # These are values the ESP32 cannot measure: pH and free ammonia come from
-# the Seneye, GH/KH/NO2/NO3 from a test kit typed into HA. They arrive on
+# a test kit typed into HA -- pH, ammonia, GH, KH, NO2 and NO3. They arrive on
 # retained topics, so the broker replays the last known value the moment
 # this device reconnects.
 #
