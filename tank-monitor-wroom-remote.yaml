@@ -25,6 +25,7 @@ packages:
       - packages/webui.yaml
       - packages/control.yaml
       - packages/sensors.yaml
+      - packages/ph.yaml
       # Uncomment to let a remote panel read THIS board over ESP-NOW.
       # The panel picks its source by provider name, so also point that
       # panel's `source_device` substitution at the device_name above --

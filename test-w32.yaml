@@ -1,9 +1,0 @@
-substitutions:
-  device_name: tank-monitor-w32
-  friendly_name: Tank Monitor W32
-packages:
-  base: !include packages/base.yaml
-  webui: !include packages/webui.yaml
-  control: !include packages/control.yaml
-  sensors: !include packages/sensors.yaml
-  board: !include boards/esp32-wroom32.yaml

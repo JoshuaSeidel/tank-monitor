@@ -20,6 +20,7 @@ packages:
       - packages/webui.yaml
       - packages/control.yaml
       - packages/sensors.yaml
+      - packages/ph.yaml
       # Stage 2: broadcasts to the remote panel over ESP-NOW, and takes
       # setpoint/learning commands back. MQTT is untouched.
       - packages/espnow_link.yaml

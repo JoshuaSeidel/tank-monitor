@@ -1,0 +1,90 @@
+# pH, from a DFRobot Gravity industrial probe (SEN0169-V2, wide-voltage).
+#
+# The board file supplies `ph_voltage` (an adc sensor on whatever pin that
+# board has free); everything here is board-agnostic. Same split as TDS.
+#
+# ---------------------------------------------------------------
+# CALIBRATION IS NOT OPTIONAL
+# ---------------------------------------------------------------
+# The two substitutions below are DFRobot's factory defaults, NOT your
+# probe. An uncalibrated electrode can read a full pH unit out -- which is
+# precisely the failure we are replacing the Seneye to escape.
+#
+#   1. Rinse the probe in distilled water and BLOT dry. Never wipe the
+#      glass bulb: it builds a static charge that takes minutes to bleed
+#      off and the reading wanders while it does.
+#   2. Stand it in pH 7.00 buffer, wait 2 min for it to settle, and read
+#      sensor.<device>_ph_probe_voltage. That number is ph_v_neutral.
+#   3. Rinse, blot, repeat in pH 4.00 buffer. That is ph_v_acid.
+#   4. Put both into the wrapper's substitutions: block and reflash.
+#
+# Redo it every few months and any time a reading looks wrong. Being able
+# to prove the sensor is right is the entire reason it exists.
+#
+# ---------------------------------------------------------------
+# A DISCONNECTED PROBE READS NEAR pH 7
+# ---------------------------------------------------------------
+# The BNC input floats to mid-rail, which lands almost exactly on neutral.
+# A plausible number is NOT evidence the probe is attached or working. The
+# only check that means anything is whether it MOVES when you put it in
+# buffer. Until the hardware is wired this reads noise, same as the TDS
+# probe did before its probe arrived.
+
+substitutions:
+  # Volts measured at pH 7.00 and pH 4.00. DFRobot defaults -- replace with
+  # your own after calibrating, or the numbers below are fiction.
+  ph_v_neutral: "1.500"
+  ph_v_acid: "2.032"
+
+sensor:
+  - platform: template
+    name: "pH Probe Voltage"
+    id: ph_probe_v
+    unit_of_measurement: "V"
+    accuracy_decimals: 3
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      if (std::isnan(id(ph_voltage).state)) return {};
+      return id(ph_voltage).state;
+
+  - platform: template
+    name: "Water pH"
+    id: water_ph
+    unit_of_measurement: "pH"
+    icon: "mdi:test-tube"
+    accuracy_decimals: 2
+    state_class: measurement
+    update_interval: 30s
+    filters:
+      # The electrode is a ~100 MOhm source sitting in water with a mains
+      # heater and two pumps. Median rejects the switching spikes that
+      # couple in without lagging a value that moves over hours anyway.
+      - median:
+          window_size: 5
+          send_every: 1
+    lambda: |-
+      const float v = id(ph_voltage).state;
+      if (std::isnan(v))
+        return {};
+
+      // Two-point fit. Slope is NEGATIVE on this board: more volts, lower pH.
+      const float v7 = ${ph_v_neutral};
+      const float v4 = ${ph_v_acid};
+      const float slope25 = (v4 - v7) / (4.0f - 7.0f);   // volts per pH at 25 C
+      if (fabsf(slope25) < 1e-4f)
+        return {};                                       // calibration unset
+
+      // The Nernst slope scales with ABSOLUTE temperature, so an electrode
+      // calibrated at 25 C reads slightly off at tank temperature. Correcting
+      // is free here -- unlike a handheld meter, we already have a water
+      // temperature we have verified against a third thermometer.
+      float t_c = id(water_temp).state;
+      if (std::isnan(t_c))
+        t_c = 25.0f;
+      const float slope = slope25 * ((t_c + 273.15f) / 298.15f);
+
+      const float ph = 7.0f + (v - v7) / slope;
+      if (ph < 0.0f || ph > 14.0f)
+        return {};                                       // nothing sane attached
+      return ph;

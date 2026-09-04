@@ -93,6 +93,26 @@ sensor:
           send_every: 4
           send_first_at: 4
 
+  # pH probe (DFRobot Gravity industrial SEN0169-V2) -> packages/ph.yaml.
+  #
+  # GPIO0 is the last free ADC pin on this board, and it is SAFE here:
+  # the C6's strapping pins are {4, 5, 8, 9, 15}, per ESPHome's own
+  # validator (gpio_esp32_c6.py). GPIO0 is a strapping pin on the classic
+  # ESP32, not on this one. 4 and 5 are doubly out -- strapping AND wired
+  # to this board's microSD socket.
+  - platform: adc
+    pin: GPIO0
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
 font:
   - file: "gfonts://Roboto@700"
     id: font_small

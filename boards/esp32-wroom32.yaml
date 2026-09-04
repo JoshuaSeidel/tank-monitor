@@ -106,6 +106,25 @@ sensor:
           send_every: 20
           send_first_at: 20
 
+  # pH probe (DFRobot Gravity industrial SEN0169-V2) -> packages/ph.yaml.
+  #
+  # GPIO32 is ADC1 (so Wi-Fi does not corrupt it) and not a strapping pin.
+  # GPIO33 stays free for an ORP probe later. NOT GPIO0 on this board --
+  # unlike the C6, GPIO0 IS the boot strapping pin here, and a sensor
+  # holding it near 1.5 V at reset lands in the undefined logic region.
+  - platform: adc
+    pin: GPIO32
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
 # ---------------------------------------------------------------
 # No display, and no backlight output
 # ---------------------------------------------------------------
