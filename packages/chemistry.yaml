@@ -158,7 +158,7 @@ text_sensor:
       if (!n.is_valid()) return {};
       const uint32_t age = (uint32_t) n.timestamp - id(chem_stamp);
       char buf[24];
-      if (age < 3600)        snprintf(buf, sizeof(buf), "%um ago", age / 60);
-      else if (age < 172800) snprintf(buf, sizeof(buf), "%uh ago", age / 3600);
-      else                   snprintf(buf, sizeof(buf), "%ud ago", age / 86400);
+      if (age < 3600)        snprintf(buf, sizeof(buf), "%um ago", (unsigned) (age / 60));
+      else if (age < 172800) snprintf(buf, sizeof(buf), "%uh ago", (unsigned) (age / 3600));
+      else                   snprintf(buf, sizeof(buf), "%ud ago", (unsigned) (age / 86400));
       return {buf};

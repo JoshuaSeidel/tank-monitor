@@ -63,6 +63,10 @@
 # single delivery landing at the one moment the queue is full.
 
 substitutions:
+  # Placeholder until phase 2. This address intentionally does not exist,
+  # so ble_client scans and never connects -- which is the radio activity
+  # the coexistence test needs.
+  controller_ble_mac: "AA:BB:CC:DD:EE:FF"
   # Topic prefix of the board that owns the sensors. This is that device's
   # device_name, NOT this one's.
   source_device: tank-monitor
@@ -301,6 +305,13 @@ sensor:
       - lambda: id(r_fan) = x;
 
 binary_sensor:
+  - platform: template
+    name: "BLE Link"
+    id: ble_link_up
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: "return id(r_ble_connected);"
+
   # The controller broadcasts every 10s, so 45s is four missed rounds --
   # long enough not to flap on a single lost frame, short enough to notice
   # before you have made a decision based on a stale screen.
@@ -348,6 +359,26 @@ binary_sensor:
           id(r_learn_known) = true;
 
 text_sensor:
+  # WHICH transport is feeding the panel. Link Age can say the data is
+  # fresh without saying what made it fresh, and with two transports live
+  # during the transition that is the question you actually have.
+  - platform: template
+    name: "Link Source"
+    id: link_source
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      // Stale beats loyal: if nothing has arrived recently say so, rather
+      // than naming whichever transport happened to speak last.
+      if (id(r_stamp_ms) == 0 || (millis() - id(r_stamp_ms)) > 45000)
+        return {"none"};
+      switch (id(r_src)) {
+        case 1: return {"esp-now"};
+        case 2: return {"ble"};
+        default: return {"unknown"};
+      }
+
   # How stale the tank data is. The panel is only ever as current as its
   # last packet, and a frozen screen showing plausible numbers is the one
   # failure mode worth making visible -- the same reasoning as Chem Age.
@@ -361,9 +392,9 @@ text_sensor:
       if (!id(sntp_time).now().is_valid()) return {"unknown"};
       const uint32_t age = id(sntp_time).now().timestamp - id(r_stamp);
       char buf[24];
-      if (age < 90)         snprintf(buf, sizeof(buf), "%us ago", age);
-      else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", age / 60);
-      else                  snprintf(buf, sizeof(buf), "%uh ago", age / 3600);
+      if (age < 90)         snprintf(buf, sizeof(buf), "%us ago", (unsigned) age);
+      else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", (unsigned) (age / 60));
+      else                  snprintf(buf, sizeof(buf), "%uh ago", (unsigned) (age / 3600));
       return {buf};
 
 interval:
@@ -397,3 +428,42 @@ interval:
           static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
           const char *rq = "RQ";
           id(espnow_link).send(BCAST, (const uint8_t *) rq, 2);
+
+# ====================================================================
+# BLE link -- PHASE 1: coexistence test, carries no data
+# ====================================================================
+# Lives HERE rather than in its own package on purpose. A separate file
+# would have to be added to the CYD wrapper, and that wrapper is the one
+# file NOT pulled from git -- three separate changes in this project have
+# silently not taken because a wrapper edit did not happen. Anything that
+# must load reliably goes in a file the wrapper already includes.
+#
+# WHY BLE AT ALL: ESP-NOW inherits the WiFi station channel and cannot be
+# pinned independently -- ESPHome's schema is cv.OnlyWithout(CONF_CHANNEL,
+# CONF_WIFI), so the espnow channel: option is rejected on any device with
+# a wifi component. Both boards need wifi. When the AP drops and the
+# station scans to reconnect, ESP-NOW packets are lost: the link degrades
+# during exactly the outage it exists to survive.
+#
+# PHASE 1 CARRIES NO DATA. It answers one question compiling cannot: do
+# WiFi, ESP-NOW and BLE coexist at RUNTIME on one shared 2.4 GHz radio?
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Deliberately low duty cycle. BLE is not separate hardware here -- it
+    # time-slices the same radio as WiFi and ESP-NOW, which is the exact
+    # contention being measured. A default 320/30 active scan is the worst
+    # case, so start gentle: coexisting at this rate proves the design, and
+    # the rate can be raised later with evidence rather than starting
+    # aggressive and not knowing which variable broke it.
+    interval: 1100ms
+    window: 100ms
+    active: false
+
+ble_client:
+  - id: ctrl_ble
+    mac_address: ${controller_ble_mac}
+    on_connect:
+      - lambda: id(r_ble_connected) = true;
+    on_disconnect:
+      - lambda: id(r_ble_connected) = false;

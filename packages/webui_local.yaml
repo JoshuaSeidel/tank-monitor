@@ -1,0 +1,25 @@
+# The custom web interface, delivered entirely by git.
+#
+# ESPHome's own `js_include` reads a file from the ESPHome config
+# directory at build time, and remote packages fetch only the YAML listed
+# in `files:` -- so with a git-driven install that file could never arrive,
+# and had to be copied and re-copied by hand. Which defeats the point of
+# pulling from git at all.
+#
+# External *components* are fetched from git in full, assets included. So
+# the script and stylesheet live inside components/tank_webui/assets/ and
+# that component serves them over routes on this device. js_url then
+# points at the device itself.
+#
+# Result: nothing to copy, nothing from a CDN, no internet needed, and a
+# push to main updates the UI on the next build like everything else.
+
+tank_webui:
+
+# Blanking the defaults is what hands the page over: ESPHome's index is
+# only `<esp-app></esp-app>` plus one script tag, so with its CDN bundle
+# suppressed, whatever tank.js defines as `esp-app` becomes the entire
+# interface.
+web_server:
+  js_url: "/tank.js"
+  css_url: "/tank.css"

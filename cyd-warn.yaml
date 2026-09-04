@@ -1,0 +1,13 @@
+substitutions:
+  device_name: tank-monitor-v2
+  friendly_name: Tank Monitor v2
+external_components:
+  - source: {type: local, path: components}
+    components: [tank_webui, tank_controller]
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui_local.yaml
+  remote: !include packages/remote_display.yaml
+  ble: !include packages/ble_link.yaml
+  chemistry: !include packages/chemistry.yaml
+  board: !include boards/cyd-esp32-2432s028r.yaml

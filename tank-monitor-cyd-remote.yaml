@@ -33,7 +33,6 @@ packages:
       # loop -- it subscribes to the C6's topics and renders them. Loading
       # control.yaml or sensors.yaml alongside it collides on every id.
       - packages/remote_display.yaml
-      - packages/ble_link.yaml
       - packages/chemistry.yaml
       - boards/cyd-esp32-2432s028r.yaml
     refresh: 0s

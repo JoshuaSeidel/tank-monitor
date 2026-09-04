@@ -6,13 +6,21 @@ namespace tank_webui {
 
 static const char *const TAG = "tank_webui";
 
+// url() is deprecated and REMOVED in ESPHome 2026.9.0. url_to() writes into
+// a caller-supplied buffer instead of returning a std::string, which is the
+// point: this runs on every HTTP request, and the old form heap-allocated a
+// string just to compare it against two constants.
 bool TankWebUI::canHandle(AsyncWebServerRequest *request) const {
-  return request->method() == HTTP_GET &&
-         (request->url() == "/tank.js" || request->url() == "/tank.css");
+  if (request->method() != HTTP_GET)
+    return false;
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  const auto url = request->url_to(url_buf);
+  return url == "/tank.js" || url == "/tank.css";
 }
 
 void TankWebUI::handleRequest(AsyncWebServerRequest *request) {
-  const bool is_js = request->url() == "/tank.js";
+  char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+  const bool is_js = request->url_to(url_buf) == "/tank.js";
   // Content type matters for the script tag: ESPHome emits it as
   // type=module, and a browser refuses a module served as text/plain.
   auto *response = request->beginResponse(200, is_js ? "text/javascript" : "text/css",
