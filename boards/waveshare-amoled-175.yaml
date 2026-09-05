@@ -46,6 +46,20 @@ esp32:
   framework:
     type: esp-idf
 
+# ESPHome's default MQTT unique_id generator is "legacy": "ESP" + component
+# type + object_id, with NO device name and no MAC in it. So this board's
+# "Water Temperature" generates a unique_id byte-identical to the C6's, and
+# Home Assistant refuses to register a second entity with a unique_id it
+# already holds -- silently, with nothing in the log. The symptom is that
+# only the entities the OTHER board does not have ever appear.
+#
+# This lives in the BOARD FILE, not the wrapper. The wrapper is the one file
+# not pulled from git, and putting load-critical config there has silently
+# failed four times in this project now.
+mqtt:
+  discovery_unique_id_generator: mac
+
+
 psram:
   mode: octal
   speed: 80MHz
