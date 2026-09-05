@@ -29,6 +29,11 @@ sensor:
           window_size: 5
           send_every: 1
           send_first_at: 1
+      # Calibration offset, applied HERE rather than on the published
+      # Fahrenheit sensor: the controller reads this one, so correcting it
+      # anywhere else would leave the control loop working from the
+      # uncorrected value while the dashboard showed the corrected one.
+      - lambda: return x + id(cal_temp_offset_c);
 
   - platform: template
     name: "TDS"
@@ -54,7 +59,7 @@ sensor:
       // 0.5 TDS-to-conductivity factor, then the user K-value.
       float ppm = (133.42f * vc * vc * vc
                    - 255.86f * vc * vc
-                   + 857.39f * vc) * 0.5f * ${tds_k_factor};
+                   + 857.39f * vc) * 0.5f * id(cal_tds_k);
       if (ppm < 0.0f) ppm = 0.0f;
       return ppm;
     filters:
@@ -111,3 +116,99 @@ sensor:
     lambda: |-
       if (isnan(id(water_temp).state)) return {};
       return id(water_temp).state * 9.0f / 5.0f + 32.0f;
+
+# ---------------------------------------------------------------------
+# Calibration
+# ---------------------------------------------------------------------
+# Runtime, from Home Assistant. These used to be substitutions, which
+# meant every calibration was a config edit and a reflash -- and a probe
+# recalibrated in a bucket at the sink is exactly when you least want a
+# build step between you and storing the number.
+#
+# restore_value so a calibration survives reboots and OTA updates. The
+# substitutions remain as the FIRST-BOOT defaults only.
+globals:
+  - id: cal_tds_k
+    type: float
+    restore_value: true
+    initial_value: '${tds_k_factor}'
+  - id: cal_temp_offset_c
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+number:
+  - platform: template
+    name: "Cal TDS K Factor"
+    id: cal_tds_k_num
+    icon: "mdi:tune-variant"
+    entity_category: config
+    min_value: 0.10
+    max_value: 5.00
+    step: 0.01
+    unit_of_measurement: "x"
+    update_interval: 60s
+    lambda: "return id(cal_tds_k);"
+    set_action:
+      - lambda: id(cal_tds_k) = x;
+
+  # What the calibration solution is worth. 342 ppm (the 707 uS/cm NaCl
+  # standard) and 1000 ppm are the usual bottles; set this to whatever the
+  # label says BEFORE pressing Calibrate TDS.
+  - platform: template
+    name: "Cal TDS Standard"
+    id: cal_tds_standard
+    icon: "mdi:flask"
+    entity_category: config
+    optimistic: true
+    restore_value: true
+    initial_value: 342
+    min_value: 1
+    max_value: 2000
+    step: 1
+    unit_of_measurement: "ppm"
+
+  - platform: template
+    name: "Cal Temperature Offset"
+    id: cal_temp_offset_num
+    icon: "mdi:thermometer-plus"
+    entity_category: config
+    min_value: -5.0
+    max_value: 5.0
+    step: 0.1
+    unit_of_measurement: "\u00b0F"
+    update_interval: 60s
+    # Stored in Celsius because that is what the probe and the controller
+    # use; shown in Fahrenheit because that is what every other temperature
+    # in this project is shown in.
+    lambda: "return id(cal_temp_offset_c) * 9.0f / 5.0f;"
+    set_action:
+      - lambda: id(cal_temp_offset_c) = x * 5.0f / 9.0f;
+
+button:
+  # Put the probe in the standard, wait for the reading to settle, press.
+  # Solves for the K factor that makes the CURRENT reading equal the
+  # standard, which is the whole of a single-point conductivity calibration.
+  - platform: template
+    name: "Calibrate TDS"
+    id: cal_tds_button
+    icon: "mdi:target-variant"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          const float shown = id(tds).state;
+          const float want = id(cal_tds_standard).state;
+          if (std::isnan(shown) || shown < 1.0f || std::isnan(want) || want < 1.0f) {
+            ESP_LOGW("cal", "TDS calibration skipped: reading %.1f, standard %.1f", shown, want);
+            return;
+          }
+          // shown was produced with the current k, so the uncalibrated
+          // value is shown/k and the k we want is want/(shown/k).
+          const float k = id(cal_tds_k) * want / shown;
+          if (k < 0.10f || k > 5.00f) {
+            ESP_LOGW("cal", "TDS calibration refused: k=%.3f is outside 0.1-5.0, check the probe", k);
+            return;
+          }
+          ESP_LOGI("cal", "TDS calibrated: %.1f ppm -> %.1f ppm, k %.3f -> %.3f",
+                   shown, want, id(cal_tds_k), k);
+          id(cal_tds_k) = k;

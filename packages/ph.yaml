@@ -13,10 +13,17 @@
 #   1. Rinse the probe in distilled water and BLOT dry. Never wipe the
 #      glass bulb: it builds a static charge that takes minutes to bleed
 #      off and the reading wanders while it does.
-#   2. Stand it in pH 7.00 buffer, wait 2 min for it to settle, and read
-#      sensor.<device>_ph_probe_voltage. That number is ph_v_neutral.
-#   3. Rinse, blot, repeat in pH 4.00 buffer. That is ph_v_acid.
-#   4. Put both into the wrapper's substitutions: block and reflash.
+#   2. Stand it in pH 7.00 buffer, wait 2 min for the voltage to settle,
+#      and press the "Capture pH 7.00" button in Home Assistant.
+#   3. Rinse, blot, stand it in pH 4.00 buffer, wait, press
+#      "Capture pH 4.00".
+#
+# That is the whole procedure -- no reflash. The captured voltages are
+# stored in flash and survive reboots and OTA updates, and each is exposed
+# as a sensor so you can write them down or spot one that has drifted.
+#
+# The substitutions below are now FIRST-BOOT DEFAULTS only. They are
+# DFRobot's factory figures, not your probe.
 #
 # Redo it every few months and any time a reading looks wrong. Being able
 # to prove the sensor is right is the entire reason it exists.
@@ -69,8 +76,8 @@ sensor:
         return {};
 
       // Two-point fit. Slope is NEGATIVE on this board: more volts, lower pH.
-      const float v7 = ${ph_v_neutral};
-      const float v4 = ${ph_v_acid};
+      const float v7 = id(cal_ph_v7);
+      const float v4 = id(cal_ph_v4);
       const float slope25 = (v4 - v7) / (4.0f - 7.0f);   // volts per pH at 25 C
       if (fabsf(slope25) < 1e-4f)
         return {};                                       // calibration unset
@@ -88,3 +95,66 @@ sensor:
       if (ph < 0.0f || ph > 14.0f)
         return {};                                       // nothing sane attached
       return ph;
+
+  # The stored calibration, visible so it can be recorded and so a probe
+  # that has drifted is obvious. A healthy DFRobot electrode separates the
+  # two points by roughly 0.5 V; much less than that means it is tired.
+  - platform: template
+    name: "Cal pH 7 Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: "return id(cal_ph_v7);"
+
+  - platform: template
+    name: "Cal pH 4 Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: "return id(cal_ph_v4);"
+
+  - platform: template
+    name: "Cal pH Slope"
+    unit_of_measurement: "V/pH"
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: "return (id(cal_ph_v4) - id(cal_ph_v7)) / (4.0f - 7.0f);"
+
+globals:
+  - id: cal_ph_v7
+    type: float
+    restore_value: true
+    initial_value: '${ph_v_neutral}'
+  - id: cal_ph_v4
+    type: float
+    restore_value: true
+    initial_value: '${ph_v_acid}'
+
+button:
+  # Capture rather than type. Reading a voltage off a dashboard and
+  # entering it somewhere else is two chances to transcribe it wrong,
+  # while standing at a sink with a wet probe.
+  - platform: template
+    name: "Capture pH 7.00"
+    icon: "mdi:numeric-7-box"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          const float v = id(ph_voltage).state;
+          if (std::isnan(v)) { ESP_LOGW("cal", "pH 7 capture skipped: no probe reading"); return; }
+          ESP_LOGI("cal", "pH 7.00 point captured at %.4f V (was %.4f)", v, id(cal_ph_v7));
+          id(cal_ph_v7) = v;
+
+  - platform: template
+    name: "Capture pH 4.00"
+    icon: "mdi:numeric-4-box"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          const float v = id(ph_voltage).state;
+          if (std::isnan(v)) { ESP_LOGW("cal", "pH 4 capture skipped: no probe reading"); return; }
+          ESP_LOGI("cal", "pH 4.00 point captured at %.4f V (was %.4f)", v, id(cal_ph_v4));
+          id(cal_ph_v4) = v;
