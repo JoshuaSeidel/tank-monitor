@@ -73,3 +73,18 @@ header h1{font-size:15px;font-weight:500;letter-spacing:.14em;color:var(--faint)
 .chem div span{display:block}
 .age{color:var(--faint);font-size:11px;margin-top:10px;text-align:right}
 .stale{color:var(--amber)}
+
+/* Calibration. Deliberately on the device's own page and not only in Home
+   Assistant: you calibrate standing at a sink with a wet probe, and the
+   broker being up is not a precondition anyone should have to satisfy to
+   make the sensor tell the truth. */
+.cal{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px 14px;align-items:end}
+.cal .fld{display:flex;flex-direction:column;gap:6px}
+.cal input{width:100%;padding:9px 10px;border-radius:10px;border:1px solid var(--line);
+  background:var(--card2);color:var(--ink);font:inherit;font-size:19px;font-weight:700}
+.cal input:focus{outline:none;border-color:var(--blue)}
+.cal .btn{width:100%;padding:11px 14px}
+.calsec+.calsec{border-top:1px solid var(--line);margin-top:14px;padding-top:14px}
+.calsec>.lbl{margin-bottom:10px;display:block}
+.note{font-size:11px;color:var(--faint);margin-top:10px;line-height:1.6}
+.note b{color:var(--dim);font-weight:600}

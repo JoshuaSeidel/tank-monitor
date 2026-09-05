@@ -553,13 +553,15 @@ device itself.
 Push, rebuild, done — same as every other change here.
 
 It shows temperature with the same band colours as the panels, the target
-with steppers, heater and fan duty plus live relay state, swing, TDS,
+with steppers, heater and fan duty plus live relay state, swing, TDS, pH,
 light, model confidence, and the water chemistry mirrored from Home
 Assistant with its age. Controls: setpoint, adaptive learning, backlight,
-restart, reset learning.
+restart, reset learning — **and the full calibration panel** (see below).
 
 The chemistry card hides itself on boards that don't include
-`packages/chemistry.yaml`, rather than showing six dashes.
+`packages/chemistry.yaml`, rather than showing six dashes; the pH and
+calibration cards do the same on boards without `packages/ph.yaml` or
+`packages/sensors.yaml`.
 
 ### Secrets
 
@@ -788,6 +790,68 @@ not a weak one. Use the learned gains for that.
 
 ---
 
+## Calibration
+
+**Every correction lives on the device, in flash, and is applied before the
+value is published.** Not in Home Assistant, and not in a substitution that
+needs a reflash.
+
+Both of those alternatives were tried and both were wrong. A substitution
+means recalibrating is a config edit and a rebuild — precisely what you
+cannot do standing at a sink with a wet probe. And a correction applied in
+Home Assistant is a correction the tank does not have: the ESP-NOW panel and
+this device's own web page would still be showing the uncorrected number, and
+the three surfaces would disagree.
+
+So the numbers are `restore_value` globals, they survive reboots and OTA
+updates, and they are reachable **two** ways — Home Assistant, and the
+device's own web page at its IP. The second one is the one that matters,
+because it still works with the broker, the router and HA all down.
+
+### TDS — single point
+
+1. Bring the calibration solution **to tank temperature**. Conductivity moves
+   about 2 %/°C, so a bottle straight off a cold shelf bakes several percent
+   of error into K permanently, and it will read wrong ever after in a way
+   that is very hard to trace back.
+2. Set **Cal TDS Standard** to what the bottle says (342 ppm and 1000 ppm are
+   the usual ones).
+3. Stand the probe in it, wait for the reading to settle.
+4. Press **Calibrate TDS**.
+
+It solves `k = k · standard / reading` and refuses any result outside
+0.1–5.0, which is the range beyond which the probe, not the calibration, is
+the problem. **Cal TDS K Factor** is also directly editable if you would
+rather type a known value.
+
+### pH — two point
+
+1. Rinse in distilled water and **blot** dry. Never wipe the glass bulb: it
+   builds a static charge that takes minutes to bleed off, and the reading
+   wanders the whole time.
+2. Stand in pH 7.00 buffer, wait two minutes, press **Capture pH 7.00**.
+3. Rinse, blot, stand in pH 4.00 buffer, wait two minutes, press
+   **Capture pH 4.00**.
+
+**Cal pH Slope** is the check that matters. A healthy electrode sits near
+0.177 V/pH (the Nernst slope at 25 °C). Much below about 0.150 and it is worn
+out — recalibrating a dead electrode just moves where it is wrong.
+
+The reading is temperature-corrected against the DS18B20 at runtime, so a
+probe calibrated at room temperature still reads correctly at 74 °F.
+
+### Temperature — offset
+
+**Cal Temperature Offset**, in °F, against a reference thermometer. Worth
+doing: this probe is the only one the control loop has, so if it reads low
+the heater will happily cook the tank while reporting the target, and nothing
+anywhere will notice.
+
+The offset is applied to the internal Celsius sensor rather than the
+published Fahrenheit one, deliberately — the controller reads the internal
+one, so correcting anywhere else would leave the control loop working from
+the uncorrected value while every display showed the corrected one.
+
 ## Tuning
 
 At the top of `packages/base.yaml`:
@@ -814,11 +878,27 @@ heater, big volume change, moving the tank to another room.
 
 ## Notes on the TDS reading
 
-The published value is a median over 20 ADC samples every 2 s; the probe is
-AC-excited and raw readings jump by tens of ppm. It's temperature-compensated
-to 77 °F using the DS18B20. The ppm curve is the DFRobot Gravity polynomial
-(the Keyestudio board is a clone of it); µS/cm is derived as `ppm × 2`, not
-measured independently.
+**Read `TDS 1h Mean`, not `TDS`.** A single sample from this probe is honest
+about nothing. Over a day of live data the spread *within one hour* had a
+median of 39 ppm and a maximum of 171 ppm — bigger than any dose you would
+ever make, which means two readings minutes apart can differ by more than a
+water change does. This project spent real effort explaining a 47 ppm
+"overnight rise" that was noise.
 
-The TDS probe is not rated for permanent submersion and biofilm reads as
-dissolved solids — pull and clean it periodically.
+So `TDS 1h Mean` is a 120-sample sliding window at 30 s, republished every
+minute, computed **on the device** so the panel, the web page and Home
+Assistant all show the same number with no broker involved. `TDS` itself is
+still published, and still worth plotting underneath the mean: seeing the
+noise band is what stops the next spike reading as an event. `Electrical
+Conductivity` follows the mean, since it is the same measurement × 2 and the
+two disagreeing by 30 µS/cm would look like a fault.
+
+Underneath that: the raw value is a median over 20 ADC samples, giving a new
+voltage every 10 s, and it is temperature-compensated to 77 °F using the
+DS18B20. The ppm curve is the DFRobot Gravity polynomial (the Keyestudio
+board is a clone of it); µS/cm is derived as `ppm × 2`, not measured
+independently.
+
+The probe ships uncalibrated — see [Calibration](#calibration). It is also
+not rated for permanent submersion, and biofilm reads as dissolved solids, so
+pull and clean it periodically.

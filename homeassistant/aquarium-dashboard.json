@@ -126,11 +126,11 @@
             },
             {
               "type": "markdown",
-              "content": "| | Now | Target |\n|---|---|---|\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} °F | {{ states('number.tank_monitor_target_temperature') }} °F |\n| **TDS** | {{ states('sensor.tank_monitor_tank_tds_hourly_mean') }} ppm | informational |\n| **pH** | {{ states('input_number.aquarium_ph_manual') }} | 7.0 – 7.5 |\n| **GH** | {{ states('input_number.aquarium_gh') }} ppm | {{ states('input_number.aquarium_gh_target_min') }} – {{ states('input_number.aquarium_gh_target_max') }} |\n| **KH** | {{ states('input_number.aquarium_kh') }} ppm | {{ states('input_number.aquarium_kh_target_min') }} – {{ states('input_number.aquarium_kh_target_max') }} |\n| **NO3** | {{ states('input_number.aquarium_nitrate') }} ppm | under 20 |\n\n*Temp is live from the controller; TDS is the mean of the last hour, because a single reading from that probe swings 40-70 ppm. Everything below them is your last manual API-kit entry.*"
+              "content": "| | Now | Target |\n|---|---|---|\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} °F | {{ states('number.tank_monitor_target_temperature') }} °F |\n| **TDS** | {{ states('sensor.tank_monitor_tds_1h_mean') }} ppm | informational |\n| **pH** | {{ states('input_number.aquarium_ph_manual') }} | 7.0 – 7.5 |\n| **GH** | {{ states('input_number.aquarium_gh') }} ppm | {{ states('input_number.aquarium_gh_target_min') }} – {{ states('input_number.aquarium_gh_target_max') }} |\n| **KH** | {{ states('input_number.aquarium_kh') }} ppm | {{ states('input_number.aquarium_kh_target_min') }} – {{ states('input_number.aquarium_kh_target_max') }} |\n| **NO3** | {{ states('input_number.aquarium_nitrate') }} ppm | under 20 |\n\n*Temp is live from the controller; TDS is a one-hour mean computed on the controller itself, because a single reading from that probe swings 40-70 ppm. Everything below them is your last manual API-kit entry.*"
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_tank_tds_hourly_mean",
+              "entity": "sensor.tank_monitor_tds_1h_mean",
               "grid_options": {
                 "columns": 6
               },
@@ -569,7 +569,7 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_tank_tds_hourly_mean",
+                  "entity": "sensor.tank_monitor_tds_1h_mean",
                   "name": "Hourly mean",
                   "color": "#3ECF6E"
                 },

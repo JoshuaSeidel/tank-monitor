@@ -33,8 +33,20 @@ const E = {
   swing: "sensor-temperature_swing_1h",
   drift: "sensor-temperature_drift_rate",
   conf: "sensor-model_confidence",
-  tds: "sensor-tds",
+  tds: "sensor-tds_1h_mean",
+  tdsRaw: "sensor-tds",
   lux: "sensor-tank_light_level",
+  ph: "sensor-water_ph",
+  phv: "sensor-ph_probe_voltage",
+  // Calibration state. These live on the device, in flash, and are applied
+  // inside the sensor lambdas -- so every consumer (this page, MQTT, the
+  // ESP-NOW panel) gets the corrected value from one place.
+  calK: "number-cal_tds_k_factor",
+  calStd: "number-cal_tds_standard",
+  calOff: "number-cal_temperature_offset",
+  calV7: "sensor-cal_ph_7_voltage",
+  calV4: "sensor-cal_ph_4_voltage",
+  calSlope: "sensor-cal_ph_slope",
   heatRelay: "binary_sensor-heater",
   fanRelay: "binary_sensor-fan",
   fault: "binary_sensor-temperature_fault",
@@ -100,6 +112,8 @@ class TankApp extends HTMLElement {
           <div class="sub">peak-to-peak</div></div>
         <div class="card"><div class="lbl">TDS</div><div class="val" id="tds">--</div>
           <div class="sub" id="ec">-- &micro;S/cm</div></div>
+        <div class="card" id="phcard" style="display:none"><div class="lbl">pH</div>
+          <div class="val" id="ph">--</div><div class="sub" id="phv">-- V</div></div>
         <div class="card"><div class="lbl">Light</div><div class="val" id="lux">--</div>
           <div class="sub">lux</div></div>
         <div class="card"><div class="lbl">Learned</div><div class="val" id="conf">--</div>
@@ -116,6 +130,59 @@ class TankApp extends HTMLElement {
             <div><span class="lbl">NO3</span><span class="val" id="c_no3">--</span></div>
           </div>
           <div class="age" id="c_age">from Home Assistant</div>
+        </div>
+
+        <div class="card span" id="calcard" style="display:none">
+          <div class="lbl" style="margin-bottom:4px">Calibration</div>
+          <div class="note" style="margin-bottom:14px">Stored on this device, in flash.
+            Applied before anything is published, so Home Assistant and the panel
+            get the corrected value too. Survives reboots and OTA updates.</div>
+
+          <div class="calsec">
+            <span class="lbl">TDS &mdash; single point</span>
+            <div class="cal">
+              <div class="fld"><span class="sub">Standard (ppm on the bottle)</span>
+                <input type="number" id="std" min="1" max="2000" step="1"></div>
+              <div class="fld"><span class="sub">Reading now</span>
+                <div class="val" id="cal_now">--</div></div>
+              <div class="fld"><span class="sub">K factor</span>
+                <div class="val" id="cal_k">--</div></div>
+              <div class="fld"><button class="btn" id="b_cal_tds">Calibrate</button></div>
+            </div>
+            <div class="note">Stand the probe in the standard, wait for the reading
+              to settle, then press. <b>Bring the standard to tank temperature first</b>
+              &mdash; conductivity moves about 2%/&deg;C, so a cold bottle bakes several
+              percent of error into K permanently.</div>
+          </div>
+
+          <div class="calsec" id="calph" style="display:none">
+            <span class="lbl">pH &mdash; two point</span>
+            <div class="cal">
+              <div class="fld"><span class="sub">Probe now</span>
+                <div class="val" id="cal_phv">--</div></div>
+              <div class="fld"><span class="sub">Slope</span>
+                <div class="val" id="cal_slope">--</div></div>
+              <div class="fld"><button class="btn" id="b_ph7">Capture 7.00</button></div>
+              <div class="fld"><button class="btn" id="b_ph4">Capture 4.00</button></div>
+            </div>
+            <div class="note">Rinse in distilled water and <b>blot</b> dry &mdash; never
+              wipe the glass bulb, it holds a static charge and the reading wanders for
+              minutes. Two minutes in each buffer before capturing. A healthy electrode
+              sits near <b>0.177 V/pH</b>; much less and it is tired.</div>
+          </div>
+
+          <div class="calsec">
+            <span class="lbl">Temperature</span>
+            <div class="cal">
+              <div class="fld"><span class="sub">Offset (&deg;F)</span>
+                <input type="number" id="off" min="-5" max="5" step="0.1"></div>
+              <div class="fld"><span class="sub">Reads now</span>
+                <div class="val" id="cal_temp">--</div></div>
+            </div>
+            <div class="note">Against a reference thermometer. This probe is the only
+              one the control loop has &mdash; if it reads low the heater will cook the
+              tank while reporting the target, and nothing will notice.</div>
+          </div>
         </div>
 
         <div class="card span">
@@ -150,6 +217,31 @@ class TankApp extends HTMLElement {
     this.$("b_reset").onclick = () =>
       confirm("Discard everything the model has learned about this tank?") &&
       this.post("/button/reset_learning/press");
+
+    // Calibration. Every one of these overwrites a stored calibration, and
+    // a mis-press with the probe in tank water instead of buffer silently
+    // corrupts every future reading -- so all three confirm, same as the
+    // learning reset does.
+    const setNum = (el, entity) => {
+      this.$(el).onchange = (e) => {
+        const v = parseFloat(e.target.value);
+        if (!isNaN(v)) this.post(`/number/${entity}/set?value=${v}`);
+      };
+    };
+    setNum("std", "cal_tds_standard");
+    setNum("off", "cal_temperature_offset");
+
+    this.$("b_cal_tds").onclick = () => {
+      const std = this.$("std").value;
+      confirm(`Set the TDS calibration so the probe reads ${std} ppm right now?`) &&
+        this.post("/button/calibrate_tds/press");
+    };
+    this.$("b_ph7").onclick = () =>
+      confirm("Store the current probe voltage as pH 7.00?") &&
+      this.post("/button/capture_ph_7_00/press");
+    this.$("b_ph4").onclick = () =>
+      confirm("Store the current probe voltage as pH 4.00?") &&
+      this.post("/button/capture_ph_4_00/press");
   }
 
   listen() {
@@ -204,7 +296,10 @@ class TankApp extends HTMLElement {
 
     const sw = this.num(E.swing);
     if (!isNaN(sw)) q("swing").textContent = sw.toFixed(2) + " °F";
-    const tds = this.num(E.tds);
+    // The hour mean. Raw only until the first mean lands after a boot --
+    // see packages/sensors.yaml for why a single sample is not a reading.
+    let tds = this.num(E.tds);
+    if (isNaN(tds)) tds = this.num(E.tdsRaw);
     if (!isNaN(tds)) { q("tds").textContent = tds.toFixed(0); q("ec").textContent = (tds * 2).toFixed(0) + " µS/cm"; }
     const lux = this.num(E.lux);
     if (!isNaN(lux)) q("lux").textContent = lux.toFixed(0);
@@ -212,6 +307,37 @@ class TankApp extends HTMLElement {
     if (!isNaN(cf)) q("conf").textContent = cf.toFixed(0) + "%";
     const dr = this.num(E.drift);
     if (!isNaN(dr)) q("drift").textContent = (dr >= 0 ? "+" : "") + dr.toFixed(2) + " °F/h";
+
+    // pH exists only on a board that includes packages/ph.yaml.
+    const ph = this.num(E.ph), phv = this.num(E.phv);
+    q("phcard").style.display = isNaN(ph) ? "none" : "";
+    if (!isNaN(ph)) q("ph").textContent = ph.toFixed(2);
+    if (!isNaN(phv)) q("phv").textContent = phv.toFixed(3) + " V";
+
+    // --- calibration ---
+    const k = this.num(E.calK);
+    q("calcard").style.display = isNaN(k) ? "none" : "";
+    if (!isNaN(k)) q("cal_k").textContent = k.toFixed(2) + "x";
+    if (!isNaN(tds)) q("cal_now").textContent = tds.toFixed(0) + " ppm";
+    if (!isNaN(t)) q("cal_temp").textContent = t.toFixed(2) + " °F";
+
+    const slope = this.num(E.calSlope);
+    q("calph").style.display = isNaN(slope) ? "none" : "";
+    if (!isNaN(slope)) {
+      q("cal_slope").textContent = Math.abs(slope).toFixed(3) + " V/pH";
+      // Nernst is 0.1773 V/pH at 25 °C. Below ~85% of ideal the electrode is
+      // worn out and no amount of recalibrating will make it linear again.
+      q("cal_slope").style.color = Math.abs(slope) < 0.150 ? "var(--amber)" : "";
+    }
+    if (!isNaN(phv)) q("cal_phv").textContent = phv.toFixed(4) + " V";
+
+    // Never clobber a field mid-type: these are inputs, not readouts.
+    const fill = (el, k2, dp) => {
+      const node = q(el), v = this.num(k2);
+      if (!isNaN(v) && document.activeElement !== node) node.value = v.toFixed(dp);
+    };
+    fill("std", E.calStd, 0);
+    fill("off", E.calOff, 1);
 
     const set = (el, k, dp) => {
       const v = this.num(k);

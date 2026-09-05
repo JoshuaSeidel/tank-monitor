@@ -236,6 +236,19 @@ sensor:
           id: r_seen
           src: 1
 
+  # The controller's own hour mean. Averaged on the controller, not here:
+  # this panel is a screen, and a screen that computes its own version of a
+  # number will eventually disagree with every other screen.
+  - platform: packet_transport
+    provider: ${source_device}
+    remote_id: tm
+    id: tds_mean
+    internal: true
+    on_value:
+      - script.execute:
+          id: r_seen
+          src: 1
+
   - platform: packet_transport
     provider: ${source_device}
     remote_id: lx

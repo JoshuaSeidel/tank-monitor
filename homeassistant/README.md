@@ -33,23 +33,40 @@ is less, because it is wrong more often and more confidently. That is why pH
 is moving to a DFRobot glass electrode on the controller: it can be stood in
 pH 7.00 buffer and proven right.
 
-### The TDS number is an hourly mean, not a reading
+### The TDS number is an hourly mean, and the mean is computed on the device
 
 The analog TDS probe is honest about the trend and useless about any single
-sample. Measured over a day of live data, the within-hour spread was a median
-of 39 ppm and as much as 171 ppm — so two readings taken minutes apart can
-differ by more than any dose you would ever make. That is what had this
-project explaining a "47 ppm overnight rise" that was noise.
+sample. Measured over a day of live data, the spread WITHIN one hour was a
+median of 39 ppm and as much as 171 ppm — larger than any dose you would ever
+make. That is what had this project explaining a "47 ppm overnight rise" that
+was noise.
 
-So the dashboard reads `sensor.tank_monitor_tank_tds_hourly_mean` — a built-in
-**statistics** helper over `sensor.tank_monitor_tds`, `state_characteristic:
-mean`, `max_age: 1h`, `sampling_size: 500`, `keep_last_sample: true`. The raw
-probe is still plotted on the Trends view underneath it, deliberately: seeing
-the noise band around the mean is what stops anyone reading a spike as an
-event.
+So the dashboard reads `sensor.tank_monitor_tds_1h_mean`. **That sensor is
+computed on the ESP32, not here** — a 120-sample sliding window at 30 s,
+republished every minute, defined in `packages/sensors.yaml`.
 
-Recreate it before importing the dashboard on a fresh install — the cards
-reference it by entity id and will show "Entity not available" without it.
+It was briefly an HA `statistics` helper instead, which was the wrong place.
+A correction that only exists in Home Assistant is a correction the tank does
+not have: the remote panel over ESP-NOW and the controller's own web page
+would still have been showing the raw jittering value, and would have
+disagreed with this dashboard by 15–40 ppm at any given moment. The same
+argument applies to every calibration — see the note below.
+
+The raw probe is still plotted on the Trends view underneath the mean,
+deliberately: seeing the noise band around the mean is what stops the next
+spike being read as an event.
+
+### Calibration lives on the device, not here
+
+Every probe correction — TDS K factor, pH two-point, temperature offset — is
+a `restore_value` global on the ESP32, applied inside the sensor lambda
+before anything is published. Home Assistant receives values that are already
+correct; it is a consumer, not the correction.
+
+The entities are exposed to HA for convenience, but the same controls exist
+on the device's own web page at its IP address, which is what you use when
+the broker is down or when you are standing at a sink with a wet probe. See
+the root `README.md` for the procedure.
 
 ### Manual entry
 

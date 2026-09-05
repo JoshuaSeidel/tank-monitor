@@ -67,6 +67,39 @@ sensor:
           min_value: 0
           max_value: 2000
 
+  # The number to actually READ. A single sample from this probe is honest
+  # about nothing: measured over a day of live data, the spread WITHIN one
+  # hour had a median of 39 ppm and a maximum of 171 ppm -- larger than any
+  # dose you would ever make. Two readings minutes apart can differ by more
+  # than a water change does, which is how a 47 ppm "overnight rise" got
+  # diagnosed here as a real event.
+  #
+  # 120 samples at 30s is a one-hour window, republished every minute.
+  #
+  # This is averaged HERE and not in Home Assistant, for exactly the reason
+  # the calibration lives here: the remote panel over ESP-NOW and this
+  # device's own web page must show the same trustworthy number with the
+  # broker, the router and Home Assistant all down. A correction that only
+  # exists in HA is a correction the tank does not have.
+  - platform: template
+    name: "TDS 1h Mean"
+    id: tds_1h
+    unit_of_measurement: "ppm"
+    icon: "mdi:water-opacity"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 30s
+    lambda: |-
+      if (isnan(id(tds).state)) return {};
+      return id(tds).state;
+    filters:
+      # send_first_at: 1 so a reboot republishes immediately on a partial
+      # window rather than showing nothing for an hour. It converges.
+      - sliding_window_moving_average:
+          window_size: 120
+          send_every: 2
+          send_first_at: 1
+
   # Electrical conductivity, derived from the same reading
   - platform: template
     name: "Electrical Conductivity"
@@ -76,8 +109,8 @@ sensor:
     state_class: measurement
     update_interval: 30s
     lambda: |-
-      if (isnan(id(tds).state)) return {};
-      return id(tds).state * 2.0f;
+      if (isnan(id(tds_1h).state)) return {};
+      return id(tds_1h).state * 2.0f;
 
   # Diagnostics
   - platform: template

@@ -203,6 +203,12 @@ packet_transport:
         broadcast_id: wt
       - id: tds
         broadcast_id: td
+      # The hour mean as well as the raw value. The panel shows the mean --
+      # a glance-at-it display whose number jumps 40-70 ppm between glances
+      # is worse than no number -- but raw still goes out, because raw is
+      # what proves the probe is alive and moving rather than latched.
+      - id: tds_1h
+        broadcast_id: tm
       - id: tank_lux
         broadcast_id: lx
       - id: link_setpoint_c

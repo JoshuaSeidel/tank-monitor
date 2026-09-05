@@ -1339,8 +1339,13 @@ interval:
 
           if (!isnan(id(tank_lux).state))
             lv_label_set_text_fmt(id(hdr_light), "LIGHT %.0f", id(tank_lux).state);
-          if (!isnan(id(tds).state))
-            lv_label_set_text_fmt(id(chip_tds), "TDS %.0f", id(tds).state);
+          // The hour mean, not the instantaneous reading -- see the note in
+          // packages/sensors.yaml. Raw is the fallback for the few seconds
+          // after a boot before the first mean packet arrives.
+          const float tds_show = !isnan(id(tds_mean).state) ? id(tds_mean).state
+                                                            : id(tds).state;
+          if (!isnan(tds_show))
+            lv_label_set_text_fmt(id(chip_tds), "TDS %.0f", tds_show);
           const float sw = id(r_swing_c);
           if (!isnan(sw)) lv_label_set_text_fmt(id(chip_swing), "SWING %.1f", sw * 9.0f / 5.0f);
 
@@ -1421,9 +1426,9 @@ interval:
           }
 
           // --- water page ---
-          if (!isnan(id(tds).state)) {
-            lv_label_set_text_fmt(id(w_tds), "%.0f", id(tds).state);
-            lv_label_set_text_fmt(id(w_ec), "%.0f uS/cm", id(tds).state * 2.0f);
+          if (!isnan(tds_show)) {
+            lv_label_set_text_fmt(id(w_tds), "%.0f", tds_show);
+            lv_label_set_text_fmt(id(w_ec), "%.0f uS/cm", tds_show * 2.0f);
           }
           if (!isnan(id(tank_lux).state)) {
             lv_label_set_text_fmt(id(w_lux), "%.0f", id(tank_lux).state);
