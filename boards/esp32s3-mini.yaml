@@ -1,3 +1,13 @@
+# NOT THE ONLY S3 BOARD FILE IN THIS REPO -- check you are loading the right
+# one. ESP32-S3-Zero / SuperMini: pads are labelled with GPIO numbers directly.
+# 4 MB flash, 2 MB PSRAM.
+# The sister file is boards/xiao-esp32s3.yaml.
+#
+# Telling them apart at a glance: look at the board's pad labels. Loading the
+# wrong file compiles cleanly and every symptom is silent -- a probe on the
+# wrong pin reads plausible nonsense, and a DS18B20 on the wrong pin reports
+# "No devices" exactly like a missing pull-up.
+#
 # ESP32-S3 "mini" class boards -- a headless controller in 23 x 18 mm.
 #
 # One file, two boards. They are the same silicon (ESP32-S3FH4R2: dual

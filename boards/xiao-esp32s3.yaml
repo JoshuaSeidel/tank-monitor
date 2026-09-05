@@ -1,3 +1,13 @@
+# NOT THE ONLY S3 BOARD FILE IN THIS REPO -- check you are loading the right
+# one. Seeed XIAO ESP32-S3: pads are labelled D0-D10 and those are NOT GPIO
+# numbers (D3 is GPIO4, D8 is GPIO7). 8 MB flash, 8 MB PSRAM.
+# The sister file is boards/esp32s3-mini.yaml.
+#
+# Telling them apart at a glance: look at the board's pad labels. Loading the
+# wrong file compiles cleanly and every symptom is silent -- a probe on the
+# wrong pin reads plausible nonsense, and a DS18B20 on the wrong pin reports
+# "No devices" exactly like a missing pull-up.
+#
 # Seeed XIAO ESP32-S3 -- controller (sensors + relays), headless.
 #
 # WHY THIS BOARD

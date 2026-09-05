@@ -1,0 +1,114 @@
+# BLE link, CONTROLLER side. Pair with the panel's ble_link_panel.yaml.
+#
+# WHY BLE AND NOT ESP-NOW
+# ESP-NOW inherits the WiFi station channel and cannot be pinned separately:
+# ESPHome's schema is cv.OnlyWithout(CONF_CHANNEL, CONF_WIFI), so the espnow
+# channel: option is rejected on any device that has a wifi component. Both
+# ends need wifi. When the AP drops and the station scans to reconnect,
+# ESP-NOW packets are lost -- the link degrades during exactly the outage it
+# exists to survive. BLE has its own channel hopping and no dependency on the
+# AP.
+#
+# THE RULE THIS OBEYS: a device may run WiFi + ESP-NOW, or WiFi + BLE. Never
+# all three. That is not theory -- the CYD lost its ESP-NOW link and then
+# stopped answering HTTP with all three enabled, and stayed healthy on WiFi +
+# BLE alone. So this file must NEVER be loaded alongside espnow_link.yaml.
+#
+# ONE CHARACTERISTIC, NOT THIRTEEN
+# The obvious translation of the ESP-NOW link's ~13 values is 13
+# characteristics. Deliberately not done:
+#   - one payload is an ATOMIC SNAPSHOT. Thirteen characteristics would let
+#     the panel show temperature from one moment beside TDS from three
+#     seconds later, and nothing would look wrong.
+#   - one payload has ONE age, which is honest provenance.
+#   - a delimited string is readable in a log; a UUID is not.
+#   - it is far less config, and less to drift out of sync.
+#
+# FIELD 11 AND 12 ARE DEMAND, NOT RELAY STATE. The controller exposes duty,
+# not contact position -- the relays are driven by slow_pwm and only that
+# component knows when the contacts actually move. So these say "the
+# controller is calling for heat/cooling this window", which is the steadier
+# thing to show anyway: at 14% duty the contacts are open for 13 of every 15
+# minutes, and a panel mirroring that would read as chaos.
+#
+# The leading "1" is a format version. A panel on older firmware can bail on
+# an unknown version rather than misparse a reordered field -- the same
+# reasoning that made the command protocol text rather than a packed struct.
+
+globals:
+  - id: ble_tx
+    type: std::string
+    restore_value: false
+
+esp32_ble_server:
+  manufacturer: "tank-monitor"
+  model: "${device_name}"
+  services:
+    - uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+      advertise: true
+      characteristics:
+        # Telemetry, controller -> panel. notify so the panel is pushed to
+        # rather than polling, which matters on a battery-capable panel.
+        - id: tele_char
+          uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+          read: true
+          notify: true
+          # NOTE ON LENGTH: max_length is a DESCRIPTOR option, not a
+          # characteristic one -- the characteristic sizes itself from
+          # set_value. What still matters is the MTU: the BLE default is 23
+          # bytes and this payload is ~110, so the PANEL must negotiate a
+          # larger MTU or it will silently read a truncated string. That is a
+          # panel-side concern to verify when the AMOLED arrives, not
+          # something this side can fix.
+          value: "1,0,0,0,0,0,0,0,0,0,0,0,0"
+
+        # Commands, panel -> controller. Same tiny text protocol the ESP-NOW
+        # link used, unchanged, so both transports speak the same thing:
+        #   SP<degF>   set target temperature
+        #   AL0 | AL1  adaptive learning off / on
+        - id: cmd_char
+          uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+          write: true
+          value: ""
+          on_write:
+            - lambda: |-
+                std::string s(x.begin(), x.end());
+                if (s.rfind("SP", 0) == 0) {
+                  const float f = atof(s.c_str() + 2);
+                  // Clamped here as well as on the panel. The panel's copy is
+                  // optimistic; this is the one that actually moves the tank,
+                  // so a malformed packet must not drive it somewhere the UI
+                  // would refuse to.
+                  if (f >= 70.0f && f <= 80.0f)
+                    id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
+                } else if (s.rfind("AL", 0) == 0) {
+                  id(controller).set_learning_enabled(s.size() > 2 && s[2] == '1');
+                }
+
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          char b[180];
+          const auto num = [](float v) { return std::isnan(v) ? -999.0f : v; };
+          snprintf(b, sizeof(b),
+            "1,%.3f,%.3f,%.0f,%.0f,%.3f,%.4f,%.0f,%.1f,%.1f,%d,%d,%d,%d",
+            num(id(water_temp).state),
+            num(id(controller).get_setpoint()),
+            num(id(tds).state),
+            num(id(tank_lux).state),
+            num(id(controller).get_swing()),
+            num(id(controller).get_drift_rate()),
+            num(id(controller).get_confidence()),
+            num(id(controller).get_heater_duty()),
+            num(id(controller).get_fan_duty()),
+            id(controller).get_heater_duty() > 0.05f ? 1 : 0,
+            id(controller).get_fan_duty() > 0.05f ? 1 : 0,
+            id(controller).is_safety_tripped() ? 1 : 0,
+            id(controller).get_learning_enabled() ? 1 : 0);
+          id(ble_tx) = b;
+      - ble_server.characteristic.set_value:
+          id: tele_char
+          value: !lambda 'return std::vector<uint8_t>(id(ble_tx).begin(), id(ble_tx).end());'
+      - ble_server.characteristic.notify:
+          id: tele_char

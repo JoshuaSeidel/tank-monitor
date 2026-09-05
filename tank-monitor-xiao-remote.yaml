@@ -23,7 +23,12 @@ packages:
       - packages/control.yaml
       - packages/sensors.yaml
       - packages/ph.yaml
-      - packages/espnow_link.yaml
+      # BLE, not ESP-NOW. The S3 pairs with the new AMOLED panel over BLE and
+      # talks to Home Assistant over WiFi; the C6 and CYD keep their ESP-NOW
+      # pair untouched until both retire together. NEVER load espnow_link.yaml
+      # alongside this -- a device running WiFi + ESP-NOW + BLE lost its link
+      # and then its web server on the CYD.
+      - packages/ble_link.yaml
       - boards/xiao-esp32s3.yaml
     # refresh defaults to 1d, which would silently build yesterday's config.
     refresh: 0s
