@@ -57,6 +57,21 @@
 # -999 is the not-a-number sentinel; NAN does not survive snprintf %f
 # portably and an out-of-band value is unambiguous to the parser.
 
+# Mirrors "Panel Transport" on the panel side. Without it there is no way
+# to tell from Home Assistant whether a controller's firmware actually
+# contains this file -- and that cost a real diagnosis: the S3 ran a build
+# stamped 12:10:26 while this file was committed at 12:14:11, four minutes
+# later, so it advertised nothing and the panel's BLE icon sat red with a
+# perfectly correct MAC in its config. A firmware build date does not tell
+# you what is IN the build. This does.
+text_sensor:
+  - platform: template
+    name: "Controller Transport"
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"ble"};'
+
 globals:
   - id: ble_tx
     type: std::string
