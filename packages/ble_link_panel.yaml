@@ -143,6 +143,18 @@ sensor:
     update_interval: never
 
 text_sensor:
+  # Which transport this firmware was BUILT with -- not which one last
+  # delivered. Link Source reports "none" whenever the feed is stale, so it
+  # cannot answer "is this the BLE build?", and that was exactly the question
+  # that could not be answered while the panel sat on ESP-NOW through three
+  # reflashes with only a missing entity as the symptom.
+  - platform: template
+    name: "Panel Transport"
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"ble"};'
+
   # The whole telemetry snapshot, as one notified string.
   #
   # ONE CHARACTERISTIC, NOT FIFTEEN -- see ble_link.yaml. One payload is an

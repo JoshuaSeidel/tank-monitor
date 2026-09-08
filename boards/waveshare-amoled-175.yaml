@@ -123,6 +123,25 @@ font:
     size: 22
     glyphs: "0123456789.-+% ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz°/|"
 
+# ---------------------------------------------------------------
+# BUILD GUARD: this panel pairs with the S3 over BLE, and only that
+# ---------------------------------------------------------------
+# The status-icon lambda below reads id(ble_connected), a binary_sensor that
+# exists ONLY in packages/ble_link_panel.yaml. Building this board against
+# packages/remote_display.yaml therefore fails with "Couldn't find ID
+# 'ble_connected'" instead of quietly producing ESP-NOW firmware that pairs
+# with the C6.
+#
+# It has to be an ID, not a substitution: ESPHome only WARNS about an
+# undefined ${substitution} inside a lambda and compiles it as literal text,
+# which is no guard at all. A missing id is a hard error.
+#
+# Why a guard rather than a note: the ESPHome dashboard's copy of the wrapper
+# is not the copy in this repo, so changing the repo wrapper to BLE changed
+# nothing on the device. The panel went on connecting to the C6 across
+# reflashes and the only symptom was an entity that failed to appear. A build
+# that stops is louder than any comment.
+
 lvgl:
   displays: [amoled]
   touchscreens: [amoled_touch]
@@ -512,7 +531,7 @@ interval:
             // built against the ESP-NOW package instead: green still means
             // the tank data is live, rather than red because a BLE flag
             // that nothing sets happens to be false.
-            const uint32_t bc = !stale ? GOOD : (id(r_ble_connected) ? WARN : BAD);
+            const uint32_t bc = !stale ? GOOD : (id(ble_connected).state ? WARN : BAD);
             const uint32_t wc = wifi_up ? GOOD : BAD;
 
             lv_obj_set_style_arc_color(id(wifi_a3), lv_color_hex(wc), LV_PART_MAIN);

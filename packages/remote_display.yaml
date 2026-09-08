@@ -361,6 +361,16 @@ binary_sensor:
           id(r_learn_known) = true;
 
 text_sensor:
+  # Which transport this firmware was BUILT with -- not which one last
+  # delivered. Link Source reports "none" whenever the feed is stale, so it
+  # cannot answer "is this the ESP-NOW build?".
+  - platform: template
+    name: "Panel Transport"
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"esp-now"};'
+
   # WHICH transport is feeding the panel. Link Age can say the data is
   # fresh without saying what made it fresh, and with two transports live
   # during the transition that is the question you actually have.
