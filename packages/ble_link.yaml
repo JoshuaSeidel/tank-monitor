@@ -72,6 +72,36 @@ text_sensor:
     update_interval: 60s
     lambda: 'return {"ble"};'
 
+  # The MAC the panel has to be pointed at. Read from efuse, so it is the
+  # real one rather than an assumption -- on the S3 the Bluetooth address is
+  # the base MAC + 2 and it is NOT the WiFi MAC, which is the wrong number
+  # everyone reaches for first because it is the one every other tool shows.
+  #
+  # Published so both ends of the link are visible in Home Assistant side by
+  # side: compare this against the panel's "BLE Target" and a mismatch is
+  # obvious in one glance instead of a boot-log hunt.
+  - platform: template
+    name: "Controller BLE MAC"
+    icon: "mdi:bluetooth"
+    entity_category: diagnostic
+    update_interval: 300s
+    lambda: |-
+      // Straight from the running BLE stack via ESPHome's own accessor, not
+      // computed from the WiFi MAC. The offset between the two is a build
+      // option (CONFIG_..._UNIVERSAL_MAC_ADDRESSES) and differs between
+      // chips, so deriving it would be a guess that reads as a fact.
+      using esphome::esp32_ble::global_ble;
+      if (global_ble == nullptr) return {"not started"};
+      uint8_t m[6];
+      global_ble->get_mac_msb_first(m);
+      if (m[0] == 0 && m[1] == 0 && m[2] == 0 &&
+          m[3] == 0 && m[4] == 0 && m[5] == 0)
+        return {"not started"};
+      char b[18];
+      snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X:%02X",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+      return {std::string(b)};
+
 globals:
   - id: ble_tx
     type: std::string

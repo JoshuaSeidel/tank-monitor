@@ -147,3 +147,31 @@ output:
     # Silkscreen D9.
     pin: GPIO8
     period: 900s
+
+# ---------------------------------------------------------------
+# BUILD GUARD: this controller carries the BLE link, and must
+# ---------------------------------------------------------------
+# The lambda below reads id(ble_tx), a global defined ONLY in
+# packages/ble_link.yaml. Building this board without that file fails with
+# "Couldn't find ID 'ble_tx'" rather than producing a controller that runs
+# the tank perfectly and advertises nothing for the panel to connect to.
+#
+# That is not hypothetical. The firmware on this board was built at
+# 2026-09-05 12:10:26; ble_link.yaml was committed at 12:14:11, four minutes
+# later. It ran for three days with no BLE server, and the symptom at the
+# panel -- a red icon and no connection -- is indistinguishable from a wrong
+# MAC address. Nothing anywhere reported the difference.
+#
+# It has to be an ID. ESPHome only WARNS about an undefined ${substitution}
+# inside a lambda and compiles it as literal text; a missing id is fatal.
+text_sensor:
+  - platform: template
+    name: "Link Payload"
+    icon: "mdi:code-string"
+    entity_category: diagnostic
+    update_interval: 60s
+    # The exact string on the wire. Worth publishing on its own: you can see
+    # the field count, the format version, and whether the hourly TDS mean is
+    # actually populated -- which is the difference between "the panel is not
+    # connected" and "the panel is connected and rejecting every frame".
+    lambda: 'return {id(ble_tx)};'

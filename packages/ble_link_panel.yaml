@@ -155,6 +155,16 @@ text_sensor:
     update_interval: 60s
     lambda: 'return {"ble"};'
 
+  # The MAC this firmware was BUILT to connect to. Compare against the
+  # controller's "Controller BLE MAC" entity -- if they differ, that is the
+  # whole fault, and it is visible without opening a serial log.
+  - platform: template
+    name: "BLE Target"
+    icon: "mdi:bluetooth"
+    entity_category: diagnostic
+    update_interval: 300s
+    lambda: 'return {"${s3_ble_mac}"};'
+
   # The whole telemetry snapshot, as one notified string.
   #
   # ONE CHARACTERISTIC, NOT FIFTEEN -- see ble_link.yaml. One payload is an
