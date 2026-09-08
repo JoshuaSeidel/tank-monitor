@@ -1,19 +1,50 @@
 # Waveshare ESP32-S3-Touch-AMOLED-1.75 round panel. Put THIS in the dashboard.
 #
-# PHASE A: joins on ESP-NOW as a SECOND panel beside the CYD, which is left
-# untouched and keeps working. Two panels showing the same tank while the new
-# UI is built. No controller change, no BLE, no new failure mode.
+# This panel pairs with the XIAO ESP32-S3 controller over BLE, and with
+# nothing else. It does not speak ESP-NOW and cannot be pointed at the C6 --
+# that was Phase A, a temporary arrangement so the new UI could be built
+# against live data while the S3 controller did not exist yet. It does now
+# (packages/ble_link.yaml), so Phase A is over.
 #
-# PHASE B swaps remote_display.yaml's ESP-NOW for BLE in one flash, when the
-# S3 controller exists. This board never runs both -- that is the rule that
-# came out of the phase 1 coexistence failure on the CYD.
+# ---------------------------------------------------------------------
+# One radio pair, chosen at build time
+# ---------------------------------------------------------------------
+# A panel may run WiFi + ESP-NOW, or WiFi + BLE. Never all three. With all
+# three live the CYD lost its ESP-NOW link and then stopped answering HTTP
+# altogether, at the gentlest useful scan setting. So the transport is a
+# whole-file choice: loading packages/remote_display.yaml (ESP-NOW) beside
+# packages/ble_link_panel.yaml (BLE) would collide on every id below AND
+# bring up two radios. Never do it.
 #
-# device_name must NOT collide with the CYD. Same name means the same MQTT
-# topic prefix, discovery ids, hostname and LWT, and the two boards overwrite
-# each other's entities.
+# The CYD keeps ESP-NOW and keeps working, untouched, until it retires.
+#
+# ---------------------------------------------------------------------
+# s3_ble_mac -- you must set this
+# ---------------------------------------------------------------------
+# ESPHome's ble_client can only address a peer by MAC; there is no name- or
+# service-based connect. Find the controller's at its boot log:
+#
+#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
+#
+# It is NOT the WiFi MAC and NOT the OTA/mDNS name.
+#
+# The value shipped below is deliberately NOT a valid MAC, so ESPHome's
+# address validator rejects it and the build stops until you replace it.
+# A real-looking placeholder would compile cleanly and then simply never
+# connect -- silently, forever -- which is the failure this project keeps
+# meeting. Better to fail at the keyboard than at the tank.
+#
+# ---------------------------------------------------------------------
+# device_name
+# ---------------------------------------------------------------------
+# Must NOT collide with the CYD or the controller. Same name means the same
+# MQTT topic prefix, discovery ids, mDNS hostname and LWT, and the boards
+# overwrite each other's Home Assistant entities as fast as they appear.
 substitutions:
   device_name: tank-monitor-round
   friendly_name: Tank Monitor Round
+  # ---- REPLACE THIS with the S3 controller's BLE MAC (see above) ----
+  s3_ble_mac: "SET-ME-FROM-THE-S3-BOOT-LOG"
 
 packages:
   tank_monitor:
@@ -24,7 +55,7 @@ packages:
       - packages/webui.yaml
       # Display-only: this REPLACES control.yaml and sensors.yaml. Loading
       # either alongside it collides on every id.
-      - packages/remote_display.yaml
+      - packages/ble_link_panel.yaml
       - packages/chemistry.yaml
       - boards/waveshare-amoled-175.yaml
     refresh: 0s

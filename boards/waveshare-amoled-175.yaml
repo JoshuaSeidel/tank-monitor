@@ -351,17 +351,25 @@ interval:
           lv_arc_set_value(id(t_arc), (int) pct);
 
           // ---- water page ----
-          const float tds_v = id(tds).state;
+          // The controller's hour mean, not the instantaneous reading. A
+          // single sample off this probe is honest about nothing -- see
+          // packages/sensors.yaml. Raw is the fallback for the few seconds
+          // after a boot, before the first full payload arrives.
+          const float tds_v = !isnan(id(tds_mean).state) ? id(tds_mean).state
+                                                         : id(tds).state;
           if (!isnan(tds_v)) { snprintf(buf, sizeof(buf), "TDS %.0f", tds_v); lv_label_set_text(id(w_tds), buf); }
           const float lux = id(tank_lux).state;
           if (!isnan(lux)) { snprintf(buf, sizeof(buf), "LIGHT %.0f", lux); lv_label_set_text(id(w_light), buf); }
           const float sw = id(r_swing_c);
           if (!isnan(sw)) { snprintf(buf, sizeof(buf), "SWING %.1f", sw * 9.0f / 5.0f); lv_label_set_text(id(w_swing), buf); }
 
-          if (id(r_heat) > 0.5f)      snprintf(buf, sizeof(buf), "HEATING %.0f%%", id(r_heat));
-          else if (id(r_fan) > 0.5f)  snprintf(buf, sizeof(buf), "COOLING %.0f%%", id(r_fan));
-          else                        snprintf(buf, sizeof(buf), "IDLE");
-          lv_label_set_text(id(w_heat), buf);
+          // ON/OFF, never a percentage. The heater and fan are plain relays
+          // on a mains outlet -- there is no throughput to throttle, and a
+          // "42%" beside a silent fan reads as a fault rather than as a
+          // duty cycle over a 15-minute window.
+          if (id(r_heat_on))     lv_label_set_text(id(w_heat), "HEATING");
+          else if (id(r_fan_on)) lv_label_set_text(id(w_heat), "COOLING");
+          else                   lv_label_set_text(id(w_heat), "IDLE");
 
           // ---- chemistry page ----
           if (!isnan(id(chem_ph)))  { snprintf(buf, sizeof(buf), "pH %.2f", id(chem_ph)); lv_label_set_text(id(c_ph), buf); }

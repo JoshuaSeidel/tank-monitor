@@ -31,9 +31,31 @@
 # thing to show anyway: at 14% duty the contacts are open for 13 of every 15
 # minutes, and a panel mirroring that would read as chaos.
 #
-# The leading "1" is a format version. A panel on older firmware can bail on
-# an unknown version rather than misparse a reordered field -- the same
+# The leading number is a FORMAT VERSION. A panel on older firmware bails on
+# an unknown version rather than misparsing a reordered field -- the same
 # reasoning that made the command protocol text rather than a packed struct.
+#
+#   v2 (2026-09-08) added field 4, the controller's own one-hour TDS mean.
+#      A single sample off that probe is honest about nothing -- the spread
+#      within one hour was a median of 39 ppm before the probe was moved off
+#      the airstone -- so the panel must show the mean, and the mean has to
+#      be computed once, on the board that owns the probe. Raw is still sent
+#      beside it: raw is what proves the probe is alive rather than latched.
+#      v1 shipped but nothing ever consumed it, so there is no compatibility
+#      debt to carry.
+#
+# FIELD ORDER (v2), 15 fields:
+#   0  version        8  confidence %
+#   1  water temp C   9  heater duty %
+#   2  setpoint C    10  fan duty %
+#   3  TDS raw ppm   11  heater demand 0/1
+#   4  TDS 1h mean   12  fan demand 0/1
+#   5  lux           13  safety tripped 0/1
+#   6  swing C       14  learning enabled 0/1
+#   7  drift C/min
+#
+# -999 is the not-a-number sentinel; NAN does not survive snprintf %f
+# portably and an out-of-band value is unambiguous to the parser.
 
 globals:
   - id: ble_tx
@@ -60,7 +82,7 @@ esp32_ble_server:
           # larger MTU or it will silently read a truncated string. That is a
           # panel-side concern to verify when the AMOLED arrives, not
           # something this side can fix.
-          value: "1,0,0,0,0,0,0,0,0,0,0,0,0"
+          value: "2,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
 
         # Commands, panel -> controller. Same tiny text protocol the ESP-NOW
         # link used, unchanged, so both transports speak the same thing:
@@ -92,10 +114,11 @@ interval:
           char b[180];
           const auto num = [](float v) { return std::isnan(v) ? -999.0f : v; };
           snprintf(b, sizeof(b),
-            "1,%.3f,%.3f,%.0f,%.0f,%.3f,%.4f,%.0f,%.1f,%.1f,%d,%d,%d,%d",
+            "2,%.3f,%.3f,%.0f,%.0f,%.0f,%.3f,%.4f,%.0f,%.1f,%.1f,%d,%d,%d,%d",
             num(id(water_temp).state),
             num(id(controller).get_setpoint()),
             num(id(tds).state),
+            num(id(tds_1h).state),
             num(id(tank_lux).state),
             num(id(controller).get_swing()),
             num(id(controller).get_drift_rate()),

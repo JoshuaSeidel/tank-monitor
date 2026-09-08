@@ -1,0 +1,278 @@
+# BLE link, PANEL side. The other half of packages/ble_link.yaml.
+#
+# Load this INSTEAD OF packages/remote_display.yaml. It provides the same
+# ids the board files read -- water_temp, tds, tds_mean, tank_lux and the
+# r_* globals -- so the LVGL code does not know or care which radio the
+# numbers arrived on.
+#
+# ---------------------------------------------------------------------
+# Why this is a separate file and not a transport option inside
+# remote_display.yaml
+# ---------------------------------------------------------------------
+# A panel may run WiFi + ESP-NOW, or WiFi + BLE. Never both. That is not a
+# style preference: with all three live the CYD lost its ESP-NOW link and
+# then stopped answering HTTP entirely, at the gentlest useful scan
+# setting. So the transport is a whole-file choice made at build time, and
+# there is no configuration in which a panel could accidentally bring up
+# two radios.
+#
+# The two files therefore duplicate some globals and the Link Age / Link
+# Source sensors. That duplication is deliberate and TEMPORARY: it ends
+# when the CYD retires and remote_display.yaml is deleted. Extracting a
+# shared core instead would have meant editing the CYD's wrapper in the
+# ESPHome dashboard, and wrapper edits have silently failed to take three
+# times in this project. Not worth the risk to a panel that works.
+#
+# ---------------------------------------------------------------------
+# Finding the controller's BLE MAC
+# ---------------------------------------------------------------------
+# ble_client can only address a peer by MAC -- ESPHome has no name- or
+# service-based connect. The S3 prints its own at boot:
+#
+#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
+#
+# Put that in the wrapper as s3_ble_mac. There is deliberately NO default:
+# a wrong MAC compiles cleanly and then simply never connects, which is
+# the worst failure this project keeps meeting. An unset substitution
+# fails the build instead, loudly, at the right moment.
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Only ever looking for one known MAC, so this can be as gentle as the
+    # component allows. Passive scanning does not transmit at all, which
+    # matters on a board sharing one antenna with the WiFi station.
+    active: false
+    interval: 1100ms
+    window: 100ms
+
+ble_client:
+  - id: ctrl_ble
+    mac_address: ${s3_ble_mac}
+    on_connect:
+      - lambda: |-
+          id(r_ble_connected) = true;
+          ESP_LOGI("ble", "controller connected");
+    on_disconnect:
+      - lambda: |-
+          id(r_ble_connected) = false;
+          ESP_LOGW("ble", "controller disconnected");
+
+globals:
+  # restore_value so a rebooted panel shows the last known reading straight
+  # away instead of dashes until the next notify.
+  - id: r_setpoint_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_swing_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_heat
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: r_fan
+    type: float
+    restore_value: true
+    initial_value: '0'
+  # Demand, not contact position: the controller drives the relays through
+  # slow_pwm and only that component knows when the contacts actually move.
+  # At 14% duty the contacts are open for 13 of every 15 minutes, and a
+  # panel mirroring that would read as chaos.
+  - id: r_heat_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: r_fan_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: r_fault
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Which transport last delivered data. Not restored: after a reboot the
+  # honest answer is "nothing has arrived yet", and claiming the previous
+  # source would be a small lie of exactly the kind this project keeps
+  # getting bitten by.
+  - id: r_src
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: r_ble_connected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: r_stamp
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Same event on millis(). Link Age wants a wall clock to say "3m ago";
+  # the connectivity sensor must work before SNTP has synced -- and a panel
+  # that has just booted with no network is exactly when you want it to
+  # admit the link is down.
+  - id: r_stamp_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+sensor:
+  # Published by the notify parser below, never polled. update_interval:
+  # never because there is no local source to poll -- the value only exists
+  # when a packet arrives, and a template lambda returning a stale copy on
+  # a timer would defeat the staleness detection entirely.
+  - platform: template
+    id: water_temp
+    internal: true
+    update_interval: never
+  - platform: template
+    id: tds
+    internal: true
+    update_interval: never
+  # The controller's own hour mean. Averaged on the controller, not here:
+  # this panel is a screen, and a screen that computes its own version of a
+  # number will eventually disagree with every other screen.
+  - platform: template
+    id: tds_mean
+    internal: true
+    update_interval: never
+  - platform: template
+    id: tank_lux
+    internal: true
+    update_interval: never
+
+text_sensor:
+  # The whole telemetry snapshot, as one notified string.
+  #
+  # ONE CHARACTERISTIC, NOT FIFTEEN -- see ble_link.yaml. One payload is an
+  # atomic snapshot with one age; fifteen characteristics would let the
+  # panel show temperature from one moment beside TDS from three seconds
+  # later, and nothing would look wrong.
+  - platform: ble_client
+    ble_client_id: ctrl_ble
+    id: ble_tele
+    internal: true
+    service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+    characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+    notify: true
+    on_value:
+      - lambda: |-
+          // MTU: BLE's default is 23 bytes and this payload is ~115, so a
+          // client that failed to negotiate a larger MTU receives a
+          // TRUNCATED string. Truncation is silent at the transport layer
+          // and produces plausible-looking garbage -- an atof() of a
+          // half-written float is still a float. So the parse is checked
+          // rather than trusted: wrong field count or wrong version means
+          // publish NOTHING and say so. A stale screen that admits it is
+          // stale beats a fresh screen that is lying.
+          const std::string &s = x;
+          float f[15];
+          int n = 0;
+          size_t start = 0;
+          while (n < 15 && start <= s.size()) {
+            const size_t comma = s.find(',', start);
+            const std::string tok = (comma == std::string::npos)
+                                      ? s.substr(start)
+                                      : s.substr(start, comma - start);
+            if (tok.empty()) break;
+            f[n++] = atof(tok.c_str());
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+          }
+          if (n != 15) {
+            ESP_LOGW("ble", "bad payload: %d of 15 fields in %u bytes -- MTU too small?",
+                     n, (unsigned) s.size());
+            return;
+          }
+          if ((int) f[0] != 2) {
+            ESP_LOGW("ble", "payload format v%d, this panel speaks v2 -- reflash one end",
+                     (int) f[0]);
+            return;
+          }
+
+          // -999 is the controller's not-a-number sentinel. Turning it back
+          // into NAN here means every downstream isnan() check that the
+          // ESP-NOW panel relied on keeps working unchanged.
+          const auto val = [](float v) { return v <= -998.0f ? NAN : v; };
+
+          id(water_temp).publish_state(val(f[1]));
+          id(r_setpoint_c) = val(f[2]);
+          id(tds).publish_state(val(f[3]));
+          id(tds_mean).publish_state(val(f[4]));
+          id(tank_lux).publish_state(val(f[5]));
+          id(r_swing_c)  = val(f[6]);
+          id(r_heat)     = val(f[9]);
+          id(r_fan)      = val(f[10]);
+          id(r_heat_on)  = f[11] > 0.5f;
+          id(r_fan_on)   = f[12] > 0.5f;
+          id(r_fault)    = f[13] > 0.5f;
+
+          // Stamp last, and only on a payload that fully parsed, so Link
+          // Age never reports fresh data off a frame that was rejected.
+          id(r_stamp) = id(sntp_time).now().is_valid()
+                        ? id(sntp_time).now().timestamp
+                        : 0;
+          id(r_stamp_ms) = millis();
+          id(r_src) = 2;
+
+  # WHICH transport is feeding the panel. Link Age can say the data is
+  # fresh without saying what made it fresh.
+  - platform: template
+    name: "Link Source"
+    id: link_source
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      // Stale beats loyal: if nothing has arrived recently say so, rather
+      // than naming whichever transport happened to speak last.
+      if (id(r_stamp_ms) == 0 || (millis() - id(r_stamp_ms)) > 45000)
+        return {"none"};
+      switch (id(r_src)) {
+        case 1: return {"esp-now"};
+        case 2: return {"ble"};
+        default: return {"unknown"};
+      }
+
+  # How stale the tank data is. The panel is only ever as current as its
+  # last packet, and a frozen screen showing plausible numbers is the one
+  # failure mode worth making visible -- the same reasoning as Chem Age.
+  - platform: template
+    name: "Link Age"
+    id: link_age
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (id(r_stamp) == 0) return {"no data"};
+      if (!id(sntp_time).now().is_valid()) return {"unknown"};
+      const uint32_t age = id(sntp_time).now().timestamp - id(r_stamp);
+      char buf[24];
+      if (age < 90)         snprintf(buf, sizeof(buf), "%us ago", (unsigned) age);
+      else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", (unsigned) (age / 60));
+      else                  snprintf(buf, sizeof(buf), "%uh ago", (unsigned) (age / 3600));
+      return {buf};
+
+binary_sensor:
+  # The controller notifies every 5s, so 45s is nine missed rounds -- long
+  # enough not to flap on a dropped notification, short enough to notice
+  # before you have made a decision based on a stale screen.
+  #
+  # Deliberately NOT the same thing as r_ble_connected: a GATT connection
+  # can stay up while notifications stop, and that failure looks identical
+  # to a healthy link if you only watch the connection state.
+  - platform: template
+    name: "Controller Link"
+    id: controller_link
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: |-
+      if (id(r_stamp_ms) == 0) return false;
+      return (millis() - id(r_stamp_ms)) < 45000;
+
+  - platform: template
+    name: "BLE Connected"
+    id: ble_connected
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: "return id(r_ble_connected);"

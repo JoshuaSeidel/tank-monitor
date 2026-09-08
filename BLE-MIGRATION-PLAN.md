@@ -30,27 +30,52 @@ device**. It does not have to become BLE on the same day the controller does.
 
 ## 2. Phases
 
-### Phase A — build the AMOLED panel on ESP-NOW
+### Phase A — AMOLED panel on ESP-NOW — **DONE, and now ended (2026-09-08)**
 
-The new panel joins as a **second** display speaking the transport that
-already works. Nothing else changes.
+The new panel joined as a second display speaking the transport that already
+worked: new board file, new round UI, `packages/remote_display.yaml`
+unchanged, CYD untouched. It did its job — the round UI was built and
+debugged against live data while no S3 controller existed.
 
-- New board file, new round UI (see §3)
-- Reuses `packages/remote_display.yaml` **unchanged** — the ESP-NOW receive
-  path, the cached globals, `Link Age`, `Link Source`
-- **The CYD is untouched and keeps working.** Two panels showing the same
-  tank, which is genuinely useful while the new UI is being built
-- No controller change. No BLE. No new failure mode
+It is over. `tank-monitor-amoled-remote.yaml` no longer loads
+`remote_display.yaml` and **cannot be pointed at the C6**. The panel pairs
+with the S3 and nothing else.
 
-This is the phase that can start the day the board arrives.
+### Phase B — panel switches to BLE — **BUILT, not yet deployed**
 
-### Phase B — S3 controller, panel switches to BLE, CYD retires
+Done:
 
-- Build the S3 controller (XIAO ESP32-S3, measured at 33.7% flash with BLE)
-- Panel swaps ESP-NOW for BLE **in one flash** — it never runs both
-- Learned thermal model carries across via the existing
-  `tank-seed/<device>/model` path
-- C6 and CYD retire together
+- `packages/ble_link.yaml` — controller side. BLE server, one telemetry
+  characteristic (notify, 5 s) and one command characteristic.
+- `packages/ble_link_panel.yaml` — panel side. `ble_client`, notify
+  subscription, checked parser, the same ids the board files already read.
+- Payload is at **v2**: v1 omitted the controller's hourly TDS mean, so the
+  panel would have shown the raw value while the CYD showed the mean. v1
+  shipped but nothing ever consumed it, so there was no debt to carry.
+- The panel's `HEATING 42%` became `HEATING` / `COOLING` / `IDLE`. They are
+  relays; there is no throughput to throttle.
+
+Still required before it works:
+
+1. **The S3's BLE MAC.** `ble_client` addresses peers only by MAC — no name
+   or service lookup. It is in the S3's boot log as `ESP-IDF BLE MAC
+   address:`, and it is *not* the WiFi MAC. Set `s3_ble_mac` in the wrapper;
+   the shipped value is intentionally invalid so the build stops until you do.
+2. **The S3 has to be running.** It is the only board that speaks BLE. As of
+   2026-09-08 its 54 entities are registered in HA and all unavailable.
+3. **MTU is verified at runtime, not assumed.** The payload is ~115 bytes
+   against BLE's 23-byte default. The parser counts fields and checks the
+   version; a short read publishes nothing and logs `bad payload: N of 15
+   fields -- MTU too small?`. If that appears in the panel log, MTU
+   negotiation is the cause.
+
+Known gap: **the round UI is read-only.** It has no setpoint stepper and no
+learning switch, so nothing on the panel writes to the command
+characteristic. The CYD can do both. That gap has to close before the CYD
+retires, or retiring it loses function.
+
+Still open from the original Phase B: the learned thermal model carrying
+across via `tank-seed/<device>/model`, and C6 + CYD retiring together.
 
 ---
 

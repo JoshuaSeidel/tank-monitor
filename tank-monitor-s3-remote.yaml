@@ -17,9 +17,14 @@
 # First flash is over USB-C, and the board enumerates as a native USB
 # device rather than a serial bridge -- hold BOOT while plugging it in if
 # the dashboard does not offer the port.
+# NAME COLLISION, fixed 2026-09-08: this wrapper and
+# tank-monitor-xiao-remote.yaml both declared device_name: tank-monitor-s3.
+# Both files carry a paragraph explaining why that is fatal, and both did it
+# anyway. The XIAO keeps the original name because it is the board carrying
+# the BLE link to the round panel; this one is renamed.
 substitutions:
-  device_name: tank-monitor-s3
-  friendly_name: Tank Monitor S3
+  device_name: tank-monitor-s3mini
+  friendly_name: Tank Monitor S3 Mini
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
