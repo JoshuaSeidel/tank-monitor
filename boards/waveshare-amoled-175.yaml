@@ -215,50 +215,31 @@ lvgl:
           scrollable: false
           clickable: false
 
-      # ---- BLE: arcs radiating both sides of a dot ----
-      - arc:
-          id: ble_left
+      # ---- BLE: the actual Bluetooth rune, drawn as one polyline ----
+      # It was radio waves before, identical in spirit to the CYD's ESP-NOW
+      # icon -- so it read as ESP-NOW, which is exactly what it was mistaken
+      # for. A link icon that names the wrong radio is worse than none.
+      #
+      # A line widget rather than a glyph: the fonts here are trimmed to save
+      # flash and a character outside the set renders as NOTHING at runtime,
+      # with no build error. The rune is one continuous stroke -- bottom-left
+      # up through the centre, down to the foot, up the spine, out to the
+      # top-right, back down through the centre -- which is why it can be a
+      # single points list.
+      - line:
+          id: ble_rune
           align: CENTER
           x: 38
           y: -186
-          width: 34
-          height: 34
-          start_angle: 135
-          end_angle: 225
-          arc_width: 4
-          min_value: 0
-          max_value: 100
-          value: 0
-          adjustable: false
-          clickable: false
-      - arc:
-          id: ble_right
-          align: CENTER
-          x: 38
-          y: -186
-          width: 34
-          height: 34
-          start_angle: 315
-          end_angle: 45
-          arc_width: 4
-          min_value: 0
-          max_value: 100
-          value: 0
-          adjustable: false
-          clickable: false
-      - obj:
-          id: ble_dot
-          align: CENTER
-          x: 38
-          y: -186
-          width: 8
-          height: 8
-          radius: 4
-          bg_opa: COVER
-          border_width: 0
-          pad_all: 0
-          scrollable: false
-          clickable: false
+          points:
+            - [0, 9]
+            - [18, 27]
+            - [9, 36]
+            - [9, 0]
+            - [18, 9]
+            - [0, 27]
+          line_width: 4
+          line_rounded: true
 
   # ---------------------------------------------------------------
   # Navigation: tap ANYWHERE cycles pages.
@@ -537,9 +518,14 @@ interval:
             lv_obj_set_style_arc_color(id(wifi_a3), lv_color_hex(wc), LV_PART_MAIN);
             lv_obj_set_style_arc_color(id(wifi_a2), lv_color_hex(wc), LV_PART_MAIN);
             lv_obj_set_style_bg_color(id(wifi_dot), lv_color_hex(wc), 0);
-            lv_obj_set_style_arc_color(id(ble_left),  lv_color_hex(bc), LV_PART_MAIN);
-            lv_obj_set_style_arc_color(id(ble_right), lv_color_hex(bc), LV_PART_MAIN);
-            lv_obj_set_style_bg_color(id(ble_dot), lv_color_hex(bc), 0);
+            // id(ble_connected) is also the BUILD GUARD -- it exists only in
+            // packages/ble_link_panel.yaml, so an ESP-NOW build of this board
+            // fails to compile rather than pairing with the C6. Do not
+            // replace it with the r_ble_connected global, which both
+            // transport packages define.
+            // A line widget's id is an LvLineType wrapper, not an lv_obj_t*
+            // like every other widget here -- ->obj is the underlying object.
+            lv_obj_set_style_line_color(id(ble_rune)->obj, lv_color_hex(bc), LV_PART_MAIN);
           }
           lv_label_set_text(id(c_link), stale ? "LINK STALE" : "LINK OK");
           lv_obj_set_style_text_color(id(c_link),
