@@ -131,6 +131,117 @@ lvgl:
   bg_color: 0x000000
 
   # ---------------------------------------------------------------
+  # Radio status, on top_layer so it shows on EVERY page
+  # ---------------------------------------------------------------
+  # Drawn from arcs and dots rather than glyphs, deliberately: the fonts on
+  # this board are glyph-restricted to save flash, and a character that is
+  # not in the set renders as nothing at RUNTIME with no build error. An
+  # icon that silently disappears is worse than no icon.
+  #
+  # Sits at the top of the face between the rim gauge and the TARGET label,
+  # which is the only band on p_temp with nothing in it. The arc sweeps
+  # 130 deg to 50 deg, so its gap is at the BOTTOM -- the top is covered
+  # and these have to live inside it.
+  #
+  # Left  = WiFi (Home Assistant, MQTT, the web UI)
+  # Right = BLE  (the controller link -- the tank data itself)
+  #
+  # They fail independently and it matters which. WiFi red with BLE green
+  # means the readings are live and Home Assistant is blind; BLE red with
+  # WiFi green means the dashboard is fine and this screen is lying.
+  top_layer:
+    widgets:
+      # ---- WiFi: two arcs opening upward from a dot, all concentric ----
+      - arc:
+          id: wifi_a3
+          align: CENTER
+          x: -38
+          y: -186
+          width: 40
+          height: 40
+          start_angle: 225
+          end_angle: 315
+          arc_width: 4
+          min_value: 0
+          max_value: 100
+          value: 0
+          adjustable: false
+          clickable: false
+      - arc:
+          id: wifi_a2
+          align: CENTER
+          x: -38
+          y: -186
+          width: 26
+          height: 26
+          start_angle: 225
+          end_angle: 315
+          arc_width: 4
+          min_value: 0
+          max_value: 100
+          value: 0
+          adjustable: false
+          clickable: false
+      - obj:
+          id: wifi_dot
+          align: CENTER
+          x: -38
+          y: -186
+          width: 8
+          height: 8
+          radius: 4
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          clickable: false
+
+      # ---- BLE: arcs radiating both sides of a dot ----
+      - arc:
+          id: ble_left
+          align: CENTER
+          x: 38
+          y: -186
+          width: 34
+          height: 34
+          start_angle: 135
+          end_angle: 225
+          arc_width: 4
+          min_value: 0
+          max_value: 100
+          value: 0
+          adjustable: false
+          clickable: false
+      - arc:
+          id: ble_right
+          align: CENTER
+          x: 38
+          y: -186
+          width: 34
+          height: 34
+          start_angle: 315
+          end_angle: 45
+          arc_width: 4
+          min_value: 0
+          max_value: 100
+          value: 0
+          adjustable: false
+          clickable: false
+      - obj:
+          id: ble_dot
+          align: CENTER
+          x: 38
+          y: -186
+          width: 8
+          height: 8
+          radius: 4
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          clickable: false
+
+  # ---------------------------------------------------------------
   # Navigation: tap ANYWHERE cycles pages.
   # ---------------------------------------------------------------
   # The CYD uses three nav buttons along the bottom edge. On a circle that
@@ -379,6 +490,38 @@ interval:
           // Link freshness. Stale beats loyal -- if nothing has arrived
           // recently say so rather than showing a plausible frozen number.
           const bool stale = id(r_stamp_ms) == 0 || (millis() - id(r_stamp_ms)) > 45000;
+
+          // ---- radio status icons ----
+          {
+            const uint32_t GOOD = 0x3ECF6E, WARN = 0xFFB020, BAD = 0xFF4438;
+            const bool wifi_up = wifi::global_wifi_component != nullptr &&
+                                 wifi::global_wifi_component->is_connected();
+
+            // THREE states, not two, because the failures look identical
+            // from the outside and want different actions:
+            //   green = data is current. That is the question that matters,
+            //           so it is asked FIRST -- a link delivering fresh
+            //           readings is healthy whatever the GATT flag says.
+            //   amber = connected, but nothing fresh has arrived. The
+            //           notification subscription died, or every frame is
+            //           being rejected -- check the log for "bad payload",
+            //           which means the MTU was never negotiated up.
+            //   red   = no link at all. Wrong MAC, or the S3 is off.
+            //
+            // Freshness first also keeps this honest if the board is ever
+            // built against the ESP-NOW package instead: green still means
+            // the tank data is live, rather than red because a BLE flag
+            // that nothing sets happens to be false.
+            const uint32_t bc = !stale ? GOOD : (id(r_ble_connected) ? WARN : BAD);
+            const uint32_t wc = wifi_up ? GOOD : BAD;
+
+            lv_obj_set_style_arc_color(id(wifi_a3), lv_color_hex(wc), LV_PART_MAIN);
+            lv_obj_set_style_arc_color(id(wifi_a2), lv_color_hex(wc), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(id(wifi_dot), lv_color_hex(wc), 0);
+            lv_obj_set_style_arc_color(id(ble_left),  lv_color_hex(bc), LV_PART_MAIN);
+            lv_obj_set_style_arc_color(id(ble_right), lv_color_hex(bc), LV_PART_MAIN);
+            lv_obj_set_style_bg_color(id(ble_dot), lv_color_hex(bc), 0);
+          }
           lv_label_set_text(id(c_link), stale ? "LINK STALE" : "LINK OK");
           lv_obj_set_style_text_color(id(c_link),
               lv_color_hex(stale ? 0xFF4438 : 0x3ECF6E), 0);
