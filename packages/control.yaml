@@ -137,8 +137,17 @@ binary_sensor:
     device_class: running
     icon: "mdi:fan"
 
+  # The temperature probe stopped reporting for long enough that the
+  # controller cut the heater -- with no reading there is no safe way to
+  # heat. Self-clearing: it drops the moment a valid reading returns.
+  #
+  # Named "Not Responding" to match the heater and fan sensors below. It
+  # was "Temperature Fault" until 2026-09-10, and that one word cost a real
+  # diagnosis: "fault" reads as latched and needing a manual reset, so a
+  # dead heater got called a latched fault to be cleared by hand when
+  # nothing in this controller latches at all.
   - platform: template
-    name: "Temperature Fault"
+    name: "Probe Not Responding"
     device_class: problem
     entity_category: diagnostic
     lambda: "return id(controller).is_safety_tripped();"

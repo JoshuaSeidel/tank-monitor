@@ -64,7 +64,7 @@ claude mcp add --transport http tank \
 | Tool | Answers |
 |---|---|
 | `tank_report` | "How is the tank?" — everything, plus a ranked list of what is wrong. Start here. |
-| `tank_status` | Temperature against setpoint, heater and fan duty, TDS, faults, probe cross-check. |
+| `tank_status` | Temperature against setpoint, heater and fan duty, TDS, and controller problems. |
 | `water_chemistry` | Every chemistry value with a verdict; GH/KH in both degrees and ppm. |
 | `ph_status` | Current pH and **where it came from** — `probe`, `test kit` or `unavailable`. |
 | `metric_history` | Min/max/mean of one metric over N hours. |

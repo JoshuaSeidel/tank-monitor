@@ -115,7 +115,7 @@ class TankServer:
             """Live state of the aquarium controller.
 
             Water temperature against setpoint, what the heater and fan are
-            doing, TDS and conductivity, light level, controller faults, and a
+            doing, TDS and conductivity, light level, controller problems, and a
             There is no second temperature probe, so nothing independently
             checks the DS18B20 this reports.
             Temperatures are Fahrenheit.

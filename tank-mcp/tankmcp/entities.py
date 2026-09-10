@@ -117,8 +117,8 @@ class TankEntities:
         return f"binary_sensor.{self.prefix}_status"
 
     @property
-    def temperature_fault(self) -> str:
-        return f"binary_sensor.{self.prefix}_temperature_fault"
+    def probe_not_responding(self) -> str:
+        return f"binary_sensor.{self.prefix}_probe_not_responding"
 
     @property
     def heater_not_responding(self) -> str:

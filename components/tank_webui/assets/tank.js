@@ -49,7 +49,7 @@ const E = {
   calSlope: "sensor-cal_ph_slope",
   heatRelay: "binary_sensor-heater",
   fanRelay: "binary_sensor-fan",
-  fault: "binary_sensor-temperature_fault",
+  fault: "binary_sensor-probe_not_responding",
   learn: "switch-adaptive_learning",
   light: "light-display_backlight",
 };

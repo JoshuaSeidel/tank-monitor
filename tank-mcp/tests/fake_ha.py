@@ -52,7 +52,7 @@ def reset() -> None:
     _set("sensor.tank_monitor_predicted_temperature_15_min", 73.66)
     _set("sensor.tank_monitor_model_confidence", 100)
     _set("binary_sensor.tank_monitor_status", "on")
-    _set("binary_sensor.tank_monitor_temperature_fault", "off")
+    _set("binary_sensor.tank_monitor_probe_not_responding", "off")
     _set("binary_sensor.tank_monitor_heater_not_responding", "off")
     _set("binary_sensor.tank_monitor_fan_not_responding", "off")
     _set("switch.tank_monitor_adaptive_learning", "on")

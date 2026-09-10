@@ -9,17 +9,17 @@
       "badges": [
         {
           "type": "entity",
-          "entity": "sensor.tank_monitor_water_temperature",
+          "entity": "sensor.tank_monitor_s3_water_temperature",
           "show_name": true
         },
         {
           "type": "entity",
-          "entity": "sensor.tank_monitor_temperature_swing_1h",
+          "entity": "sensor.tank_monitor_s3_temperature_swing_1h",
           "show_name": true
         },
         {
           "type": "entity",
-          "entity": "sensor.tank_monitor_controller_state",
+          "entity": "sensor.tank_monitor_s3_controller_state",
           "show_name": true
         }
       ],
@@ -35,7 +35,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_water_temperature",
+              "entity": "sensor.tank_monitor_s3_water_temperature",
               "name": "Water",
               "grid_options": {
                 "columns": 12
@@ -49,7 +49,7 @@
             },
             {
               "type": "tile",
-              "entity": "number.tank_monitor_target_temperature",
+              "entity": "number.tank_monitor_s3_target_temperature",
               "name": "Target",
               "grid_options": {
                 "columns": 12
@@ -63,7 +63,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_temperature_swing_1h",
+              "entity": "sensor.tank_monitor_s3_temperature_swing_1h",
               "name": "Swing (1h)",
               "grid_options": {
                 "columns": 6
@@ -77,7 +77,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_controller_state",
+              "entity": "sensor.tank_monitor_s3_controller_state",
               "name": "Controller",
               "grid_options": {
                 "columns": 6
@@ -85,7 +85,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_heater_output",
+              "entity": "sensor.tank_monitor_s3_heater_output",
               "name": "Heater",
               "grid_options": {
                 "columns": 6
@@ -100,7 +100,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_fan_output",
+              "entity": "sensor.tank_monitor_s3_fan_output",
               "name": "Fan",
               "grid_options": {
                 "columns": 6
@@ -126,11 +126,11 @@
             },
             {
               "type": "markdown",
-              "content": "**Live from the controller**\n\n| | Now | Target |\n|---|---|---|\n| **Temp** | {{ states('sensor.tank_monitor_water_temperature') }} °F | {{ states('number.tank_monitor_target_temperature') }} °F |\n| **TDS** | {{ states('sensor.tank_monitor_tds_1h_mean') }} ppm | informational |\n| **Light** | {{ states('sensor.tank_monitor_tank_light_level') }} lx | — |\n\n**Last manual test kit**\n\n| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('input_number.aquarium_ph_manual') }} | 7.0 – 7.5 |\n| **GH** | {{ states('input_number.aquarium_gh') }} ppm | {{ states('input_number.aquarium_gh_target_min') }} – {{ states('input_number.aquarium_gh_target_max') }} |\n| **KH** | {{ states('input_number.aquarium_kh') }} ppm | {{ states('input_number.aquarium_kh_target_min') }} – {{ states('input_number.aquarium_kh_target_max') }} |\n| **NH3** | {{ states('input_number.aquarium_total_ammonia') }} ppm | 0 |\n| **NO3** | {{ states('input_number.aquarium_nitrate') }} ppm | under 20 |\n\n*TDS is a trend, not a verdict — it is the sum of everything dissolved and cannot tell you whether the right minerals are there. GH and KH are what matter. pH floor is 7.0, set by the emerald dwarf danios.*"
+              "content": "**Live from the controller**\n\n| | Now | Target |\n|---|---|---|\n| **Temp** | {{ states('sensor.tank_monitor_s3_water_temperature') }} °F | {{ states('number.tank_monitor_s3_target_temperature') }} °F |\n| **TDS** | {{ states('sensor.tank_monitor_s3_tds_1h_mean') }} ppm | informational |\n| **Light** | {{ states('sensor.tank_monitor_s3_tank_light_level') }} lx | — |\n\n**Last manual test kit**\n\n| | Now | Target |\n|---|---|---|\n| **pH** | {{ states('input_number.aquarium_ph_manual') }} | 7.0 – 7.5 |\n| **GH** | {{ states('input_number.aquarium_gh') }} ppm | {{ states('input_number.aquarium_gh_target_min') }} – {{ states('input_number.aquarium_gh_target_max') }} |\n| **KH** | {{ states('input_number.aquarium_kh') }} ppm | {{ states('input_number.aquarium_kh_target_min') }} – {{ states('input_number.aquarium_kh_target_max') }} |\n| **NH3** | {{ states('input_number.aquarium_total_ammonia') }} ppm | 0 |\n| **NO3** | {{ states('input_number.aquarium_nitrate') }} ppm | under 20 |\n\n*TDS is a trend, not a verdict — it is the sum of everything dissolved and cannot tell you whether the right minerals are there. GH and KH are what matter. pH floor is 7.0, set by the emerald dwarf danios.*"
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_tds_1h_mean",
+              "entity": "sensor.tank_monitor_s3_tds_1h_mean",
               "name": "TDS (hourly mean)",
               "grid_options": {
                 "columns": 6
@@ -144,7 +144,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_electrical_conductivity",
+              "entity": "sensor.tank_monitor_s3_electrical_conductivity",
               "name": "Conductivity",
               "grid_options": {
                 "columns": 6
@@ -152,7 +152,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_tank_light_level",
+              "entity": "sensor.tank_monitor_s3_tank_light_level",
               "name": "Light",
               "grid_options": {
                 "columns": 6
@@ -166,7 +166,7 @@
             },
             {
               "type": "tile",
-              "entity": "light.tank_monitor_display_backlight",
+              "entity": "light.tank_monitor_s3_display_backlight",
               "name": "Display",
               "grid_options": {
                 "columns": 6
@@ -185,15 +185,15 @@
             },
             {
               "type": "tile",
-              "entity": "binary_sensor.tank_monitor_temperature_fault",
-              "name": "Probe fault",
+              "entity": "binary_sensor.tank_monitor_s3_probe_not_responding",
+              "name": "Probe not responding",
               "grid_options": {
                 "columns": 6
               }
             },
             {
               "type": "tile",
-              "entity": "binary_sensor.tank_monitor_status",
+              "entity": "binary_sensor.tank_monitor_s3_status",
               "name": "Controller online",
               "grid_options": {
                 "columns": 6
@@ -201,7 +201,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_model_confidence",
+              "entity": "sensor.tank_monitor_s3_model_confidence",
               "name": "Model learned",
               "grid_options": {
                 "columns": 6
@@ -216,7 +216,7 @@
             },
             {
               "type": "tile",
-              "entity": "switch.tank_monitor_adaptive_learning",
+              "entity": "switch.tank_monitor_s3_adaptive_learning",
               "name": "Adaptive learning",
               "grid_options": {
                 "columns": 12
@@ -494,7 +494,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_tds",
+              "entity": "sensor.tank_monitor_s3_tds",
               "name": "Reading now (raw)",
               "grid_options": {
                 "columns": 6
@@ -502,7 +502,7 @@
             },
             {
               "type": "tile",
-              "entity": "number.tank_monitor_cal_tds_standard",
+              "entity": "number.tank_monitor_s3_cal_tds_standard",
               "name": "Standard (ppm)",
               "grid_options": {
                 "columns": 6
@@ -516,7 +516,7 @@
             },
             {
               "type": "tile",
-              "entity": "number.tank_monitor_cal_tds_k_factor",
+              "entity": "number.tank_monitor_s3_cal_tds_k_factor",
               "name": "K factor",
               "grid_options": {
                 "columns": 6
@@ -530,7 +530,7 @@
             },
             {
               "type": "tile",
-              "entity": "button.tank_monitor_calibrate_tds",
+              "entity": "button.tank_monitor_s3_calibrate_tds",
               "name": "Calibrate TDS",
               "icon": "mdi:target-variant",
               "grid_options": {
@@ -540,7 +540,7 @@
                 "action": "perform-action",
                 "perform_action": "button.press",
                 "target": {
-                  "entity_id": "button.tank_monitor_calibrate_tds"
+                  "entity_id": "button.tank_monitor_s3_calibrate_tds"
                 },
                 "confirmation": {
                   "text": "Recalibrate TDS so the probe reads the standard value right now? This overwrites the stored K factor."
@@ -560,7 +560,7 @@
             },
             {
               "type": "tile",
-              "entity": "sensor.tank_monitor_water_temperature",
+              "entity": "sensor.tank_monitor_s3_water_temperature",
               "name": "Reads now",
               "grid_options": {
                 "columns": 6
@@ -568,7 +568,7 @@
             },
             {
               "type": "tile",
-              "entity": "number.tank_monitor_cal_temperature_offset",
+              "entity": "number.tank_monitor_s3_cal_temperature_offset",
               "name": "Offset (°F)",
               "grid_options": {
                 "columns": 6
@@ -589,7 +589,7 @@
             {
               "type": "markdown",
               "text_only": true,
-              "content": "The running build has no pH sensor, no capture buttons and no slope — `packages/ph.yaml` is not compiled in. The **CO2 pH-floor cutoff automation is inert** for the same reason: it triggers on `sensor.tank_monitor_water_ph`, which does not exist, so CO2 currently has no automatic floor. The drop checker is the only backstop.\n\nCheck the C6 wrapper in the ESPHome dashboard for the `packages/ph.yaml` line."
+              "content": "The running build has no pH sensor, no capture buttons and no slope — `packages/ph.yaml` is not compiled in. The **CO2 pH-floor cutoff automation is inert** for the same reason: it triggers on `sensor.tank_monitor_s3_water_ph`, which does not exist, so CO2 currently has no automatic floor. The drop checker is the only backstop.\n\nCheck the C6 wrapper in the ESPHome dashboard for the `packages/ph.yaml` line."
             }
           ]
         }
@@ -627,12 +627,12 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_water_temperature",
+                  "entity": "sensor.tank_monitor_s3_water_temperature",
                   "name": "Water",
                   "color": "#00C8FF"
                 },
                 {
-                  "entity": "number.tank_monitor_target_temperature",
+                  "entity": "number.tank_monitor_s3_target_temperature",
                   "name": "Target",
                   "color": "#3ECF6E"
                 }
@@ -648,7 +648,7 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_temperature_swing_1h",
+                  "entity": "sensor.tank_monitor_s3_temperature_swing_1h",
                   "name": "Swing",
                   "color": "#FF4438"
                 }
@@ -664,12 +664,12 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_heater_output",
+                  "entity": "sensor.tank_monitor_s3_heater_output",
                   "name": "Heater",
                   "color": "#FFB020"
                 },
                 {
-                  "entity": "sensor.tank_monitor_fan_output",
+                  "entity": "sensor.tank_monitor_s3_fan_output",
                   "name": "Fan",
                   "color": "#00C8FF"
                 }
@@ -685,7 +685,7 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_tank_light_level",
+                  "entity": "sensor.tank_monitor_s3_tank_light_level",
                   "name": "Light"
                 }
               ]
@@ -727,12 +727,12 @@
               },
               "entities": [
                 {
-                  "entity": "sensor.tank_monitor_tds_1h_mean",
+                  "entity": "sensor.tank_monitor_s3_tds_1h_mean",
                   "name": "Hourly mean",
                   "color": "#3ECF6E"
                 },
                 {
-                  "entity": "sensor.tank_monitor_tds",
+                  "entity": "sensor.tank_monitor_s3_tds",
                   "name": "Raw probe",
                   "color": "#00C8FF"
                 },

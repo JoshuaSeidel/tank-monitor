@@ -120,8 +120,8 @@ async def tank_status(ha: HomeAssistant, tank: E.TankEntities) -> dict[str, Any]
         "light_level_lx": _round(await ha.number(tank.light), 0),
         "model_confidence_percent": _round(await ha.number(tank.model_confidence), 0),
         "adaptive_learning": await ha.is_on(tank.adaptive_learning),
-        "faults": {
-            "temperature_probe": await ha.is_on(tank.temperature_fault),
+        "problems": {
+            "probe_not_responding": await ha.is_on(tank.probe_not_responding),
             "heater_not_responding": await ha.is_on(tank.heater_not_responding),
             "fan_not_responding": await ha.is_on(tank.fan_not_responding),
         },
@@ -241,12 +241,12 @@ def concerns(status: dict[str, Any], chemistry: dict[str, Any]) -> list[str]:
         temp = status.get("temperature_f")
         if temp is not None and temp < E.TEMP_COLD_FLOOR_F:
             found.append("The water is below the cold floor for the loaches and blue-eyes.")
-        faults = status.get("faults", {})
-        if faults.get("temperature_probe"):
+        problems = status.get("problems", {})
+        if problems.get("probe_not_responding"):
             found.append("The temperature probe has stopped responding and the heater is cut.")
-        if faults.get("heater_not_responding"):
+        if problems.get("heater_not_responding"):
             found.append("The heater is being driven but the water is not warming.")
-        if faults.get("fan_not_responding"):
+        if problems.get("fan_not_responding"):
             found.append("The fan is being driven but the water is not cooling.")
 
     ph = chemistry.get("ph", {})

@@ -434,7 +434,7 @@ interval:
           const float off  = f - spf;
 
           uint32_t col; const char *word;
-          if (!ok)                            { col = 0xFF4438; word = "PROBE FAULT"; }
+          if (!ok)                            { col = 0xFF4438; word = "NO PROBE"; }
           else if (off < ${temp_off_lightblue}) { col = 0x2F6FED; word = "TOO COLD"; }
           else if (off < ${temp_off_greenblue}) { col = 0x4FA3FF; word = "COLD"; }
           else if (off < ${temp_off_green})     { col = 0x3ECFB0; word = "COOL"; }
