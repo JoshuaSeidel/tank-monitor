@@ -1,0 +1,24 @@
+# LOCAL validation wrapper for boards/xiao-esp32s3-lg-dual.yaml.
+#
+# Sister to local-cyd.yaml: every package is !include'd from the working
+# tree instead of fetched from GitHub, so `esphome config local-lg-dual.yaml`
+# and `esphome compile local-lg-dual.yaml` test what you just edited rather
+# than what is on main.
+#
+# This is a TEST harness, not the deploy wrapper. The real one goes in the
+# ESPHome dashboard and pulls from git -- see tank-monitor-xiao-remote.yaml.
+#
+# device_name carries a -test suffix so it is distinct from EVERY deploy
+# wrapper, including this board's own. A stray flash of a half-edited test
+# build must not be able to impersonate the real device on MQTT.
+substitutions:
+  device_name: tank-monitor-lg-test
+  friendly_name: Tank Monitor LG TEST
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui.yaml
+  control: !include packages/control.yaml
+  sensors: !include packages/sensors.yaml
+  ph: !include packages/ph.yaml
+  ble: !include packages/ble_link_v3.yaml
+  board: !include boards/xiao-esp32s3-lg-dual.yaml

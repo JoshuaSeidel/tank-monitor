@@ -1,0 +1,178 @@
+# BLE link, CONTROLLER side, PAYLOAD v3. Fork of packages/ble_link.yaml.
+#
+# ---------------------------------------------------------------------
+# Why this is a fork and not an edit to ble_link.yaml
+# ---------------------------------------------------------------------
+# The panel parser is strict by design: packages/ble_link_panel.yaml
+# rejects any frame that is not EXACTLY 15 fields at version 2, because a
+# truncated BLE read produces plausible garbage rather than an error. That
+# strictness is correct and is not being relaxed.
+#
+# The consequence is that v2 and v3 cannot come out of one file. Both
+# controllers include the same package, so bumping the version there would
+# make the XIAO emit v3 and the round AMOLED panel -- which speaks v2 --
+# reject every frame. The tank would keep regulating perfectly and the
+# panel would simply go blank, which is the exact failure mode this
+# project keeps being caught by.
+#
+# So: the 12-gal system keeps ble_link.yaml untouched and byte-identical.
+# The large dual-system tank uses this file. They never meet -- different
+# controllers, different BLE MACs, different panels.
+#
+# This duplication is deliberate and TEMPORARY, on the same terms as the
+# duplication already documented in ble_link_panel.yaml: it ends when the
+# round panel moves to v3, at which point this file and ble_link.yaml
+# merge and v2 is deleted.
+#
+# ---------------------------------------------------------------------
+# WHAT THIS FILE REQUIRES FROM THE BOARD -- it is not board-agnostic
+# ---------------------------------------------------------------------
+# v3 carries the dual-system fields, so it only builds on a board that
+# has them. boards/xiao-esp32s3-lg-dual.yaml supplies:
+#   water_temp_b        second probe, Celsius
+#   temp_gradient       signed A-B, already in degF
+#   grad_ema_heating    degF
+#   grad_ema_idle       degF
+# and packages/ph.yaml supplies water_ph. Build this against the plain
+# xiao board and it fails at compile on a missing id, which is the right
+# way for it to fail.
+#
+# ---------------------------------------------------------------------
+# FIELD ORDER (v3), 20 fields. 0-14 are byte-identical to v2.
+# ---------------------------------------------------------------------
+#   0  version          10  fan duty %
+#   1  water temp A C   11  heater demand 0/1
+#   2  setpoint C       12  fan demand 0/1
+#   3  TDS raw ppm      13  safety tripped 0/1
+#   4  TDS 1h mean      14  learning enabled 0/1
+#   5  lux              ---- v3 additions ----
+#   6  swing C          15  water temp B C
+#   7  drift C/min      16  gradient degF, signed A-B
+#   8  confidence %     17  pH
+#   9  heater duty %    18  gradient degF while heating
+#                       19  gradient degF while idle
+#
+# Keeping 0-14 in place is not politeness. It means a future tolerant
+# parser can read a v3 frame as v2 by ignoring the tail, so the merge
+# above is a deletion rather than a rewrite.
+#
+# -999 is the not-a-number sentinel; NAN does not survive snprintf %f
+# portably and an out-of-band value is unambiguous to the parser.
+#
+# MTU: v2 was ~115 bytes and already needed the panel to negotiate past
+# BLE's 23-byte default. v3 is ~155. The buffer below is 256 so the
+# CONTROLLER never truncates; the panel still has to ask for the MTU, and
+# packages/ble_link_panel_v3.yaml checks the field count for exactly this.
+
+text_sensor:
+  # Mirrors "Panel Transport" on the panel side. Without it there is no way
+  # to tell from Home Assistant whether a controller's firmware actually
+  # contains this file -- see ble_link.yaml for the incident that cost.
+  - platform: template
+    name: "Controller Transport"
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"ble-v3"};'
+
+  # The MAC the panel has to be pointed at. Read from efuse, so it is the
+  # real one rather than an assumption -- on the S3 the Bluetooth address
+  # is the base MAC + 2 and it is NOT the WiFi MAC.
+  - platform: template
+    name: "Controller BLE MAC"
+    icon: "mdi:bluetooth"
+    entity_category: diagnostic
+    update_interval: 3600s
+    lambda: |-
+      // Straight from the running BLE stack via ESPHome's own accessor, not
+      // computed from the WiFi MAC. The offset between the two is a build
+      // option (CONFIG_..._UNIVERSAL_MAC_ADDRESSES) and differs between
+      // chips, so deriving it would be a guess that reads as a fact.
+      using esphome::esp32_ble::global_ble;
+      if (global_ble == nullptr) return {"not started"};
+      uint8_t m[6];
+      global_ble->get_mac_msb_first(m);
+      if (m[0] == 0 && m[1] == 0 && m[2] == 0 &&
+          m[3] == 0 && m[4] == 0 && m[5] == 0)
+        return {"not started"};
+      char b[18];
+      snprintf(b, sizeof(b), "%02X:%02X:%02X:%02X:%02X:%02X",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+      return {std::string(b)};
+
+globals:
+  - id: ble_tx
+    type: std::string
+    restore_value: false
+
+esp32_ble_server:
+  manufacturer: "tank-monitor"
+  model: "${device_name}"
+  services:
+    - uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+      advertise: true
+      characteristics:
+        - id: tele_char
+          uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+          read: true
+          notify: true
+          value: "3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"
+
+        # Commands, panel -> controller. Unchanged from v2 on purpose: the
+        # command protocol and the telemetry format version are independent,
+        # and a panel that can read v2 telemetry can still drive a v3
+        # controller's setpoint.
+        #   SP<degF>   set target temperature
+        #   AL0 | AL1  adaptive learning off / on
+        - id: cmd_char
+          uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+          write: true
+          value: ""
+          on_write:
+            - lambda: |-
+                std::string s(x.begin(), x.end());
+                if (s.rfind("SP", 0) == 0) {
+                  const float f = atof(s.c_str() + 2);
+                  // Clamped here as well as on the panel. The panel's copy is
+                  // optimistic; this is the one that actually moves the tank.
+                  if (f >= 70.0f && f <= 80.0f)
+                    id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
+                } else if (s.rfind("AL", 0) == 0) {
+                  id(controller).set_learning_enabled(s.size() > 2 && s[2] == '1');
+                }
+
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          char b[256];
+          const auto num = [](float v) { return std::isnan(v) ? -999.0f : v; };
+          snprintf(b, sizeof(b),
+            "3,%.3f,%.3f,%.0f,%.0f,%.0f,%.3f,%.4f,%.0f,%.1f,%.1f,%d,%d,%d,%d"
+            ",%.3f,%.3f,%.3f,%.3f,%.3f",
+            num(id(water_temp).state),
+            num(id(controller).get_setpoint()),
+            num(id(tds).state),
+            num(id(tds_1h).state),
+            num(id(tank_lux).state),
+            num(id(controller).get_swing()),
+            num(id(controller).get_drift_rate()),
+            num(id(controller).get_confidence()),
+            num(id(controller).get_heater_duty()),
+            num(id(controller).get_fan_duty()),
+            id(controller).get_heater_duty() > 0.05f ? 1 : 0,
+            id(controller).get_fan_duty() > 0.05f ? 1 : 0,
+            id(controller).is_safety_tripped() ? 1 : 0,
+            id(controller).get_learning_enabled() ? 1 : 0,
+            // ---- v3 ----
+            num(id(water_temp_b).state),
+            num(id(temp_gradient).state),
+            num(id(water_ph).state),
+            num(id(grad_ema_heating)),
+            num(id(grad_ema_idle)));
+          id(ble_tx) = b;
+      - ble_server.characteristic.set_value:
+          id: tele_char
+          value: !lambda 'return std::vector<uint8_t>(id(ble_tx).begin(), id(ble_tx).end());'
+      - ble_server.characteristic.notify:
+          id: tele_char

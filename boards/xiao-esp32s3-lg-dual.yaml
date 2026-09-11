@@ -1,0 +1,539 @@
+# Seeed XIAO ESP32-S3 -- LARGE TANK, DUAL SYSTEMS. Headless controller.
+#
+# WHY THIS FILE EXISTS SEPARATELY FROM boards/xiao-esp32s3.yaml
+# Same silicon, same pad labels, different wet side. The "-lg-dual" suffix
+# is the whole point: two heaters sharing one load, two temperature probes,
+# two light sensors, and pH/TDS moved off the internal ADC onto an ADS1115.
+# Do NOT merge this back into the plain xiao file -- that one runs the
+# 12-13 gal tank, and its NVS calibration belongs to different water.
+#
+# NOTHING IN THIS FILE CHANGES ANY SHARED PACKAGE. Every addition is local
+# to this board, including the one !extend below, which only applies to a
+# config that includes this file. Boards that do not include it are
+# bit-identical to before this file existed.
+#
+# The two devices MUST carry different device_name values in their wrappers.
+# That name sets the MQTT topic prefix, the discovery object ids, the mDNS
+# hostname and the fallback AP name all at once; two boards answering to one
+# name overwrite each other's Home Assistant entities as fast as they appear.
+#
+# PAD LABELS ARE NOT GPIO NUMBERS. The XIAO is silkscreened D0-D10 and D3 is
+# GPIO4, D8 is GPIO7. Wiring to the pad whose printed number matches a GPIO
+# below lands on the wrong pin, and every symptom of that is silent.
+#   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
+#
+#   signal                    SILKSCREEN   GPIO
+#   1-Wire bus A (control)    D5           6      + 4.7k pull-up
+#   1-Wire bus B (crosscheck) D0           1      + 4.7k pull-up
+#   I2C SDA                   D6           43
+#   I2C SCL                   D7           44
+#   Heater A control          D8           7
+#   Heater B control          D4           5
+#   Fan control               D9           8
+#
+# Spare: D1 (GPIO2), D3 (GPIO4), D10 (GPIO9) -- all ADC1, all free because
+# pH and TDS now live on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3
+# strapping pin and nothing may hold it at a level during boot.
+#
+# WHAT THIS FILE OWES THE SHARED PACKAGES -- the board contract:
+#   one_wire bus                 -> dallas_temp in packages/sensors.yaml
+#   i2c bus                      -> BH1750 + ADS1115
+#   sensor id: tds_voltage       -> packages/sensors.yaml
+#   sensor id: ph_voltage        -> packages/ph.yaml
+#   output id: heater_output     -> packages/control.yaml
+#   output id: fan_output        -> packages/control.yaml
+
+# Side labels. Probe A and heater A are the SAME half of the tank, probe B
+# and heater B the other -- that pairing is the whole point of two probes
+# here, and it is a wiring fact this file cannot verify. Override these in
+# the wrapper with the physical arrangement ("Left"/"Right", "Front"/"Back")
+# so the Home Assistant entities are self-documenting.
+#
+# packages/sensors.yaml owns the name "Water Temperature" for probe A and
+# cannot be relabelled from here, so: the UNSUFFIXED temperature is side A.
+substitutions:
+  side_a_name: "A"
+  side_b_name: "B"
+
+esp32:
+  board: seeed_xiao_esp32s3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+# See boards/xiao-esp32s3.yaml for the full story. Short version: ESPHome's
+# default "legacy" unique_id generator omits the device name, so this board's
+# "Water Temperature" would collide with the other controller's and Home
+# Assistant would silently refuse the second one.
+mqtt:
+  discovery_unique_id_generator: mac
+
+# ---------------------------------------------------------------
+# Two 1-Wire buses, one probe each -- deliberately not one bus with two
+# ---------------------------------------------------------------
+# Two DS18B20 on a shared bus must each carry an explicit `address:`, and
+# packages/sensors.yaml defines its probe WITHOUT one (correctly -- it is
+# the single-probe case, and changing it would alter every existing board).
+# Giving each probe its own bus means neither needs an address, so the
+# shared package drops in unmodified.
+#
+# It is also better engineering for a cross-check: a shorted or flooded
+# probe takes down its own bus and nothing else. On a shared bus one bad
+# probe silences both, which is the exact moment you most want the other.
+#
+# Declaration order does NOT disambiguate. Verified against ESPHome
+# 2026.8.2: with two buses declared, sensors.yaml's address-less probe
+# fails config with "Too many candidates found for 'one_wire_id'". It is
+# bound explicitly by the !extend in the sensor block below.
+one_wire:
+  - platform: gpio
+    id: onewire_a
+    pin: GPIO6      # D5 -- control probe. 4.7k pull-up to 3V3.
+  - platform: gpio
+    id: onewire_b
+    pin: GPIO1      # D0 -- cross-check probe. 4.7k pull-up to 3V3.
+
+i2c:
+  sda: GPIO43       # D6
+  scl: GPIO44       # D7
+  scan: true
+
+# ---------------------------------------------------------------
+# ADS1115 -- pH and TDS off the internal ADC
+# ---------------------------------------------------------------
+# 0x48 = ADDR tied to GND. No clash with the BH1750s at 0x23 and 0x5C.
+#
+# POWER IT FROM 3.3V, NOT 5V. Two independent reasons:
+#   - Its I2C logic threshold is 0.7*VDD. At VDD=5V that is 3.5V and the
+#     XIAO only drives 3.3V, so highs are marginal and it fails
+#     intermittently rather than cleanly.
+#   - Absolute max analog input is VDD+0.3V. A 3.3V rail caps safe input at
+#     ~3.6V; make sure the Gravity boards cannot swing above that.
+#
+# Continuous mode is OFF (the default). With two channels multiplexed on one
+# hub, continuous conversion returns the previous channel's reading.
+ads1115:
+  - address: 0x48
+
+sensor:
+  # Bind the shared package's probe to bus A.
+  #
+  # This !extend lives in the BOARD FILE and not the wrapper on purpose. The
+  # wrapper is the one file not pulled from git, and load-critical config has
+  # silently gone missing from it four times in this project. The board that
+  # grew a second bus is the board that owes the binding.
+  #
+  # It also scopes the change correctly: !extend only applies to configs
+  # that include THIS file, so sensors.yaml keeps behaving exactly as it
+  # always has for every other board.
+  - id: !extend water_temp
+    one_wire_id: onewire_a
+
+  # Raw TDS probe voltage. Internal only; packages/sensors.yaml does the
+  # maths and owns the published entity.
+  - platform: ads1115
+    multiplexer: 'A0_GND'
+    # 4.096, NOT the 2.048 that looks like it fits. The Gravity TDS board
+    # swings to ~2.3V and the pH board to ~3V; at 2.048 both clip at the top
+    # of their range and the symptom is a reading that tracks fine in the
+    # middle and flattens at exactly the extremes you make decisions on.
+    gain: 4.096
+    id: tds_voltage
+    update_interval: 500ms
+    internal: true
+    filters:
+      # The probe output is noisy; median rejects spikes without lagging a
+      # value that moves over minutes anyway.
+      - median:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+
+  # pH electrode buffer output -> packages/ph.yaml.
+  - platform: ads1115
+    multiplexer: 'A1_GND'
+    gain: 4.096
+    id: ph_voltage
+    update_interval: 1s
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
+  # ---------------------------------------------------------------
+  # Cross-check temperature probe
+  # ---------------------------------------------------------------
+  # NOT a second control input. packages/control.yaml regulates on
+  # water_temp alone, and that is deliberate: two independent loops on one
+  # body of water mislearn each other's heat as ambient bias.
+  #
+  # This probe exists to answer two questions the control probe cannot:
+  # "is the control probe still telling the truth" and "does this tank
+  # actually have a gradient".
+  - platform: dallas_temp
+    one_wire_id: onewire_b
+    internal: true
+    id: water_temp_b
+    update_interval: 10s
+    accuracy_decimals: 2
+    filters:
+      # No filter_out: nan. A stale cross-check reading is worse than none
+      # -- it would keep agreeing with a control probe that has died.
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+      # Probe B gets its OWN offset. A DS18B20 is +/-0.5 degC absolute and
+      # the control loop holds +/-0.3 degF, so two uncalibrated probes can
+      # read nearly a degree apart in identical water. Cross-calibrate both
+      # in the same cup before trusting any gradient number below.
+      - lambda: return x + id(cal_temp_offset_b_c);
+
+  - platform: template
+    name: "Water Temperature ${side_b_name}"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      if (std::isnan(id(water_temp_b).state)) return {};
+      return id(water_temp_b).state * 9.0f / 5.0f + 32.0f;
+
+  # SIGNED gradient, side A minus side B. Positive means the A half is
+  # warmer. The sign is the actionable half of this number -- absolute value
+  # tells you a gradient exists, the sign tells you which end to aim
+  # circulation at. That matters here because the canister draws from one
+  # side, so the two halves are not hydraulically equivalent even with
+  # identical heat going into each.
+  #
+  # Log this for a week before believing in a hot spot: under ~0.3 degF
+  # there is nothing to chase (and you cannot resolve less than that with
+  # two DS18B20 anyway), over ~1 degF you have a circulation problem that
+  # more heaters would mask rather than fix.
+  - platform: template
+    name: "Temperature Gradient"
+    id: temp_gradient
+    unit_of_measurement: "°F"
+    icon: "mdi:thermometer-lines"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      const float a = id(water_temp).state;
+      const float b = id(water_temp_b).state;
+      if (std::isnan(a) || std::isnan(b)) return {};
+      return (a - b) * 9.0f / 5.0f;
+
+  # ---------------------------------------------------------------
+  # Splitting the gradient by cause
+  # ---------------------------------------------------------------
+  # A gradient that appears ONLY while the heaters run is a mixing problem:
+  # heat is not leaving the end it is injected at. A gradient that persists
+  # while they are idle is an ambient problem: one end of the tank is losing
+  # heat to a cold wall, window or floor. Those have completely different
+  # fixes, and the raw gradient cannot tell them apart.
+  #
+  # With both elements on the same duty, the heating figure is also the
+  # heater-failure detector. If one element dies or its relay stops closing,
+  # its half stops receiving heat and this number walks away from zero and
+  # stays there while the idle figure does not.
+  - platform: template
+    name: "Gradient While Heating"
+    unit_of_measurement: "°F"
+    icon: "mdi:thermometer-lines"
+    entity_category: diagnostic
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      // Expire rather than publish stale. If the tank has not been in this
+      // regime recently the honest answer is "unavailable", not a figure
+      // from last week presented as current -- the same reasoning that
+      // keeps filter_out: nan off the probe in packages/sensors.yaml.
+      const uint32_t t = id(grad_heating_ms);
+      if (t == 0) return {};
+      if (millis() - t > 21600000UL) return {};
+      if (std::isnan(id(grad_ema_heating))) return {};
+      return id(grad_ema_heating);
+
+  - platform: template
+    name: "Gradient While Idle"
+    unit_of_measurement: "°F"
+    icon: "mdi:thermometer-lines"
+    entity_category: diagnostic
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: |-
+      const uint32_t t = id(grad_idle_ms);
+      if (t == 0) return {};
+      if (millis() - t > 21600000UL) return {};
+      if (std::isnan(id(grad_ema_idle))) return {};
+      return id(grad_ema_idle);
+
+  # Second light sensor. ADDR tied to 3V3 = 0x5C; floating/GND = 0x23, which
+  # packages/sensors.yaml already claims. Two is the hard ceiling for BH1750
+  # on one bus -- the part has exactly these two addresses.
+  #
+  # If the two sensors sit far apart, drop the bus to 50kHz and use shielded
+  # cable. I2C down a long run in a humid cabinet returns plausible numbers
+  # rather than failing.
+  - platform: bh1750
+    name: "Tank Light Level ${side_b_name}"
+    id: tank_lux_b
+    address: 0x5C
+    update_interval: 30s
+    accuracy_decimals: 0
+    filters:
+      - filter_out: nan
+
+binary_sensor:
+  # Per-element contact state. control.yaml's "Heater" is the pair; these
+  # are the individual relays, and seeing them out of lockstep means a relay
+  # is not following its drive.
+  - platform: template
+    id: heater_a_relay
+    name: "Heater ${side_a_name}"
+    device_class: running
+    icon: "mdi:radiator"
+
+  - platform: template
+    id: heater_b_relay
+    name: "Heater ${side_b_name}"
+    device_class: running
+    icon: "mdi:radiator"
+
+  # Fires when the probes disagree by more than the configured band. That is
+  # either a real gradient, a dead heater, or a probe drifting out of
+  # calibration -- all three are things you want to be told about rather
+  # than discover in the data months later.
+  - platform: template
+    name: "Probe Disagreement"
+    id: probe_disagreement
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      if (std::isnan(id(temp_gradient).state)) return {};
+      return fabsf(id(temp_gradient).state) > id(cal_gradient_alarm_f);
+
+# ---------------------------------------------------------------
+# Heaters: ONE loop, TWO relays, BOTH heating together
+# ---------------------------------------------------------------
+# Equal duty to both elements, simultaneously, always. NOT staged.
+#
+# Staging (A carries low demand alone, B joins above a threshold) delivers
+# heat more smoothly in TIME -- 150W pulsing instead of 300W. That is the
+# wrong trade for this tank, because it necessarily puts all the low-demand
+# heat into one half. The canister draws from a single side, so flow is
+# already directional; stacking a heat asymmetry on top of a flow asymmetry
+# manufactures exactly the gradient the second probe exists to detect.
+#
+# Even injection wins. The 300W-vs-150W pulse difference is invisible
+# against a thermal time constant measured in hours. The gradient it would
+# create is not.
+#
+# packages/control.yaml takes a single `heater:` FloatOutput and its RLS
+# model carries exactly one heater term (phi = [heater, fan, T-TREF, light,
+# 1]). heater_output satisfies that contract and the pair behaves as one
+# 300W actuator whose combined gain the model learns as a unit.
+#
+# The two relays stay separate rather than being ganged onto one GPIO: it
+# costs a pin this board has spare, and it keeps the ability to cut one
+# element independently if a relay welds or an element fails.
+output:
+  - platform: slow_pwm
+    id: heater_a_pwm
+    pin: GPIO7        # D8
+    period: 900s
+    # False is already the ESPHome default (verified in slow_pwm/output.py,
+    # 2026.8.2) -- stated explicitly because it matters more here than
+    # anywhere else in this repo: it keeps the two windows PHASE-LOCKED. They start together at boot and
+    # are always written in the same lambda below, so equal duty means both
+    # elements are energised over the same part of each window. Letting the
+    # cycles restart independently would drift them apart and, at partial
+    # duty, alternate the halves -- reintroducing precisely the side-to-side
+    # asymmetry this design exists to avoid.
+    restart_cycle_on_state_change: false
+    # packages/control.yaml defines heater_relay and fan_relay but does NOT
+    # publish them -- its comment says outright they are "published from
+    # slow_pwm's state_change_action in the board file". Without these the
+    # entities sit at the false seeded on_boot forever, and Home Assistant
+    # shows a heater that never runs while the tank regulates perfectly.
+    state_change_action:
+      - lambda: id(heater_a_closed) = state;
+      - binary_sensor.template.publish:
+          id: heater_relay
+          # OR, not AND: this entity answers "is heat being delivered". A
+          # failed element is not its job -- Gradient While Heating covers
+          # that, and the per-side sensors below show the pair in lockstep.
+          state: !lambda "return id(heater_a_closed) || id(heater_b_closed);"
+      - binary_sensor.template.publish:
+          id: heater_a_relay
+          state: !lambda "return state;"
+
+  - platform: slow_pwm
+    id: heater_b_pwm
+    pin: GPIO5        # D4
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - lambda: id(heater_b_closed) = state;
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return id(heater_a_closed) || id(heater_b_closed);"
+      - binary_sensor.template.publish:
+          id: heater_b_relay
+          state: !lambda "return state;"
+
+  # NOT inverted. The D-1585TL relay outlet module is active-high -- apply
+  # voltage to the control terminal and the relay closes. The cheap bare
+  # boards are active-low; this is not one of those, and `inverted: true`
+  # here would run every duty cycle exactly backwards.
+  - platform: slow_pwm
+    id: fan_output
+    pin: GPIO8        # D9
+    period: 900s
+    restart_cycle_on_state_change: false
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
+
+  - platform: template
+    id: heater_output
+    type: float
+    write_action:
+      - lambda: |-
+          const float d = clamp(state, 0.0f, 1.0f);
+          id(heater_demand) = d;
+          // Same duty, same instant, both halves of the tank. If these ever
+          // diverge in effect, the gradient sensors above are what tell you.
+          id(heater_a_pwm).set_level(d);
+          id(heater_b_pwm).set_level(d);
+
+interval:
+  # Gradient accumulation. 30s matches the probes' publish cadence; k=0.01
+  # is roughly a 50 minute time constant, which is short against the tank's
+  # thermal time constant of hours but long enough to reject probe noise.
+  - interval: 30s
+    then:
+      - lambda: |-
+          const float a = id(water_temp).state;
+          const float b = id(water_temp_b).state;
+          if (std::isnan(a) || std::isnan(b)) return;
+          const float g = (a - b) * 9.0f / 5.0f;
+          const float k = 0.01f;
+
+          // Three-way, not two. "demand > 0" would bin a 2% duty cycle --
+          // 18 seconds of contact per 15 minute window -- as heating, and
+          // dilute the heating average with what is effectively idle data.
+          // Samples in the ambiguous middle are DISCARDED rather than
+          // forced into a bin they would corrupt.
+          const float d = id(heater_demand);
+          if (d >= 0.05f) {
+            float &e = id(grad_ema_heating);
+            e = std::isnan(e) ? g : (k * g + (1.0f - k) * e);
+            id(grad_heating_ms) = millis();
+          } else if (d <= 0.0f) {
+            float &e = id(grad_ema_idle);
+            e = std::isnan(e) ? g : (k * g + (1.0f - k) * e);
+            id(grad_idle_ms) = millis();
+          }
+
+globals:
+  # Mirrors the demand handed to heater_output so the gradient metrics can
+  # tell heating from idle. Not restored: it is a live value, and a stale
+  # one after reboot would mis-bin the first sample.
+  - id: heater_demand
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+  # Gradient EMAs. Restored, because these are long-baseline averages and
+  # throwing them away on every OTA would restart the diagnosis from zero.
+  - id: grad_ema_heating
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: grad_ema_idle
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+
+  # Freshness stamps for the two EMAs. NOT restored: millis() restarts at
+  # zero on boot, so a restored timestamp would be meaningless. Zero means
+  # "no sample in this boot yet", which reads as unavailable -- honest,
+  # because a restored average has no provenance in the current session.
+  - id: grad_heating_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: grad_idle_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+  # Live contact state, so either relay's action can publish the pair's OR.
+  - id: heater_a_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: heater_b_closed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+  - id: cal_temp_offset_b_c
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: cal_gradient_alarm_f
+    type: float
+    restore_value: true
+    initial_value: '1.0'
+
+number:
+  - platform: template
+    name: "Cal Temp Offset ${side_b_name}"
+    id: cal_temp_offset_b_num
+    icon: "mdi:thermometer-plus"
+    entity_category: config
+    min_value: -5.0
+    max_value: 5.0
+    step: 0.1
+    unit_of_measurement: "°F"
+    update_interval: 60s
+    # Celsius on the inside like every other temperature in this project,
+    # Fahrenheit on the face because that is what a human reads.
+    lambda: "return id(cal_temp_offset_b_c) * 9.0f / 5.0f;"
+    set_action:
+      - lambda: id(cal_temp_offset_b_c) = x * 5.0f / 9.0f;
+
+  - platform: template
+    name: "Gradient Alarm Threshold"
+    id: cal_gradient_alarm_num
+    icon: "mdi:thermometer-alert"
+    entity_category: config
+    min_value: 0.1
+    max_value: 5.0
+    step: 0.1
+    unit_of_measurement: "°F"
+    update_interval: 60s
+    lambda: "return id(cal_gradient_alarm_f);"
+    set_action:
+      - lambda: id(cal_gradient_alarm_f) = x;
+
+text_sensor:
+  # BUILD GUARD -- see boards/xiao-esp32s3.yaml for the incident this exists
+  # because of. id(ble_tx) is defined ONLY in packages/ble_link.yaml, so
+  # building this board without that file fails at compile rather than
+  # producing a controller that runs the tank perfectly and advertises
+  # nothing for the panel to connect to.
+  - platform: template
+    name: "Link Payload"
+    icon: "mdi:code-string"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(ble_tx)};'
