@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tank Monitor — hardware placement (vertical heaters)</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#fff;--ink2:#b9c2cc;--muted:#6f7b88;--hair:rgba(255,255,255,.07);
+        --blue:#3987e5;--good:#0ca30c;--warn:#fab219;--bad:#d03b3b;--card:rgba(255,255,255,.04)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#05070a;color:var(--ink2);font-family:Inter,-apple-system,sans-serif;
+       padding:34px 34px 60px;-webkit-font-smoothing:antialiased}
+  h1{color:var(--ink);font-size:21px;font-weight:600;letter-spacing:-.02em}
+  .sub{font-size:13.5px;color:var(--muted);margin:7px 0 22px;max-width:920px;line-height:1.6}
+  .sub em{color:var(--ink2);font-style:normal}
+  .row{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:1260px}
+  .opt{background:var(--card);border:1px solid var(--hair);border-radius:14px;padding:16px;
+       display:flex;flex-direction:column}
+  .opt.rec{border-color:rgba(12,163,12,.45);box-shadow:0 0 0 1px rgba(12,163,12,.18),0 10px 30px rgba(0,0,0,.4)}
+  .tag{font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .tag.win{color:var(--good)}
+  h3{color:var(--ink);font-size:15px;font-weight:600;margin:5px 0 3px;letter-spacing:-.01em}
+  .desc{font-size:12px;color:var(--muted);line-height:1.55;margin-bottom:12px;min-height:48px}
+  .verdicts{margin-top:12px;display:flex;flex-direction:column;gap:7px}
+  .v{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;line-height:1.5}
+  .v b{flex:none;width:11px;height:11px;border-radius:50%;margin-top:2.5px}
+  .v.g b{background:var(--good)} .v.w b{background:var(--warn)} .v.r b{background:var(--bad)}
+  .v span{color:var(--ink2)} .v span i{color:var(--muted);font-style:normal}
+  svg{width:100%;display:block;border-radius:9px;background:#0a1016}
+  .key{display:flex;flex-wrap:wrap;gap:18px;margin:24px 0 0;font-size:11.5px;color:var(--muted);max-width:1260px}
+  .key div{display:flex;align-items:center;gap:7px}
+  .note{max-width:920px;margin-top:28px;padding:16px 18px;background:rgba(57,135,229,.07);
+        border:1px solid rgba(57,135,229,.24);border-radius:12px;font-size:13px;line-height:1.65;color:var(--ink2)}
+  .note h4{color:var(--ink);font-size:13px;font-weight:600;margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<h1>Placement — vertical Jager heaters</h1>
+<div class="sub">
+  Plan view, back wall at top. <em>A vertical heater reads as a circle here</em> — you're looking
+  down the cylinder. The spray bar discharges forward across the full width; water runs down the
+  front glass, along the bottom, and returns to the intake at back-right. All three options keep
+  every piece of hardware against the back wall. The difference is <em>lateral</em> position, and
+  it decides whether your two probes are measuring the tank or measuring your mounting choices.
+</div>
+
+<div class="row">
+
+  <!-- ============ A ============ -->
+  <div class="opt">
+    <span class="tag">Option A</span>
+    <h3>Back corners</h3>
+    <div class="desc">Your original plan — a heater in each back corner, probes on the front glass.</div>
+    <svg viewBox="0 0 340 250">
+      <defs><marker id="ar" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+        <path d="M0 0 L6 3 L0 6 z" fill="#4d8fae"/></marker></defs>
+      <rect x="20" y="22" width="300" height="198" rx="6" fill="#0e1a24" stroke="#39424a" stroke-width="2"/>
+      <text x="170" y="15" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">BACK</text>
+      <rect x="34" y="29" width="272" height="7" rx="3.5" fill="#173d51" stroke="#2d6c85"/>
+      <rect x="165" y="23" width="10" height="8" rx="2" fill="#173d51" stroke="#2d6c85"/>
+      <g stroke="#4d8fae" stroke-width="1.4" fill="none" opacity=".45" marker-end="url(#ar)">
+        <path d="M70 41 v38"/><path d="M120 41 v44"/><path d="M170 41 v50"/><path d="M220 41 v44"/><path d="M270 41 v38"/>
+      </g>
+      <path d="M298 62 q6 76 -84 100 q-92 20 -154 -22" stroke="#4d8fae" stroke-width="1.6"
+            fill="none" opacity=".4" stroke-dasharray="4 4"/>
+      <circle cx="298" cy="48" r="9" fill="#123243" stroke="#2d6c85" stroke-width="1.6"/>
+      <text x="298" y="70" fill="#6f7b88" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter">INTAKE</text>
+      <!-- vertical heaters, in the corners -->
+      <circle cx="36" cy="48" r="25" fill="#ff7a3c" opacity=".13"/>
+      <circle cx="36" cy="48" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <circle cx="276" cy="50" r="25" fill="#ff7a3c" opacity=".13"/>
+      <circle cx="276" cy="50" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <!-- probes at the front glass -->
+      <circle cx="90" cy="206" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <circle cx="250" cy="206" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <line x1="170" y1="22" x2="170" y2="220" stroke="#4b565f" stroke-width="2.5" opacity=".5"/>
+      <text x="170" y="238" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">FRONT</text>
+    </svg>
+    <div class="verdicts">
+      <div class="v r"><b></b><span>Heater R sits beside the intake. Its heat short-circuits into the canister and barely warms its own half.</span></div>
+      <div class="v w"><b></b><span>Both heaters in the dead corners, outside the spray bar's discharge.</span></div>
+      <div class="v r"><b></b><span>Halves aren't comparable — the gradient measures plumbing, not heating.</span></div>
+    </div>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="opt rec">
+    <span class="tag win">✓ Recommended</span>
+    <h3>Inboard mirrored, all back</h3>
+    <div class="desc">Heaters vertical on the back wall, inboard of the corners, mirrored about the centre feed. Probes also on the back wall, mirrored, offset laterally from each heater.</div>
+    <svg viewBox="0 0 340 250">
+      <rect x="20" y="22" width="300" height="198" rx="6" fill="#0e1a24" stroke="#39424a" stroke-width="2"/>
+      <text x="170" y="15" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">BACK</text>
+      <rect x="34" y="29" width="272" height="7" rx="3.5" fill="#173d51" stroke="#2d6c85"/>
+      <rect x="165" y="23" width="10" height="8" rx="2" fill="#173d51" stroke="#2d6c85"/>
+      <g stroke="#4d8fae" stroke-width="1.4" fill="none" opacity=".45" marker-end="url(#ar)">
+        <path d="M70 41 v38"/><path d="M120 41 v44"/><path d="M170 41 v50"/><path d="M220 41 v44"/><path d="M270 41 v38"/>
+      </g>
+      <path d="M298 62 q6 76 -84 100 q-92 20 -154 -22" stroke="#4d8fae" stroke-width="1.6"
+            fill="none" opacity=".4" stroke-dasharray="4 4"/>
+      <circle cx="298" cy="48" r="9" fill="#123243" stroke="#2d6c85" stroke-width="1.6"/>
+      <text x="298" y="70" fill="#6f7b88" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter">INTAKE</text>
+      <!-- mirror axis measure -->
+      <g stroke="#0ca30c" stroke-width="1" opacity=".5" stroke-dasharray="3 3">
+        <path d="M95 92 H170"/><path d="M170 92 H245"/></g>
+      <text x="132" y="88" fill="#0ca30c" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter" opacity=".85">mirrored</text>
+      <text x="208" y="88" fill="#0ca30c" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter" opacity=".85">mirrored</text>
+      <!-- heaters inboard, vertical -->
+      <circle cx="95" cy="52" r="27" fill="#ff7a3c" opacity=".14"/>
+      <circle cx="95" cy="52" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <circle cx="245" cy="52" r="27" fill="#ff7a3c" opacity=".14"/>
+      <circle cx="245" cy="52" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <text x="95" y="76" fill="#6f7b88" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter">HTR L</text>
+      <text x="245" y="76" fill="#6f7b88" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter">HTR R</text>
+      <!-- probes: back wall, inboard of each heater, mirrored -->
+      <circle cx="132" cy="56" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <circle cx="208" cy="56" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <line x1="170" y1="22" x2="170" y2="220" stroke="#4b565f" stroke-width="2.5" opacity=".5"/>
+      <text x="170" y="238" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">FRONT</text>
+    </svg>
+    <div class="verdicts">
+      <div class="v g"><b></b><span>Both heaters sit in the spray bar's discharge — heat leaves immediately instead of pooling.</span></div>
+      <div class="v g"><b></b><span>Mirrored about centre, so the halves are <i>genuinely comparable</i> and the gradient measures heating.</span></div>
+      <div class="v g"><b></b><span>Heater R is well clear of the intake, so it warms water instead of feeding the canister.</span></div>
+      <div class="v w"><b></b><span>Probes sit ~4″ below the bar and lateral to each heater — never directly above one, where the plume rises.</span></div>
+    </div>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="opt">
+    <span class="tag">Option C</span>
+    <h3>Inboard heaters, front probes</h3>
+    <div class="desc">Same heater placement as B, but probes on the front glass where you can see and service them without reaching behind hardscape.</div>
+    <svg viewBox="0 0 340 250">
+      <rect x="20" y="22" width="300" height="198" rx="6" fill="#0e1a24" stroke="#39424a" stroke-width="2"/>
+      <text x="170" y="15" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">BACK</text>
+      <rect x="34" y="29" width="272" height="7" rx="3.5" fill="#173d51" stroke="#2d6c85"/>
+      <rect x="165" y="23" width="10" height="8" rx="2" fill="#173d51" stroke="#2d6c85"/>
+      <g stroke="#4d8fae" stroke-width="1.4" fill="none" opacity=".45" marker-end="url(#ar)">
+        <path d="M70 41 v38"/><path d="M120 41 v44"/><path d="M170 41 v50"/><path d="M220 41 v44"/><path d="M270 41 v38"/>
+      </g>
+      <path d="M298 62 q6 76 -84 100 q-92 20 -154 -22" stroke="#4d8fae" stroke-width="1.6"
+            fill="none" opacity=".4" stroke-dasharray="4 4"/>
+      <circle cx="298" cy="48" r="9" fill="#123243" stroke="#2d6c85" stroke-width="1.6"/>
+      <text x="298" y="70" fill="#6f7b88" font-size="7.5" font-weight="600" text-anchor="middle" font-family="Inter">INTAKE</text>
+      <circle cx="95" cy="52" r="27" fill="#ff7a3c" opacity=".14"/>
+      <circle cx="95" cy="52" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <circle cx="245" cy="52" r="27" fill="#ff7a3c" opacity=".14"/>
+      <circle cx="245" cy="52" r="8" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/>
+      <circle cx="95" cy="204" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <circle cx="245" cy="204" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/>
+      <g stroke="#4aa3f0" stroke-width="1" opacity=".3" stroke-dasharray="3 3">
+        <path d="M95 62 V194"/><path d="M245 62 V194"/></g>
+      <line x1="170" y1="22" x2="170" y2="220" stroke="#4b565f" stroke-width="2.5" opacity=".5"/>
+      <text x="170" y="238" fill="#6f7b88" font-size="9" font-weight="600" letter-spacing="1.6" text-anchor="middle" font-family="Inter">FRONT</text>
+    </svg>
+    <div class="verdicts">
+      <div class="v g"><b></b><span>Heaters identical to B — same distribution, same symmetry.</span></div>
+      <div class="v g"><b></b><span>Probes readable and serviceable without disturbing the scape.</span></div>
+      <div class="v w"><b></b><span>Each probe is directly downstream of its heater. The bar pushes that warm lane forward onto it, so expect a slightly hotter reading than bulk.</span></div>
+      <div class="v w"><b></b><span>Visible from the front — the one thing you said you wanted to avoid.</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="key">
+  <div><svg width="16" height="16"><circle cx="8" cy="8" r="6" fill="#e07a3f" stroke="#7a3f1c" stroke-width="2"/></svg>Heater (vertical — seen end-on)</div>
+  <div><svg width="16" height="16"><circle cx="8" cy="8" r="5" fill="#4aa3f0" stroke="#0a1219" stroke-width="2"/></svg>Temp probe</div>
+  <div><svg width="18" height="10"><rect width="18" height="7" y="1" rx="3.5" fill="#173d51" stroke="#2d6c85"/></svg>Spray bar / intake</div>
+  <div><svg width="16" height="12"><line x1="8" y1="0" x2="8" y2="12" stroke="#4b565f" stroke-width="2.5"/></svg>Centre brace</div>
+  <div><svg width="20" height="12"><line x1="0" y1="6" x2="16" y2="6" stroke="#4d8fae" stroke-width="1.5" opacity=".6"/><path d="M16 3 L20 6 L16 9z" fill="#4d8fae" opacity=".6"/></svg>Flow</div>
+</div>
+
+<div class="note">
+  <h4>Why the probes move inboard rather than outboard</h4>
+  The obvious alternative — push each probe out toward its side wall — fails on the right,
+  because that corner <em>is</em> the intake. A probe there reads water on its way out of the
+  tank, which is the least representative sample available. Inboard keeps both probes in
+  equivalent flow and preserves the mirror.<br><br>
+  <strong>Vertical costs you almost nothing.</strong> Horizontal-and-low would have added
+  convection assist through the water column, but a 528 gph canister through a full-width spray
+  bar is doing far more mixing than natural convection ever would. What actually mattered —
+  inboard of the dead corners, mirrored about centre, clear of the intake — all survives.<br><br>
+  <strong>Two Jager limits to check against your tank:</strong> water must never drop below the
+  minimum mark on the housing, and maximum immersion depth is <em>0.5 m / 19.7″</em>. On a tank
+  taller than about 20″ that means the heater body hangs in the upper water column rather than
+  reaching the substrate — which suits this layout fine, since it puts the elements right in
+  the spray bar's discharge.
+</div>
+
+</body>
+</html>

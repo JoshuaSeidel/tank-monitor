@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tank Monitor — 4.3" panel, three pages</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#fff;--ink2:#b9c2cc;--muted:#6f7b88;--hair:rgba(255,255,255,.055);
+        --blue:#3987e5;--orange:#d95926;--aqua:#199e70;--good:#0ca30c;--warn:#fab219;
+        --card:rgba(255,255,255,.045)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#05070a;color:var(--ink2);font-family:Inter,-apple-system,sans-serif;
+       padding:34px 34px 60px;-webkit-font-smoothing:antialiased}
+  h1{color:var(--ink);font-size:21px;font-weight:600;letter-spacing:-.02em}
+  h2{color:var(--ink);font-size:15px;font-weight:600;margin:36px 0 5px;letter-spacing:-.01em}
+  .sub{font-size:13px;color:var(--muted);margin-bottom:15px;max-width:880px;line-height:1.55}
+  .sub em{color:var(--ink2);font-style:normal}
+  .panel{width:800px;height:480px;border-radius:14px;overflow:hidden;position:relative;
+         display:flex;flex-direction:column;
+         background:radial-gradient(125% 100% at 16% 0%,#141c25 0%,#0a0f15 55%,#070b0f 100%);
+         box-shadow:0 18px 50px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.06)}
+  .lbl{font-size:9.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .bar{height:40px;display:flex;align-items:center;gap:11px;padding:0 20px;flex:none}
+  .bar .name{font-size:12.5px;font-weight:600;color:var(--ink2)}
+  .chip{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--muted)}
+  .chip i{width:5px;height:5px;border-radius:50%;background:var(--good);box-shadow:0 0 6px rgba(12,163,12,.9)}
+  .clock{font-size:12.5px;font-weight:600;color:var(--ink2);font-variant-numeric:tabular-nums}
+  .sp{flex:1}
+  .foot{height:46px;display:flex;align-items:center;gap:8px;padding:0 20px;flex:none;border-top:1px solid var(--hair)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;letter-spacing:.05em;
+        padding:5px 11px;border-radius:999px;color:var(--muted);background:rgba(255,255,255,.045);border:1px solid var(--hair)}
+  .pill i{width:5px;height:5px;border-radius:50%;background:currentColor}
+  .pill.heat{color:#ff8a5c;background:rgba(217,89,38,.16);border-color:rgba(217,89,38,.42);box-shadow:0 0 14px rgba(217,89,38,.22)}
+  .dots{display:flex;gap:6px;margin-left:auto;align-items:center}
+  .dots b{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.18)}
+  .dots b.on{background:var(--blue);width:18px;border-radius:3px;box-shadow:0 0 8px rgba(57,135,229,.9)}
+  .card{background:var(--card);border-radius:15px;position:relative;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.10),0 6px 18px rgba(0,0,0,.3)}
+  .card::after{content:"";position:absolute;inset:0;border-radius:15px;border:1px solid rgba(255,255,255,.05);pointer-events:none}
+  .kv{padding:12px 16px;display:flex;flex-direction:column;justify-content:center;gap:5px}
+  .kv .n{font-size:30px;font-weight:600;color:var(--ink);letter-spacing:-.03em;line-height:1}
+  .kv .n span{font-size:13px;font-weight:400;color:var(--muted)}
+
+  /* page 1 */
+  .o-body{flex:1;display:grid;grid-template-columns:296px 1fr;gap:14px;padding:4px 18px 10px}
+  .o-gauge{display:flex;align-items:center;justify-content:center;position:relative}
+  .o-val{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+  .o-val .n{font-size:62px;font-weight:600;color:var(--ink);letter-spacing:-.035em;line-height:1}
+  .o-val .n span{font-size:20px;font-weight:400;color:var(--muted)}
+  .o-val .st{margin-top:7px;font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ff8a5c}
+  .o-val .sp2{font-size:10.5px;color:var(--muted);margin-top:3px}
+  .o-right{display:grid;grid-template-rows:1fr 1fr 1fr;gap:12px}
+  .o-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .gtrack{height:5px;border-radius:3px;background:rgba(255,255,255,.09);position:relative;margin-top:8px}
+  .gtrack .c{position:absolute;left:50%;top:-4px;width:1.5px;height:13px;background:rgba(255,255,255,.35)}
+  .gtrack .f{position:absolute;top:0;height:5px;border-radius:3px}
+
+  /* page 2 */
+  .v-body{flex:1;display:grid;grid-template-columns:1fr 216px;gap:12px;padding:0 16px 8px}
+  .v-rail{display:grid;grid-template-rows:auto 1fr 1fr;gap:9px}
+  .hero .n{font-size:44px;font-weight:600;color:var(--ink);letter-spacing:-.035em;line-height:1.05}
+  .hero .n span{font-size:16px;font-weight:400;color:var(--muted)}
+
+  /* page 3 */
+  .c-body{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr auto;gap:11px;padding:2px 18px 10px}
+  .chart{padding:13px 15px;display:flex;flex-direction:column}
+  .chart .top{display:flex;align-items:baseline;gap:9px}
+  .chart .top .n{font-size:38px;font-weight:600;color:var(--ink);letter-spacing:-.035em;line-height:1}
+  .chart .top .n span{font-size:14px;font-weight:400;color:var(--muted)}
+  .chart .top .d{font-size:11px;font-weight:600;margin-left:auto;color:var(--muted)}
+  .leg{display:flex;gap:13px;margin-top:2px}
+  .leg div{display:flex;align-items:center;gap:5px;font-size:9.5px;font-weight:600;letter-spacing:.06em;
+           text-transform:uppercase;color:var(--muted)}
+  .leg i{width:12px;height:2.5px;border-radius:2px;display:block}
+  .strip4{grid-column:span 2;display:grid;grid-template-columns:repeat(4,1fr);gap:11px}
+  .kv.sm .n{font-size:24px}
+</style>
+</head>
+<body>
+
+<h1>4.3″ panel — three pages, swipe between</h1>
+<div class="sub">
+  All rendered 1:1 at 800×480. Page dots bottom-right track position. Everything here maps to an
+  ESPHome <em>display:</em> lambda primitive — the gauge ring is native <em>filled_ring</em>,
+  the charts are native <em>graph</em> + <em>legend</em>, the tank is
+  <em>filled_triangle</em> / <em>horizontal_line</em> with precomputed depth blends.
+</div>
+
+<!-- ================= PAGE 1 ================= -->
+<h2>Page 1 · Main</h2>
+<div class="sub">Radial band gauge as the anchor — position within the safe band, setpoint as a tick. Diverging blue→neutral→orange so drift reads as direction before you parse digits.</div>
+<div class="panel">
+  <div class="bar"><span class="name">Display Tank</span><span class="sp"></span>
+    <span class="chip"><i></i>WI-FI</span><span class="chip"><i></i>BLE</span><span class="chip"><i></i>MQTT</span>
+    <span class="clock">06:42</span></div>
+  <div class="o-body">
+    <div class="card o-gauge">
+      <svg width="240" height="240" viewBox="0 0 242 242">
+        <defs><linearGradient id="arcg" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stop-color="#3987e5"/><stop offset="52%" stop-color="#7f8b96"/>
+          <stop offset="100%" stop-color="#d95926"/></linearGradient></defs>
+        <path d="M 52.1 188.9 A 96 96 0 1 1 189.9 188.9" fill="none" stroke="rgba(255,255,255,.075)"
+              stroke-width="13" stroke-linecap="round"/>
+        <path d="M 52.1 188.9 A 96 96 0 1 1 189.9 188.9" fill="none" stroke="url(#arcg)"
+              stroke-width="13" stroke-linecap="round" stroke-dasharray="237 460"/>
+        <line x1="121" y1="16" x2="121" y2="31" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity=".75"/>
+      </svg>
+      <div class="o-val">
+        <div class="n">74.1<span>°F</span></div>
+        <div class="st">▲ Heating</div>
+        <div class="sp2">Setpoint 74.0</div>
+      </div>
+    </div>
+    <div class="o-right">
+      <div class="o-row">
+        <div class="card kv"><span class="lbl">Left half</span><span class="n">74.2<span> °F</span></span></div>
+        <div class="card kv"><span class="lbl">Right half</span><span class="n">74.0<span> °F</span></span></div>
+      </div>
+      <div class="card kv">
+        <span class="lbl">Gradient</span><span class="n">+0.18<span> °F</span></span>
+        <div class="gtrack"><div class="c"></div><div class="f" style="left:50%;width:9%;background:var(--orange)"></div></div>
+      </div>
+      <div class="o-row">
+        <div class="card kv"><span class="lbl">pH</span><span class="n">7.18</span></div>
+        <div class="card kv"><span class="lbl">TDS</span><span class="n">342<span> ppm</span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="pill heat"><i></i>HEATER L</span><span class="pill heat"><i></i>HEATER R</span>
+    <span class="pill"><i></i>FANS OFF</span>
+    <span class="dots"><b class="on"></b><b></b><b></b></span>
+  </div>
+</div>
+
+<!-- ================= PAGE 2 ================= -->
+<h2>Page 2 · Vessel</h2>
+<div class="sub">Rimless glass, no plastic chrome. You look <em>into</em> the tank: back wall, floor with real area, hardware at true depth hazed toward the water colour. Heaters vertical and mirrored, probes mirrored inboard, intake back-right, spray bar just under the surface. Substrate is 2″ Stratum under a 1.5″ black sand cap, banked up at the back — the layers show in cross-section through the front glass.</div>
+<div class="panel">
+  <div class="bar"><span class="name">Display Tank</span><span class="sp"></span>
+    <span class="chip"><i></i>WI-FI</span><span class="chip"><i></i>BLE</span><span class="chip"><i></i>MQTT</span>
+    <span class="clock">06:42</span></div>
+  <div class="v-body">
+    <svg viewBox="0 0 548 392" style="width:100%;height:100%">
+      <defs>
+        <linearGradient id="bw" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3a90b8"/><stop offset="38%" stop-color="#1d5a7e"/>
+          <stop offset="100%" stop-color="#0c2f47"/></linearGradient>
+        <linearGradient id="sf" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#a8e0f2"/><stop offset="100%" stop-color="#4697bb"/></linearGradient>
+        <linearGradient id="pl" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#0a2334"/><stop offset="100%" stop-color="#184e6c"/></linearGradient>
+        <linearGradient id="pr" x1="1" y1="0" x2="0" y2="0">
+          <stop offset="0%" stop-color="#0a2334"/><stop offset="100%" stop-color="#184e6c"/></linearGradient>
+        <linearGradient id="sd" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#24242a"/><stop offset="55%" stop-color="#2b3138"/>
+          <stop offset="100%" stop-color="#35434e"/></linearGradient>
+        <linearGradient id="strat" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#3a2c20"/><stop offset="100%" stop-color="#241a12"/></linearGradient>
+        <linearGradient id="capface" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2a2a30"/><stop offset="100%" stop-color="#1b1b1f"/></linearGradient>
+        <radialGradient id="hg"><stop offset="0%" stop-color="#ff8f42" stop-opacity=".72"/>
+          <stop offset="52%" stop-color="#ff7030" stop-opacity=".20"/>
+          <stop offset="100%" stop-color="#ff7030" stop-opacity="0"/></radialGradient>
+        <radialGradient id="fg"><stop offset="0%" stop-color="#3987e5" stop-opacity=".34"/>
+          <stop offset="100%" stop-color="#3987e5" stop-opacity="0"/></radialGradient>
+        <linearGradient id="sh" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#cfeefc" stop-opacity=".26"/>
+          <stop offset="100%" stop-color="#cfeefc" stop-opacity="0"/></linearGradient>
+        <linearGradient id="gl" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#fff" stop-opacity=".11"/><stop offset="42%" stop-color="#fff" stop-opacity="0"/></linearGradient>
+        <clipPath id="in2"><polygon points="30,44 508,44 508,322 30,322"/></clipPath>
+      </defs>
+
+      <!-- fans, one per half -->
+      <g><circle cx="160" cy="20" r="26" fill="url(#fg)"/>
+        <g stroke="#6fb0ff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".8">
+          <circle cx="160" cy="20" r="11"/><path d="M160 9 A11 11 0 0 1 168 16"/>
+          <path d="M170 24 A11 11 0 0 1 158 32"/><path d="M150 30 A11 11 0 0 1 150 15"/></g></g>
+      <g><circle cx="378" cy="20" r="26" fill="url(#fg)"/>
+        <g stroke="#6fb0ff" stroke-width="2" fill="none" stroke-linecap="round" opacity=".8">
+          <circle cx="378" cy="20" r="11"/><path d="M378 9 A11 11 0 0 1 386 16"/>
+          <path d="M388 24 A11 11 0 0 1 376 32"/><path d="M368 30 A11 11 0 0 1 368 15"/></g></g>
+
+      <g clip-path="url(#in2)">
+        <polygon points="30,44 508,44 412,88 126,88" fill="url(#sf)"/>
+        <g stroke="#e6f8ff" stroke-width="1.2" opacity=".38" fill="none">
+          <path d="M64 66 q34 -7 68 0 t68 0 t68 0 t68 0 t68 0"/>
+          <path d="M90 78 q30 -6 60 0 t60 0 t60 0 t60 0"/></g>
+        <polygon points="30,44 126,88 126,256 30,322" fill="url(#pl)"/>
+        <polygon points="508,44 412,88 412,256 508,322" fill="url(#pr)"/>
+        <rect x="126" y="88" width="286" height="168" fill="url(#bw)"/>
+        <polygon points="174,88 202,88 246,256 202,256" fill="url(#sh)"/>
+        <polygon points="292,88 314,88 342,256 306,256" fill="url(#sh)"/>
+        <!-- substrate top surface: black sand, banked up toward the back -->
+        <polygon points="30,298 508,298 412,232 126,232" fill="url(#sd)"/>
+        <!-- cross-section through the front glass: 1.5" black sand over 2" Stratum -->
+        <rect x="30" y="298" width="478" height="11" fill="url(#capface)"/>
+        <rect x="30" y="309" width="478" height="13" fill="url(#strat)"/>
+        <line x1="30" y1="309" x2="508" y2="309" stroke="#4a3a2a" stroke-width="1" opacity=".8"/>
+        <line x1="30" y1="298" x2="508" y2="298" stroke="#454f59" stroke-width="1" opacity=".7"/>
+        <!-- black sand sparkle + faint caustics; subtle, it is a dark floor now -->
+        <g fill="#7d8b97" opacity=".16">
+          <ellipse cx="168" cy="282" rx="32" ry="7"/><ellipse cx="272" cy="268" rx="28" ry="6"/>
+          <ellipse cx="372" cy="284" rx="34" ry="7"/></g>
+        <g fill="#aab6c0" opacity=".28">
+          <circle cx="112" cy="290" r="1"/><circle cx="196" cy="278" r="1"/><circle cx="244" cy="288" r="1"/>
+          <circle cx="318" cy="272" r="1"/><circle cx="398" cy="286" r="1"/><circle cx="446" cy="292" r="1"/>
+          <circle cx="150" cy="262" r="1"/><circle cx="356" cy="258" r="1"/></g>
+
+        <!-- spray bar, just under the surface -->
+        <rect x="133" y="98" width="272" height="8" rx="4" fill="#17435a" stroke="#3a7d99" stroke-width="1"/>
+        <rect x="264" y="88" width="9" height="12" rx="3" fill="#17435a" stroke="#3a7d99" stroke-width="1"/>
+        <g fill="#3a7d99"><circle cx="158" cy="106" r="1.7"/><circle cx="194" cy="106" r="1.7"/>
+          <circle cx="230" cy="106" r="1.7"/><circle cx="266" cy="106" r="1.7"/>
+          <circle cx="302" cy="106" r="1.7"/><circle cx="338" cy="106" r="1.7"/><circle cx="378" cy="106" r="1.7"/></g>
+        <g stroke="#7fd0e8" stroke-width="1.5" fill="none" opacity=".36" stroke-linecap="round">
+          <path d="M158 110 q-5 15 -14 25"/><path d="M194 110 q-5 15 -14 25"/><path d="M230 110 q-5 15 -14 25"/>
+          <path d="M266 110 q-5 15 -14 25"/><path d="M302 110 q-5 15 -14 25"/><path d="M338 110 q-5 15 -14 25"/></g>
+
+        <!-- corner planting -->
+        <g fill="#2d7372" opacity=".68">
+          <polygon points="144,242 150,180 157,242"/><polygon points="156,242 165,198 172,242"/>
+          <polygon points="378,242 385,184 393,242"/><polygon points="390,242 398,204 405,242"/></g>
+
+        <!-- intake, back-right corner -->
+        <rect x="395" y="112" width="10" height="126" rx="5" fill="#12303f" stroke="#3a7d99" stroke-width="1"/>
+        <path d="M400 114 v-16 h-13" stroke="#3a7d99" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+        <!-- heaters: vertical, inboard, mirrored about centre (269) -->
+        <ellipse cx="196" cy="188" rx="48" ry="58" fill="url(#hg)"/>
+        <rect x="190" y="126" width="12" height="104" rx="6" fill="#2d4d5f" stroke="#5a8ba1" stroke-width="1"/>
+        <rect x="192.2" y="143" width="7.6" height="80" rx="3.8" fill="#e8823f"/>
+        <rect x="190" y="126" width="12" height="13" rx="5" fill="#1c3a4a"/>
+        <ellipse cx="342" cy="188" rx="48" ry="58" fill="url(#hg)"/>
+        <rect x="336" y="126" width="12" height="104" rx="6" fill="#2d4d5f" stroke="#5a8ba1" stroke-width="1"/>
+        <rect x="338.2" y="143" width="7.6" height="80" rx="3.8" fill="#e8823f"/>
+        <rect x="336" y="126" width="12" height="13" rx="5" fill="#1c3a4a"/>
+
+        <!-- probes: mirrored inboard, lateral to each heater -->
+        <g><rect x="227" y="148" width="8" height="64" rx="4" fill="#26363f" stroke="#5a8ba1" stroke-width="1"/>
+          <circle cx="231" cy="216" r="6" fill="#4aa3f0" stroke="#081018" stroke-width="1.8"/></g>
+        <g><rect x="303" y="148" width="8" height="64" rx="4" fill="#26363f" stroke="#5a8ba1" stroke-width="1"/>
+          <circle cx="307" cy="216" r="6" fill="#4aa3f0" stroke="#081018" stroke-width="1.8"/></g>
+
+        <polygon points="30,44 508,44 508,322 30,322" fill="url(#gl)"/>
+        <path d="M66 322 L306 44" stroke="#fff" stroke-width="20" opacity=".04"/>
+      </g>
+
+      <!-- RIMLESS glass: thin bright edges only, no plastic frame -->
+      <g fill="none" stroke="#8fc4dc" stroke-width="2" opacity=".55">
+        <rect x="30" y="44" width="478" height="278"/>
+        <path d="M508 44 L412 88 L412 256 L508 322"/><path d="M30 44 L126 88 L126 256 L30 322"/>
+        <path d="M126 88 H412"/></g>
+      <g fill="none" stroke="#dff2fb" stroke-width="1" opacity=".5">
+        <path d="M30 44 H508"/><path d="M30 322 H508"/></g>
+      <!-- glass centre brace -->
+      <polygon points="262,44 276,44 272,88 266,88" fill="#a8d8ec" opacity=".3"/>
+      <polygon points="262,44 276,44 276,48 262,48" fill="#dff2fb" opacity=".65"/>
+      <!-- thin shadow under the tank -->
+      <ellipse cx="269" cy="330" rx="230" ry="8" fill="#000" opacity=".45"/>
+
+      <!-- callouts -->
+      <g><rect x="156" y="60" width="72" height="29" rx="8" fill="rgba(6,10,14,.9)" stroke="rgba(255,255,255,.18)"/>
+        <text x="192" y="80" fill="#fff" font-size="17" font-weight="600" text-anchor="middle" font-family="Inter" letter-spacing="-.5">74.2°</text>
+        <line x1="206" y1="89" x2="229" y2="154" stroke="rgba(255,255,255,.24)" stroke-width="1.2"/></g>
+      <g><rect x="310" y="60" width="72" height="29" rx="8" fill="rgba(6,10,14,.9)" stroke="rgba(255,255,255,.18)"/>
+        <text x="346" y="80" fill="#fff" font-size="17" font-weight="600" text-anchor="middle" font-family="Inter" letter-spacing="-.5">74.0°</text>
+        <line x1="332" y1="89" x2="309" y2="154" stroke="rgba(255,255,255,.24)" stroke-width="1.2"/></g>
+      <g font-family="Inter" font-size="8.5" font-weight="600" letter-spacing="1.3" fill="#6f7b88">
+        <text x="196" y="360" text-anchor="middle">HTR L</text>
+        <text x="269" y="360" text-anchor="middle">PROBES · MIRRORED</text>
+        <text x="342" y="360" text-anchor="middle">HTR R</text>
+        <text x="400" y="374" text-anchor="middle">INTAKE</text>
+        <text x="269" y="374" text-anchor="middle">SPRAY BAR</text>
+      </g>
+    </svg>
+
+    <div class="v-rail">
+      <div class="card kv hero">
+        <span class="lbl">Water temperature</span><span class="n">74.1<span> °F</span></span>
+        <span class="lbl" style="margin-top:3px">Setpoint 74.0 · heating</span>
+      </div>
+      <div class="card kv"><span class="lbl">Gradient · L−R</span>
+        <span class="n" style="color:#ff8a5c">+0.18<span> °F</span></span>
+        <div class="gtrack"><div class="c"></div><div class="f" style="left:50%;width:9%;background:var(--orange)"></div></div></div>
+      <div class="card kv"><span class="lbl">Heating vs idle</span>
+        <span class="n" style="font-size:21px">+0.21 <span style="opacity:.4">/</span> +0.04<span> °F</span></span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="pill heat"><i></i>HEATER L</span><span class="pill heat"><i></i>HEATER R</span>
+    <span class="pill"><i></i>FANS OFF</span>
+    <span class="dots"><b></b><b class="on"></b><b></b></span>
+  </div>
+</div>
+
+<!-- ================= PAGE 3 ================= -->
+<h2>Page 3 · Chemistry &amp; trends</h2>
+<div class="sub">Native <em>graph</em> component. pH carries its safe band as a shaded reference — the 7.0 floor your danios and shrimp set. TDS shows raw against the hourly mean on one axis, never two, so the smoothing is visible rather than implied.</div>
+<div class="panel">
+  <div class="bar"><span class="name">Display Tank</span><span class="sp"></span>
+    <span class="chip"><i></i>WI-FI</span><span class="chip"><i></i>BLE</span><span class="chip"><i></i>MQTT</span>
+    <span class="clock">06:42</span></div>
+  <div class="c-body">
+    <div class="card chart">
+      <span class="lbl">pH · 24 hours</span>
+      <div class="top"><span class="n">7.18</span><span class="d" style="color:var(--good)">▲ 0.06 vs 24 h ago</span></div>
+      <svg viewBox="0 0 340 120" style="width:100%;flex:1;margin-top:8px">
+        <rect x="0" y="30" width="340" height="46" fill="#199e70" opacity=".09"/>
+        <line x1="0" y1="76" x2="340" y2="76" stroke="#d03b3b" stroke-width="1" stroke-dasharray="4 4" opacity=".65"/>
+        <text x="336" y="88" fill="#d03b3b" font-size="8.5" font-weight="600" text-anchor="end" font-family="Inter" opacity=".9">7.00 floor</text>
+        <g stroke="#2c2c2a" stroke-width="1"><line x1="0" y1="30" x2="340" y2="30"/><line x1="0" y1="53" x2="340" y2="53"/></g>
+        <polyline points="0,70 24,66 48,72 72,60 96,54 120,58 144,46 168,40 192,44 216,36 240,42 264,32 288,38 312,28 340,34"
+                  fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="340" cy="34" r="3.5" fill="#3987e5"/>
+      </svg>
+      <div class="leg"><div><i style="background:#3987e5"></i>pH</div>
+        <div><i style="background:#199e70;opacity:.5"></i>Target band</div></div>
+    </div>
+
+    <div class="card chart">
+      <span class="lbl">TDS · 24 hours</span>
+      <div class="top"><span class="n">342<span> ppm</span></span><span class="d">hourly mean</span></div>
+      <svg viewBox="0 0 340 120" style="width:100%;flex:1;margin-top:8px">
+        <g stroke="#2c2c2a" stroke-width="1"><line x1="0" y1="32" x2="340" y2="32"/><line x1="0" y1="60" x2="340" y2="60"/><line x1="0" y1="88" x2="340" y2="88"/></g>
+        <polyline points="0,74 20,52 40,86 60,60 80,92 100,58 120,80 140,50 160,88 180,62 200,78 220,54 240,84 260,60 280,76 300,52 320,82 340,64"
+                  fill="none" stroke="#6f7b88" stroke-width="1.4" opacity=".55" stroke-linejoin="round"/>
+        <polyline points="0,70 24,68 48,70 72,66 96,68 120,64 144,66 168,62 192,64 216,62 240,62 264,60 288,60 312,58 340,58"
+                  fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="340" cy="58" r="3.5" fill="#3987e5"/>
+      </svg>
+      <div class="leg"><div><i style="background:#3987e5"></i>Hourly mean</div>
+        <div><i style="background:#6f7b88;opacity:.6"></i>Raw</div></div>
+    </div>
+
+    <div class="strip4">
+      <div class="card kv sm"><span class="lbl">GH</span><span class="n">124<span> ppm</span></span></div>
+      <div class="card kv sm"><span class="lbl">KH</span><span class="n">71<span> ppm</span></span></div>
+      <div class="card kv sm"><span class="lbl">pH cal age</span><span class="n">18<span> days</span></span></div>
+      <div class="card kv sm"><span class="lbl">Next test due</span><span class="n" style="color:var(--warn)">Today</span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="pill heat"><i></i>HEATER L</span><span class="pill heat"><i></i>HEATER R</span>
+    <span class="pill"><i></i>FANS OFF</span>
+    <span class="dots"><b></b><b></b><b class="on"></b></span>
+  </div>
+</div>
+
+</body>
+</html>

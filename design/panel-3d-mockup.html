@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tank Monitor — interior-perspective tank, lambda-drawn</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--ink:#fff;--ink2:#b9c2cc;--muted:#6f7b88;--hair:rgba(255,255,255,.055);
+        --blue:#3987e5;--good:#0ca30c;--card:rgba(255,255,255,.045)}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#05070a;color:var(--ink2);font-family:Inter,-apple-system,sans-serif;
+       padding:34px;-webkit-font-smoothing:antialiased}
+  h1{color:var(--ink);font-size:20px;font-weight:600;letter-spacing:-.02em}
+  .sub{font-size:13px;color:var(--muted);margin:6px 0 16px;max-width:870px;line-height:1.55}
+  .sub em{color:var(--ink2);font-style:normal}
+  .panel{width:800px;height:480px;border-radius:14px;overflow:hidden;position:relative;
+         display:flex;flex-direction:column;background:#070b0f;
+         box-shadow:0 18px 50px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.06)}
+  .lbl{font-size:9.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+  .bar{height:40px;display:flex;align-items:center;gap:11px;padding:0 18px;flex:none}
+  .bar .name{font-size:12.5px;font-weight:600;color:var(--ink2)}
+  .chip{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--muted)}
+  .chip i{width:5px;height:5px;border-radius:50%;background:var(--good);box-shadow:0 0 6px rgba(12,163,12,.9)}
+  .clock{font-size:12.5px;font-weight:600;color:var(--ink2);font-variant-numeric:tabular-nums}
+  .sp{flex:1}
+  .foot{height:44px;display:flex;align-items:center;gap:8px;padding:0 18px;flex:none;border-top:1px solid var(--hair)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;letter-spacing:.05em;
+        padding:5px 11px;border-radius:999px;color:var(--muted);background:rgba(255,255,255,.045);border:1px solid var(--hair)}
+  .pill i{width:5px;height:5px;border-radius:50%;background:currentColor}
+  .pill.heat{color:#ff8a5c;background:rgba(217,89,38,.16);border-color:rgba(217,89,38,.42);box-shadow:0 0 14px rgba(217,89,38,.22)}
+  .dots{display:flex;gap:6px;margin-left:auto;align-items:center}
+  .dots b{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.18)}
+  .dots b.on{background:var(--blue);width:18px;border-radius:3px;box-shadow:0 0 8px rgba(57,135,229,.9)}
+  .body{flex:1;display:grid;grid-template-columns:1fr 228px;gap:10px;padding:0 14px 6px}
+  .rail{display:grid;grid-template-rows:auto 1fr 1fr 1fr;gap:8px}
+  .card{background:var(--card);border-radius:13px;padding:10px 14px;display:flex;flex-direction:column;
+        justify-content:center;gap:3px;box-shadow:inset 0 1px 0 rgba(255,255,255,.09)}
+  .card .n{font-size:26px;font-weight:600;color:var(--ink);letter-spacing:-.03em;line-height:1}
+  .card .n span{font-size:12px;font-weight:400;color:var(--muted)}
+  .hero .n{font-size:45px}.hero .n span{font-size:16px}
+</style>
+</head>
+<body>
+
+<h1>Interior perspective — Option B, vertical heaters</h1>
+<div class="sub">
+  Built to the actual arrangement: <em>intake back-right</em>, <em>spray bar across the back</em>
+  fed from centre, <em>vertical heaters inboard on the back wall, mirrored about the centre feed</em>, probes mirrored inboard of each heater, top split by a centre brace with <em>a fan over each half</em>. One-point perspective interior; hardware hazed toward the water
+  colour in proportion to depth, which is what sells the third dimension and costs nothing
+  because every blend is precomputed against a known background.
+</div>
+
+<div class="panel">
+  <div class="bar">
+    <span class="name">Display Tank</span><span class="sp"></span>
+    <span class="chip"><i></i>WI-FI</span><span class="chip"><i></i>BLE</span><span class="chip"><i></i>MQTT</span>
+    <span class="clock">06:42</span>
+  </div>
+  <div class="body">
+    <svg viewBox="0 0 540 396" style="width:100%;height:100%">
+      <defs>
+        <linearGradient id="back" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2f7ea6"/><stop offset="42%" stop-color="#1a5375"/>
+          <stop offset="100%" stop-color="#0d3049"/></linearGradient>
+        <linearGradient id="ceil" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#8fcfe6"/><stop offset="100%" stop-color="#3f90b4"/></linearGradient>
+        <linearGradient id="wallL" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#0a2438"/><stop offset="100%" stop-color="#164863"/></linearGradient>
+        <linearGradient id="wallR" x1="1" y1="0" x2="0" y2="0">
+          <stop offset="0%" stop-color="#0a2438"/><stop offset="100%" stop-color="#164863"/></linearGradient>
+        <linearGradient id="sand" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stop-color="#c3b596"/><stop offset="55%" stop-color="#8d9a94"/>
+          <stop offset="100%" stop-color="#5c7e8d"/></linearGradient>
+        <radialGradient id="hglow"><stop offset="0%" stop-color="#ff8a3c" stop-opacity=".70"/>
+          <stop offset="55%" stop-color="#ff7030" stop-opacity=".20"/>
+          <stop offset="100%" stop-color="#ff7030" stop-opacity="0"/></radialGradient>
+        <radialGradient id="fanglow"><stop offset="0%" stop-color="#3987e5" stop-opacity=".40"/>
+          <stop offset="100%" stop-color="#3987e5" stop-opacity="0"/></radialGradient>
+        <linearGradient id="shaft" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#bfe6f5" stop-opacity=".30"/>
+          <stop offset="100%" stop-color="#bfe6f5" stop-opacity="0"/></linearGradient>
+        <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity=".13"/>
+          <stop offset="38%" stop-color="#ffffff" stop-opacity="0"/></linearGradient>
+        <clipPath id="inside"><polygon points="26,40 500,40 500,320 26,320"/></clipPath>
+      </defs>
+
+      <g clip-path="url(#inside)">
+        <!-- ceiling = underside of the water surface -->
+        <polygon points="26,40 500,40 405,84 121,84" fill="url(#ceil)"/>
+        <g stroke="#d8f2fb" stroke-width="1.3" opacity=".45" fill="none">
+          <path d="M60 62 q34 -7 68 0 t68 0 t68 0 t68 0 t68 0"/>
+          <path d="M84 74 q30 -6 60 0 t60 0 t60 0 t60 0"/>
+        </g>
+        <!-- side panes -->
+        <polygon points="26,40 121,84 121,252 26,320" fill="url(#wallL)"/>
+        <polygon points="500,40 405,84 405,252 500,320" fill="url(#wallR)"/>
+        <!-- back wall -->
+        <rect x="121" y="84" width="284" height="168" fill="url(#back)"/>
+        <!-- light shafts -->
+        <polygon points="168,84 196,84 240,252 196,252" fill="url(#shaft)"/>
+        <polygon points="284,84 306,84 334,252 298,252" fill="url(#shaft)"/>
+
+        <!-- substrate: banked higher at the back -->
+        <polygon points="26,320 500,320 405,246 121,246" fill="url(#sand)"/>
+        <!-- caustics on the sand -->
+        <g fill="#e4d8bb" opacity=".22">
+          <ellipse cx="150" cy="300" rx="34" ry="9"/><ellipse cx="250" cy="288" rx="30" ry="7"/>
+          <ellipse cx="360" cy="304" rx="38" ry="9"/><ellipse cx="300" cy="268" rx="22" ry="5"/>
+          <ellipse cx="190" cy="262" rx="20" ry="4"/>
+        </g>
+
+        <!-- ===== BACK LAYER — hazed toward the water colour ===== -->
+        <!-- spray bar across the back, fed from centre -->
+        <rect x="128" y="98" width="272" height="9" rx="4.5" fill="#173d51" stroke="#2d6c85" stroke-width="1"/>
+        <rect x="258" y="86" width="10" height="14" rx="3" fill="#173d51" stroke="#2d6c85" stroke-width="1"/>
+        <g fill="#2d6c85" opacity=".9">
+          <circle cx="152" cy="107" r="1.8"/><circle cx="186" cy="107" r="1.8"/>
+          <circle cx="220" cy="107" r="1.8"/><circle cx="254" cy="107" r="1.8"/>
+          <circle cx="288" cy="107" r="1.8"/><circle cx="322" cy="107" r="1.8"/>
+          <circle cx="356" cy="107" r="1.8"/><circle cx="384" cy="107" r="1.8"/>
+        </g>
+        <g stroke="#6fc0dc" stroke-width="1.6" fill="none" opacity=".42" stroke-linecap="round">
+          <path d="M152 111 q-5 15 -14 25"/><path d="M186 111 q-5 15 -14 25"/>
+          <path d="M220 111 q-5 15 -14 25"/><path d="M254 111 q-5 15 -14 25"/>
+          <path d="M288 111 q-5 15 -14 25"/><path d="M322 111 q-5 15 -14 25"/>
+          <path d="M356 111 q-5 15 -14 25"/>
+        </g>
+
+        <!-- back plants: filling the dead corners, which is where they belong -->
+        <g fill="#2c6f70" opacity=".7">
+          <polygon points="140,250 146,186 153,250"/><polygon points="152,250 161,204 168,250"/>
+          <polygon points="372,250 379,190 387,250"/><polygon points="384,250 392,210 399,250"/>
+        </g>
+
+        <!-- intake: extreme back-right corner -->
+        <rect x="389" y="112" width="11" height="136" rx="5" fill="#123243" stroke="#2d6c85" stroke-width="1"/>
+        <path d="M394 114 v-16 h-14" stroke="#2d6c85" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        <g stroke="#6fc0dc" stroke-width="1.5" fill="none" opacity=".4" stroke-linecap="round">
+          <path d="M386 206 q-14 -5 -22 -14"/><path d="M386 218 q-17 -4 -27 -12"/>
+        </g>
+
+        <!-- HEATER L — vertical, back wall, inboard of the corner -->
+        <ellipse cx="190" cy="190" rx="50" ry="58" fill="url(#hglow)"/>
+        <rect x="184" y="128" width="12" height="116" rx="6" fill="#2b4859" stroke="#4d7b92" stroke-width="1"/>
+        <rect x="186.2" y="146" width="7.6" height="88" rx="3.8" fill="#e07a3f"/>
+        <rect x="184" y="128" width="12" height="13" rx="5" fill="#1b3746"/>
+        <rect x="181" y="150" width="18" height="5" rx="2.5" fill="#1b3746" opacity=".85"/>
+
+        <!-- HEATER R — mirrored about the centre feed, clear of the intake -->
+        <ellipse cx="336" cy="190" rx="50" ry="58" fill="url(#hglow)"/>
+        <rect x="330" y="128" width="12" height="116" rx="6" fill="#2b4859" stroke="#4d7b92" stroke-width="1"/>
+        <rect x="332.2" y="146" width="7.6" height="88" rx="3.8" fill="#e07a3f"/>
+        <rect x="330" y="128" width="12" height="13" rx="5" fill="#1b3746"/>
+        <rect x="327" y="150" width="18" height="5" rx="2.5" fill="#1b3746" opacity=".85"/>
+
+        <!-- PROBES — back wall, mirrored, lateral to each heater, never above one -->
+        <g>
+          <rect x="221" y="150" width="8" height="72" rx="4" fill="#24343f" stroke="#4d7b92" stroke-width="1"/>
+          <circle cx="225" cy="226" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="1.8"/>
+        </g>
+        <g>
+          <rect x="297" y="150" width="8" height="72" rx="4" fill="#24343f" stroke="#4d7b92" stroke-width="1"/>
+          <circle cx="301" cy="226" r="6" fill="#4aa3f0" stroke="#0a1219" stroke-width="1.8"/>
+        </g>
+
+        <!-- ===== MID / FRONT — rockwork nearer the glass, barely hazed ===== -->
+        <g fill="#2b2f33">
+          <polygon points="92,320 132,262 178,320"/><polygon points="330,320 372,266 418,320"/>
+          <polygon points="244,300 268,268 296,300"/>
+        </g>
+        <g fill="#3a4045" opacity=".85">
+          <polygon points="102,320 132,270 160,320"/><polygon points="340,320 372,274 400,320"/>
+        </g>
+
+        <!-- front glass reflection -->
+        <polygon points="26,40 500,40 500,320 26,320" fill="url(#glass)"/>
+        <path d="M60 320 L300 40" stroke="#ffffff" stroke-width="22" opacity=".045"/>
+        <path d="M150 320 L390 40" stroke="#ffffff" stroke-width="12" opacity=".035"/>
+      </g>
+
+      <!-- ===== FRAME / RIM — drawn last, over everything ===== -->
+      <g fill="#1c2126">
+        <rect x="18" y="28" width="490" height="16" rx="4"/>
+        <rect x="18" y="316" width="490" height="17" rx="4"/>
+        <rect x="18" y="28" width="15" height="305" rx="4"/>
+        <rect x="493" y="28" width="15" height="305" rx="4"/>
+      </g>
+      <g fill="none" stroke="#39424a" stroke-width="1.4">
+        <rect x="18" y="28" width="490" height="305" rx="5"/>
+      </g>
+      <rect x="18" y="28" width="490" height="4" rx="2" fill="#4b565f" opacity=".6"/>
+      <!-- CENTRE BRACE: splits the open top into two halves -->
+      <polygon points="255,30 271,30 268,86 258,86" fill="#1c2126"/>
+      <polygon points="255,30 271,30 270,34 256,34" fill="#4b565f" opacity=".55"/>
+
+      <!-- FAN over each half, mounted on the back rim -->
+      <g>
+        <circle cx="150" cy="16" r="30" fill="url(#fanglow)"/>
+        <g stroke="#6fb0ff" stroke-width="2.1" fill="none" stroke-linecap="round" opacity=".85">
+          <circle cx="150" cy="16" r="12"/>
+          <path d="M150 4 A12 12 0 0 1 159 12"/><path d="M161 21 A12 12 0 0 1 148 29"/>
+          <path d="M139 27 A12 12 0 0 1 139 11"/>
+        </g>
+        <rect x="146" y="28" width="8" height="9" rx="2" fill="#1c2126"/>
+      </g>
+      <g>
+        <circle cx="376" cy="16" r="30" fill="url(#fanglow)"/>
+        <g stroke="#6fb0ff" stroke-width="2.1" fill="none" stroke-linecap="round" opacity=".85">
+          <circle cx="376" cy="16" r="12"/>
+          <path d="M376 4 A12 12 0 0 1 385 12"/><path d="M387 21 A12 12 0 0 1 374 29"/>
+          <path d="M365 27 A12 12 0 0 1 365 11"/>
+        </g>
+        <rect x="372" y="28" width="8" height="9" rx="2" fill="#1c2126"/>
+      </g>
+      <!-- plinth -->
+      <rect x="30" y="333" width="466" height="9" rx="3" fill="#141a1f"/>
+      <rect x="44" y="342" width="26" height="7" rx="3" fill="#0f1418"/>
+      <rect x="456" y="342" width="26" height="7" rx="3" fill="#0f1418"/>
+
+      <!-- in-place probe readouts, over the glass -->
+      <g>
+        <rect x="150" y="60" width="74" height="30" rx="8" fill="rgba(6,10,14,.9)" stroke="rgba(255,255,255,.18)"/>
+        <text x="187" y="81" fill="#fff" font-size="18" font-weight="600" text-anchor="middle"
+              font-family="Inter" letter-spacing="-.5">74.2°</text>
+        <line x1="200" y1="90" x2="223" y2="156" stroke="rgba(255,255,255,.25)" stroke-width="1.3"/>
+      </g>
+      <g>
+        <rect x="304" y="60" width="74" height="30" rx="8" fill="rgba(6,10,14,.9)" stroke="rgba(255,255,255,.18)"/>
+        <text x="341" y="81" fill="#fff" font-size="18" font-weight="600" text-anchor="middle"
+              font-family="Inter" letter-spacing="-.5">74.0°</text>
+        <line x1="328" y1="90" x2="303" y2="156" stroke="rgba(255,255,255,.25)" stroke-width="1.3"/>
+      </g>
+
+      <g font-family="Inter" font-size="9" font-weight="600" letter-spacing="1.3" fill="#6f7b88">
+        <text x="190" y="366" text-anchor="middle">HTR L</text>
+        <text x="263" y="366" text-anchor="middle">PROBES · MIRRORED</text>
+        <text x="336" y="366" text-anchor="middle">HTR R</text>
+        <text x="394" y="380" text-anchor="middle">INTAKE</text>
+        <text x="263" y="380" text-anchor="middle">SPRAY BAR · CENTRE FED</text>
+      </g>
+    </svg>
+
+    <div class="rail">
+      <div class="card hero">
+        <span class="lbl">Water temperature</span>
+        <span class="n">74.1<span> °F</span></span>
+        <span class="lbl" style="margin-top:4px">Setpoint 74.0 · heating</span>
+      </div>
+      <div class="card"><span class="lbl">Gradient · L−R</span><span class="n" style="color:#ff8a5c">+0.18<span> °F</span></span></div>
+      <div class="card"><span class="lbl">pH</span><span class="n">7.18</span></div>
+      <div class="card"><span class="lbl">TDS</span><span class="n">342<span> ppm</span></span></div>
+    </div>
+  </div>
+  <div class="foot">
+    <span class="pill heat"><i></i>HEATER L</span>
+    <span class="pill heat"><i></i>HEATER R</span>
+    <span class="pill"><i></i>FANS OFF</span>
+    <span class="dots"><b class="on"></b><b></b><b></b><b></b></span>
+  </div>
+</div>
+
+</body>
+</html>
