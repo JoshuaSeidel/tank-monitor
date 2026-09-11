@@ -1,0 +1,20 @@
+# LOCAL validation wrapper for boards/waveshare-esp32s3-lcd-43.yaml.
+#
+# Sister to local-lg-dual.yaml: packages come from the working tree, so
+# `esphome compile local-lg-panel.yaml` tests what you just edited.
+#
+# s3_ble_mac has NO default in ble_link_panel_v3.yaml on purpose -- a wrong
+# MAC compiles cleanly and then never connects. The placeholder below is
+# obviously fake so it cannot be mistaken for a real one; replace it with
+# what the lg-dual controller prints at boot:
+#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
+substitutions:
+  device_name: tank-monitor-lg-panel-test
+  friendly_name: Tank Monitor LG Panel TEST
+  s3_ble_mac: "00:00:00:00:00:00"
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui.yaml
+  link: !include packages/ble_link_panel_v3.yaml
+  chem: !include packages/chemistry.yaml
+  board: !include boards/waveshare-esp32s3-lcd-43.yaml

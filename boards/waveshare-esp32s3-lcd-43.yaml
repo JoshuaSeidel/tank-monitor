@@ -1,0 +1,629 @@
+# Waveshare ESP32-S3-Touch-LCD-4.3 -- 800x480 panel for the large tank.
+#
+# Display-only, like the CYD and the round AMOLED: no probes, no relays, no
+# control loop. It subscribes to the controller's BLE telemetry and renders
+# it, so the tank stays regulated whatever this board is doing.
+#
+# Pair with packages/base.yaml, packages/webui.yaml, packages/chemistry.yaml
+# and packages/ble_link_panel_v3.yaml. NOT ble_link_panel.yaml and NOT
+# remote_display.yaml -- all three define the same ids and collide.
+#
+# ---------------------------------------------------------------
+# Why lambda drawing and not LVGL
+# ---------------------------------------------------------------
+# The other two panels use LVGL. This one does not, deliberately: the tank
+# view is a one-point-perspective interior drawn from live geometry, and
+# LVGL has no path primitives. Doing it in LVGL would mean a baked PNG that
+# cannot respond to data.
+#
+# rpi_dpi_rgb extends display.FULL_DISPLAY_SCHEMA, so pages: and lambda:
+# are both available -- verified against ESPHome 2026.8.2. pages: and
+# lambda: are cv.Exclusive, hence pages.
+#
+# COST: auto_clear plus a full redraw is ~384k pixel writes plus a ~768 KB
+# PSRAM flush, measured in tens of milliseconds. At the 1s update_interval
+# below that is a few percent duty and entirely fine. If it ever tears,
+# the escape hatch is auto_clear_enabled: false and dirty-region redraw.
+#
+# ---------------------------------------------------------------
+# Pins -- verified, not assumed
+# ---------------------------------------------------------------
+# From Waveshare's own reference and cross-checked against a published
+# working ESPHome config. Getting an RGB data pin wrong does not error: the
+# panel comes up blank or colour-shifted, which is indistinguishable from a
+# dead backlight.
+#
+#   DE 5   PCLK 7   HSYNC 46   VSYNC 3
+#   R: 1, 2, 42, 41, 40          (5 bits)
+#   G: 39, 0, 45, 48, 47, 21     (6 bits)
+#   B: 14, 38, 18, 17, 10        (5 bits)
+#   I2C: SDA 8, SCL 9            GT911 touch + CH422G expander
+#   GT911 INT 4, RST via CH422G pin 1
+#   Display enable CH422G pin 2, display reset CH422G pin 3
+#
+# GPIO0, 3, 45 and 46 are strapping pins on the S3 and are used here
+# because the panel's routing gives no choice -- hence the explicit
+# ignore_strapping_warning on each. That is the board's design, not a
+# shortcut.
+#
+# PSRAM IS MANDATORY: the framebuffer is 800*480*2 = 768 KB and cannot live
+# in internal RAM. Octal mode at 80MHz, because the RGB peripheral streams
+# the whole buffer every frame and quad PSRAM cannot keep up -- the symptom
+# is horizontal tearing that looks like a bad ribbon cable.
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_ESPTOOLPY_FLASHMODE_QIO: y
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: y
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+# See boards/xiao-esp32s3.yaml for the full story: ESPHome's default
+# "legacy" unique_id generator omits the device name, so this panel's
+# entities would collide with another board's in Home Assistant --
+# silently, with nothing in the log.
+mqtt:
+  discovery_unique_id_generator: mac
+
+i2c:
+  sda: GPIO8
+  scl: GPIO9
+  scan: true
+
+# The panel's reset, enable and touch-reset lines are not on the ESP32 at
+# all -- they hang off this expander. Without it the display never leaves
+# reset and the screen stays black with a perfectly valid config.
+# The CH422G has no configurable address -- it answers on a fixed set of
+# I2C addresses and the component handles that itself, so `address:` is not
+# an option here.
+ch422g:
+  - id: io_ex
+
+display:
+  - platform: rpi_dpi_rgb
+    id: tank_display
+    update_interval: 1s
+    auto_clear_enabled: true
+    color_order: RGB
+    pclk_frequency: 14MHz
+    dimensions:
+      width: 800
+      height: 480
+    de_pin: GPIO5
+    pclk_pin: GPIO7
+    hsync_pin:
+      number: GPIO46
+      ignore_strapping_warning: true
+    vsync_pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    hsync_back_porch: 10
+    hsync_front_porch: 20
+    hsync_pulse_width: 10
+    vsync_back_porch: 10
+    vsync_front_porch: 10
+    vsync_pulse_width: 10
+    data_pins:
+      red: [GPIO1, GPIO2, GPIO42, GPIO41, GPIO40]
+      green:
+        - GPIO39
+        - number: GPIO0
+          ignore_strapping_warning: true
+        - number: GPIO45
+          ignore_strapping_warning: true
+        - GPIO48
+        - GPIO47
+        - GPIO21
+      blue: [GPIO14, GPIO38, GPIO18, GPIO17, GPIO10]
+    reset_pin:
+      ch422g: io_ex
+      number: 3
+    enable_pin:
+      ch422g: io_ex
+      number: 2
+
+    pages:
+      # ===========================================================
+      # PAGE 1 -- MAIN. Radial band gauge plus the numbers you act on.
+      # ===========================================================
+      - id: page_main
+        lambda: |-
+          const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
+          const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
+          const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
+          const Color GOOD(12, 163, 12), BAD(208, 59, 59), TRACK(30, 37, 46);
+
+          it.fill(BG);
+
+          // Rounded rectangle. There is no rrect primitive, so: a cross of
+          // two rects plus four corner circles. Cheap and exact.
+          auto rr = [&](int x, int y, int w, int h, int r, Color c) {
+            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
+            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            it.filled_circle(x + r, y + r, r, c);
+            it.filled_circle(x + w - r - 1, y + r, r, c);
+            it.filled_circle(x + r, y + h - r - 1, r, c);
+            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+          };
+
+          // ---- top bar ----
+          it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+          const bool linked = id(controller_link).state;
+          it.filled_circle(640, 20, 4, linked ? GOOD : BAD);
+          it.print(652, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "BLE");
+          it.filled_circle(700, 20, 4, id(ble_connected).state ? GOOD : BAD);
+          it.print(712, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LINK");
+          it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M",
+                      id(sntp_time).now());
+
+          // ---- gauge card ----
+          rr(18, 46, 296, 380, 15, CARD);
+
+          const float sp_c = id(r_setpoint_c);
+          const float sp_f = std::isnan(sp_c) ? NAN : sp_c * 9.0f / 5.0f + 32.0f;
+          const float t_c = id(water_temp).state;
+          const float t_f = std::isnan(t_c) ? NAN : t_c * 9.0f / 5.0f + 32.0f;
+
+          // Band follows the setpoint rather than being fixed, so the gauge
+          // still reads correctly after the setpoint moves.
+          const float lo = std::isnan(sp_f) ? 72.0f : sp_f - 2.0f;
+          const float hi = std::isnan(sp_f) ? 76.0f : sp_f + 2.0f;
+          const int CX = 166, CY = 222, R_IN = 86, R_OUT = 102;
+
+          // Track: 270 degrees opening at the bottom. line_at_angle uses
+          // standard math angles with screen-y downward, so 135 is
+          // down-left and the sweep runs 135 -> 405.
+          for (int a = 135; a <= 405; a++)
+            it.line_at_angle(CX, CY, a, R_IN, R_OUT, TRACK);
+
+          if (!std::isnan(t_f)) {
+            float frac = (t_f - lo) / (hi - lo);
+            if (frac < 0.0f) frac = 0.0f;
+            if (frac > 1.0f) frac = 1.0f;
+            const int end = 135 + (int) (270.0f * frac);
+            // Diverging: cool below setpoint, neutral at it, warm above.
+            // Two hues and a neutral midpoint, never a rainbow.
+            for (int a = 135; a <= end; a++) {
+              const float p = (a - 135) / 270.0f;
+              Color seg = p < 0.5f
+                ? Color((int) (57 + (127 - 57) * p * 2), (int) (135 + (139 - 135) * p * 2),
+                        (int) (229 + (150 - 229) * p * 2))
+                : Color((int) (127 + (217 - 127) * (p - 0.5f) * 2),
+                        (int) (139 + (89 - 139) * (p - 0.5f) * 2),
+                        (int) (150 + (38 - 150) * (p - 0.5f) * 2));
+              it.line_at_angle(CX, CY, a, R_IN, R_OUT, seg);
+            }
+          }
+          // Setpoint tick at the top of the sweep.
+          it.line_at_angle(CX, CY, 270, R_OUT + 2, R_OUT + 12, INK);
+
+          if (std::isnan(t_f))
+            it.print(CX, CY - 6, id(f_hero), MUTED, TextAlign::CENTER, "--.-");
+          else
+            it.printf(CX, CY - 6, id(f_hero), INK, TextAlign::CENTER, "%.1f", t_f);
+          it.print(CX + 92, CY - 24, id(f_small), MUTED, TextAlign::CENTER, "F");
+
+          if (id(r_fault))
+            it.print(CX, CY + 52, id(f_micro), BAD, TextAlign::CENTER, "SAFETY TRIPPED");
+          else if (id(r_heat_on))
+            it.print(CX, CY + 52, id(f_micro), HEAT, TextAlign::CENTER, "HEATING");
+          else if (id(r_fan_on))
+            it.print(CX, CY + 52, id(f_micro), BLUE, TextAlign::CENTER, "COOLING");
+          else
+            it.print(CX, CY + 52, id(f_micro), MUTED, TextAlign::CENTER, "IDLE");
+
+          if (std::isnan(sp_f))
+            it.print(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint --");
+          else
+            it.printf(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint %.1f", sp_f);
+
+          // ---- right grid ----
+          auto tile = [&](int x, int y, int w, int h, const char *label,
+                          float v, const char *fmt, const char *unit, Color vc) {
+            rr(x, y, w, h, 15, CARD);
+            it.print(x + 16, y + 22, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
+            if (std::isnan(v)) {
+              it.print(x + 16, y + h / 2 + 8, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            } else {
+              it.printf(x + 16, y + h / 2 + 8, id(f_big), vc, TextAlign::CENTER_LEFT, fmt, v);
+              it.print(x + 16 + 96, y + h / 2 + 14, id(f_small), MUTED,
+                       TextAlign::CENTER_LEFT, unit);
+            }
+          };
+
+          const float tb_c = id(water_temp_b).state;
+          const float tb_f = std::isnan(tb_c) ? NAN : tb_c * 9.0f / 5.0f + 32.0f;
+          tile(326, 46, 224, 124, "LEFT HALF", t_f, "%.1f", "F", INK);
+          tile(558, 46, 224, 124, "RIGHT HALF", tb_f, "%.1f", "F", INK);
+
+          // Gradient, signed. The sign is the actionable half of the number.
+          const float g = id(temp_gradient).state;
+          rr(326, 178, 456, 124, 15, CARD);
+          it.print(342, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
+          if (std::isnan(g)) {
+            it.print(342, 248, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+          } else {
+            it.printf(342, 248, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT,
+                      "%+.2f", g);
+            it.print(342 + 108, 254, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F");
+            // Diverging bar: centre tick, fill from centre toward the sign.
+            const int bx = 342, by = 278, bw = 424;
+            it.filled_rectangle(bx, by, bw, 5, TRACK);
+            float gc = g / 1.0f;
+            if (gc > 1.0f) gc = 1.0f;
+            if (gc < -1.0f) gc = -1.0f;
+            const int half = bw / 2, len = (int) (half * (gc < 0 ? -gc : gc));
+            if (gc >= 0) it.filled_rectangle(bx + half, by, len, 5, ORANGE);
+            else         it.filled_rectangle(bx + half - len, by, len, 5, BLUE);
+            it.filled_rectangle(bx + half, by - 4, 2, 13, MUTED);
+          }
+
+          tile(326, 310, 224, 116, "PH", id(water_ph).state, "%.2f", "", INK);
+          tile(558, 310, 224, 116, "TDS", id(tds_mean).state, "%.0f", "ppm", INK);
+
+          // ---- bottom bar ----
+          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          auto pill = [&](int x, const char *txt, bool on, Color c) {
+            const int w = 108;
+            rr(x, 444, w, 26, 13, on ? Color(52, 30, 20) : CARD);
+            it.filled_circle(x + 14, 457, 4, on ? c : MUTED);
+            it.print(x + 26, 457, id(f_micro), on ? c : MUTED, TextAlign::CENTER_LEFT, txt);
+            return x + w + 8;
+          };
+          int px = 18;
+          px = pill(px, "HEATER", id(r_heat_on), HEAT);
+          px = pill(px, "FANS", id(r_fan_on), BLUE);
+          // Page dots: current page is a bar, not a dot.
+          it.filled_rectangle(718, 454, 18, 6, BLUE);
+          it.filled_circle(750, 457, 3, TRACK);
+          it.filled_circle(768, 457, 3, TRACK);
+
+      # ===========================================================
+      # PAGE 2 -- VESSEL. One-point perspective interior.
+      # ===========================================================
+      # Geometry is derived, not drawn: front opening, a vanishing point and
+      # one depth scale produce the back wall, floor and both side panes.
+      # Move a heater and its screen position and haze follow.
+      #
+      # Depth haze is the whole trick. There is no alpha in this API, but
+      # the background behind every object is a known solid, so each blend
+      # is precomputed -- mix(front_colour, water_colour, depth).
+      - id: page_vessel
+        lambda: |-
+          const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
+          const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
+          const Color BLUE(57, 135, 229), HEAT(255, 138, 92), GOOD(12, 163, 12), BAD(208, 59, 59);
+          const Color TRACK(30, 37, 46);
+
+          it.fill(BG);
+          auto rr = [&](int x, int y, int w, int h, int r, Color c) {
+            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
+            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            it.filled_circle(x + r, y + r, r, c);
+            it.filled_circle(x + w - r - 1, y + r, r, c);
+            it.filled_circle(x + r, y + h - r - 1, r, c);
+            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+          };
+          auto mix = [](Color a, Color b, float t) {
+            return Color((int) (a.r + (b.r - a.r) * t), (int) (a.g + (b.g - a.g) * t),
+                         (int) (a.b + (b.b - a.b) * t));
+          };
+
+          it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+          it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M",
+                      id(sntp_time).now());
+
+          // ---- tank geometry ----
+          const int FX0 = 24, FY0 = 56, FX1 = 552, FY1 = 386;   // front opening
+          const int BX0 = 130, BY0 = 104, BX1 = 446, BY1 = 302;  // back wall
+          const Color WATER(20, 74, 106);
+
+          // Water surface seen from below.
+          it.filled_triangle(FX0, FY0, FX1, FY0, BX1, BY0, Color(120, 200, 226));
+          it.filled_triangle(FX0, FY0, BX1, BY0, BX0, BY0, Color(120, 200, 226));
+          // Side panes.
+          it.filled_triangle(FX0, FY0, BX0, BY0, BX0, BY1, Color(14, 44, 64));
+          it.filled_triangle(FX0, FY0, BX0, BY1, FX0, FY1, Color(14, 44, 64));
+          it.filled_triangle(FX1, FY0, BX1, BY0, BX1, BY1, Color(14, 44, 64));
+          it.filled_triangle(FX1, FY0, BX1, BY1, FX1, FY1, Color(14, 44, 64));
+          // Back wall, lit from above: one horizontal_line per row.
+          for (int y = BY0; y < BY1; y++) {
+            const float p = (float) (y - BY0) / (BY1 - BY0);
+            it.horizontal_line(BX0, y, BX1 - BX0,
+                               mix(Color(58, 144, 184), Color(12, 47, 71), p));
+          }
+
+          // Substrate: black sand cap over Stratum, banked up at the back.
+          const int SFY = 356, SBY = 296;
+          for (int y = SBY; y <= FY1; y++) {
+            const float p = (float) (y - SBY) / (FY1 - SBY);
+            const int xl = (int) (BX0 + (FX0 - BX0) * p);
+            const int xr = (int) (BX1 + (FX1 - BX1) * p);
+            it.horizontal_line(xl, y, xr - xl, mix(Color(53, 67, 78), Color(36, 36, 42), p));
+          }
+          // Cross-section through the front glass: 1.5in sand over 2in Stratum.
+          it.filled_rectangle(FX0, SFY, FX1 - FX0, 12, Color(38, 38, 44));
+          it.filled_rectangle(FX0, SFY + 12, FX1 - FX0, 16, Color(45, 34, 24));
+          it.horizontal_line(FX0, SFY + 12, FX1 - FX0, Color(74, 58, 42));
+
+          // Spray bar across the back, just under the surface.
+          it.filled_rectangle(BX0 + 8, 118, (BX1 - BX0) - 16, 8, Color(23, 67, 90));
+          it.filled_rectangle(284, 106, 9, 14, Color(23, 67, 90));
+          for (int x = BX0 + 24; x < BX1 - 16; x += 38)
+            it.filled_circle(x, 128, 2, Color(58, 125, 153));
+
+          // Intake, back-right corner.
+          it.filled_rectangle(430, 132, 10, 164, Color(18, 48, 63));
+
+          // Heaters: vertical, inboard, mirrored about the centre feed.
+          // Glow is nested filled_circle in precomputed blends -- the
+          // background here is the known back-wall colour, so no alpha.
+          auto heater = [&](int cx, bool on) {
+            if (on)
+              for (int r = 54; r > 0; r -= 6)
+                it.filled_circle(cx, 216, r, mix(WATER, Color(255, 122, 60), 0.42f * (1.0f - r / 54.0f)));
+            it.filled_rectangle(cx - 6, 150, 12, 108, Color(45, 77, 95));
+            it.filled_rectangle(cx - 4, 166, 8, 84, on ? Color(232, 130, 63) : Color(70, 86, 96));
+          };
+          heater(212, id(r_heat_on));
+          heater(364, id(r_heat_on));
+
+          // Probes: mirrored inboard, lateral to each heater.
+          auto probe = [&](int cx) {
+            it.filled_rectangle(cx - 4, 172, 8, 66, Color(38, 54, 63));
+            it.filled_circle(cx, 242, 6, Color(74, 163, 240));
+          };
+          probe(250);
+          probe(326);
+
+          // Rimless glass: thin bright edges, no plastic chrome.
+          const Color EDGE(143, 196, 220);
+          it.rectangle(FX0, FY0, FX1 - FX0, FY1 - FY0, EDGE);
+          it.line(FX1, FY0, BX1, BY0, EDGE);
+          it.line(BX1, BY0, BX1, BY1, EDGE);
+          it.line(BX1, BY1, FX1, FY1, EDGE);
+          it.line(FX0, FY0, BX0, BY0, EDGE);
+          it.line(BX0, BY0, BX0, BY1, EDGE);
+          it.line(BX0, BY1, FX0, FY1, EDGE);
+          it.line(BX0, BY0, BX1, BY0, EDGE);
+          it.filled_rectangle(282, FY0, 13, 48, Color(168, 216, 236));
+
+          // In-place probe readouts.
+          const float ta_c = id(water_temp).state, tb_c = id(water_temp_b).state;
+          const float ta_f = std::isnan(ta_c) ? NAN : ta_c * 9.0f / 5.0f + 32.0f;
+          const float tb_f = std::isnan(tb_c) ? NAN : tb_c * 9.0f / 5.0f + 32.0f;
+          auto callout = [&](int x, int y, float v) {
+            rr(x, y, 84, 32, 8, Color(6, 10, 14));
+            it.rectangle(x, y, 84, 32, HAIR);
+            if (std::isnan(v)) it.print(x + 42, y + 16, id(f_med), MUTED, TextAlign::CENTER, "--");
+            else it.printf(x + 42, y + 16, id(f_med), INK, TextAlign::CENTER, "%.1f", v);
+          };
+          callout(176, 70, ta_f);
+          callout(330, 70, tb_f);
+          it.print(212, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
+          it.print(288, 404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES");
+          it.print(364, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
+          it.print(436, 404, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
+
+          // ---- right rail ----
+          rr(568, 56, 214, 112, 15, CARD);
+          it.print(584, 78, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "WATER TEMPERATURE");
+          if (std::isnan(ta_f)) it.print(584, 124, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--.-");
+          else it.printf(584, 124, id(f_big), INK, TextAlign::CENTER_LEFT, "%.1f", ta_f);
+          it.print(584, 152, id(f_micro), id(r_heat_on) ? HEAT : MUTED,
+                   TextAlign::CENTER_LEFT, id(r_heat_on) ? "HEATING" : "IDLE");
+
+          const float g = id(temp_gradient).state;
+          rr(568, 178, 214, 96, 15, CARD);
+          it.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
+          if (std::isnan(g)) it.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+          else it.printf(584, 240, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT, "%+.2f", g);
+
+          // Heating vs idle: the pair that separates a mixing problem from
+          // an insulation one. Worth being on the page with the picture.
+          rr(568, 284, 214, 102, 15, CARD);
+          it.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATING / IDLE");
+          const float gh = id(r_grad_heating), gi = id(r_grad_idle);
+          if (std::isnan(gh)) it.print(584, 340, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
+          else it.printf(584, 340, id(f_med), INK2, TextAlign::CENTER_LEFT, "%+.2f", gh);
+          if (std::isnan(gi)) it.print(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
+          else it.printf(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "%+.2f", gi);
+
+          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          it.filled_circle(722, 457, 3, TRACK);
+          it.filled_rectangle(740, 454, 18, 6, BLUE);
+          it.filled_circle(772, 457, 3, TRACK);
+
+      # ===========================================================
+      # PAGE 3 -- CHEMISTRY. Native graph component.
+      # ===========================================================
+      - id: page_chem
+        lambda: |-
+          const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
+          const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
+          const Color BLUE(57, 135, 229), AQUA(25, 158, 112), BAD(208, 59, 59), TRACK(30, 37, 46);
+
+          it.fill(BG);
+          auto rr = [&](int x, int y, int w, int h, int r, Color c) {
+            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
+            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            it.filled_circle(x + r, y + r, r, c);
+            it.filled_circle(x + w - r - 1, y + r, r, c);
+            it.filled_circle(x + r, y + h - r - 1, r, c);
+            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+          };
+
+          it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+          it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M",
+                      id(sntp_time).now());
+
+          // ---- pH ----
+          rr(18, 46, 380, 250, 15, CARD);
+          it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH  24 HOURS");
+          const float ph = id(water_ph).state;
+          if (std::isnan(ph)) it.print(36, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+          else it.printf(36, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.2f", ph);
+          it.graph(36, 140, id(ph_graph), BLUE);
+          it.print(36, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH");
+
+          // ---- TDS ----
+          rr(410, 46, 372, 250, 15, CARD);
+          it.print(428, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "TDS  24 HOURS");
+          const float tm = id(tds_mean).state;
+          if (std::isnan(tm)) it.print(428, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+          else it.printf(428, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.0f", tm);
+          it.print(428 + 88, 116, id(f_small), MUTED, TextAlign::CENTER_LEFT, "ppm");
+          it.graph(428, 140, id(tds_graph), BLUE);
+          it.print(428, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "MEAN VS RAW");
+
+          // ---- strip ----
+          // GH and KH do NOT arrive over BLE. They are manual test results
+          // that reach this panel from Home Assistant over MQTT, so they are
+          // the only numbers on the device with a different provenance --
+          // and the only ones that can be stale while everything else is
+          // live. Wi-Fi down, MQTT down or simply no test entered for a week
+          // all look identical from here, so the age is printed WITH the
+          // value rather than beside it somewhere else. A panel that shows a
+          // number without saying how old it is, is lying by omission.
+          char agebuf[20];
+          bool chem_stale = true;
+          {
+            auto n = id(sntp_time).now();
+            if (id(chem_stamp) == 0) {
+              snprintf(agebuf, sizeof(agebuf), "never");
+            } else if (!n.is_valid()) {
+              snprintf(agebuf, sizeof(agebuf), "no clock");
+            } else {
+              const uint32_t age = (uint32_t) n.timestamp - id(chem_stamp);
+              if (age < 3600)        snprintf(agebuf, sizeof(agebuf), "%um ago", (unsigned) (age / 60));
+              else if (age < 172800) snprintf(agebuf, sizeof(agebuf), "%uh ago", (unsigned) (age / 3600));
+              else                   snprintf(agebuf, sizeof(agebuf), "%ud ago", (unsigned) (age / 86400));
+              // 48h: these are strip tests, not sensors. Older than two days
+              // is a reading you should not be acting on.
+              chem_stale = age > 172800;
+            }
+          }
+
+          auto small = [&](int x, const char *label, float v, const char *fmt,
+                           Color c, const char *sub) {
+            rr(x, 306, 120, 118, 15, CARD);
+            it.print(x + 14, 328, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
+            if (std::isnan(v)) it.print(x + 14, 372, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            else it.printf(x + 14, 372, id(f_big), c, TextAlign::CENTER_LEFT, fmt, v);
+            if (sub != nullptr)
+              it.print(x + 14, 404, id(f_micro), chem_stale ? BAD : MUTED,
+                       TextAlign::CENTER_LEFT, sub);
+          };
+
+          // Stale chem reads in the warning colour, not the normal ink --
+          // the value is still shown, because a last-known reading is
+          // useful, but it must not look as current as the live ones.
+          const Color CHEM = chem_stale ? MUTED : INK2;
+          small(18,  "GH PPM",     id(chem_gh), "%.0f", CHEM, agebuf);
+          small(146, "KH PPM",     id(chem_kh), "%.0f", CHEM, agebuf);
+          small(274, "TDS RAW",    id(tds).state, "%.0f", INK2, nullptr);
+          small(402, "LUX",        id(tank_lux).state, "%.0f", INK2, nullptr);
+          small(530, "SWING F",
+                std::isnan(id(r_swing_c)) ? NAN : id(r_swing_c) * 9.0f / 5.0f, "%.2f", INK2, nullptr);
+          small(658, "CONFIDENCE", id(r_confidence), "%.0f", INK2, nullptr);
+
+          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          it.print(20, 457, id(f_micro), MUTED, TextAlign::CENTER_LEFT,
+                   id(link_age).state.c_str());
+          it.filled_circle(722, 457, 3, TRACK);
+          it.filled_circle(740, 457, 3, TRACK);
+          it.filled_rectangle(758, 454, 18, 6, BLUE);
+
+# Touch. Tap the right half for the next page, left half for the previous.
+# Page dots on every page show where you are, so there is a visible
+# affordance rather than a hidden gesture.
+touchscreen:
+  - platform: gt911
+    id: tank_touch
+    display: tank_display
+    interrupt_pin: GPIO4
+    reset_pin:
+      ch422g: io_ex
+      number: 1
+    # on_touch, NOT on_release: verified against the component, on_release
+    # is registered with no trigger arguments at all, so `touch` does not
+    # exist in its scope. Firing on press also makes the panel feel
+    # immediate rather than waiting for lift.
+    on_touch:
+      - lambda: |-
+          if (touch.x > 400) id(tank_display).show_next_page();
+          else               id(tank_display).show_prev_page();
+
+# 24 hours at the 5s notify rate is far more samples than 380px of width can
+# show, so the component decimates. Held in RAM and lost on reboot -- this is
+# the at-a-glance view; Home Assistant owns the real history.
+graph:
+  - id: ph_graph
+    sensor: water_ph
+    duration: 24h
+    width: 344
+    height: 120
+    border: false
+    x_grid: 6h
+    y_grid: 0.2
+  # Two traces on ONE axis -- never a second scale. Raw is the de-emphasised
+  # series and the hourly mean is the accent, matching the convention that
+  # glance values are smoothed and diagnostics are raw. A single TDS sample
+  # off this probe is honest about nothing; showing both is what makes the
+  # spread visible rather than implied.
+  - id: tds_graph
+    duration: 24h
+    width: 336
+    height: 120
+    border: false
+    x_grid: 6h
+    y_grid: 50
+    traces:
+      - sensor: tds_mean
+        line_thickness: 2
+        color: graph_mean
+      - sensor: tds
+        line_thickness: 1
+        color: graph_raw
+
+color:
+  - id: graph_mean
+    red: 22%
+    green: 53%
+    blue: 90%
+  - id: graph_raw
+    red: 44%
+    green: 48%
+    blue: 53%
+
+# GLYPH SETS ARE TRIMMED TO SAVE FLASH, and a missing glyph fails SILENTLY
+# at runtime rather than at compile. Every character any lambda above can
+# print must appear here -- including the minus and plus that %+.2f emits.
+font:
+  - file: "gfonts://Inter@600"
+    id: f_micro
+    size: 13
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°"
+  - file: "gfonts://Inter@500"
+    id: f_small
+    size: 17
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°"
+  - file: "gfonts://Inter@600"
+    id: f_med
+    size: 24
+    glyphs: "0123456789 .,:-+°"
+  - file: "gfonts://Inter@600"
+    id: f_big
+    size: 38
+    glyphs: "0123456789 .,:-+°"
+  - file: "gfonts://Inter@600"
+    id: f_hero
+    size: 78
+    glyphs: "0123456789.-"

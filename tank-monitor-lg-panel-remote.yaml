@@ -1,0 +1,83 @@
+# LARGE TANK panel -- Waveshare ESP32-S3-Touch-LCD-4.3, 800x480.
+# Put THIS file in the ESPHome dashboard.
+#
+# Pairs with tank-monitor-lg-remote.yaml over BLE, and with nothing else.
+# It speaks payload v3 and will reject a v2 frame outright, so it cannot be
+# pointed at the 12-gal controller -- which is the correct behaviour, not a
+# limitation. A panel showing another tank's numbers is worse than a blank
+# one.
+#
+# ---------------------------------------------------------------------
+# One radio pair, chosen at build time
+# ---------------------------------------------------------------------
+# A panel may run WiFi + ESP-NOW, or WiFi + BLE. Never all three. With all
+# three live the CYD lost its ESP-NOW link and then stopped answering HTTP
+# altogether, at the gentlest useful scan setting. So the transport is a
+# whole-file choice: loading packages/remote_display.yaml (ESP-NOW) or
+# packages/ble_link_panel.yaml (v2) beside ble_link_panel_v3.yaml would
+# collide on every id AND bring up two radios. Never do it.
+#
+# ---------------------------------------------------------------------
+# s3_ble_mac -- you must set this
+# ---------------------------------------------------------------------
+# ESPHome's ble_client can only address a peer by MAC; there is no name- or
+# service-based connect. Find the LG controller's at its boot log:
+#
+#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
+#
+# It is NOT the WiFi MAC and NOT the OTA/mDNS name. The controller also
+# publishes it as "Controller BLE MAC" once it is up.
+#
+# The value below is deliberately NOT a valid MAC, so ESPHome's address
+# validator rejects it and the build stops until you replace it. A
+# real-looking placeholder would compile cleanly and then never connect --
+# silently, forever. Better to fail at the keyboard than at the tank.
+#
+# THIS IS THE LG CONTROLLER'S MAC, NOT THE XIAO'S. Both are ESP32-S3 and
+# both print the same log line. Pointing this panel at the 12-gal
+# controller gets you a connected BLE icon and a permanently blank screen,
+# because that board speaks v2.
+#
+# ---------------------------------------------------------------------
+# device_name
+# ---------------------------------------------------------------------
+# Must not collide with tank-monitor-lg, -s3, -s3mini, -round, -v2 or -w32.
+substitutions:
+  device_name: tank-monitor-lg-panel
+  friendly_name: Tank Monitor LG Panel
+  # ---- REPLACE THIS with the LG controller's BLE MAC (see above) ----
+  s3_ble_mac: "SET-ME-FROM-THE-LG-CONTROLLER-BOOT-LOG"
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      # Display-only: this REPLACES control.yaml and sensors.yaml. Loading
+      # either alongside it collides on every id.
+      - packages/ble_link_panel_v3.yaml
+      # GH, KH and the rest of the manual chemistry reach this panel over
+      # MQTT from Home Assistant, not over BLE. They are the only numbers
+      # here with a different provenance, and page 3 prints their age
+      # beside them so a stale value can never pass for a live one.
+      - packages/chemistry.yaml
+      - boards/waveshare-esp32s3-lcd-43.yaml
+    refresh: 0s
+
+# ---------------------------------------------------------------------
+# First power-up: two things to check before believing anything
+# ---------------------------------------------------------------------
+# 1. THE SCREEN. The RGB data pins are from Waveshare's own reference and
+#    cross-checked against a published working config, but a wrong data pin
+#    does not error -- the panel comes up blank or colour-shifted, which is
+#    indistinguishable from a dead backlight or a bad ribbon. If it is
+#    blank, suspect the CH422G enable line before the data pins.
+#
+# 2. THE MTU. A v3 frame is ~155 bytes and BLE's default MTU is 23. If the
+#    client fails to negotiate a larger one the string arrives TRUNCATED,
+#    and an atof() of a half-written float is still a float. The parser
+#    checks the field count for exactly this and logs
+#    "bad payload: N of 20 fields" rather than rendering garbage. If you
+#    see that line, it is the MTU, not the wiring.

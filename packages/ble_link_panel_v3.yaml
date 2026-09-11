@@ -1,0 +1,293 @@
+# BLE link, PANEL side, PAYLOAD v3. The other half of ble_link_v3.yaml.
+#
+# Load this INSTEAD OF packages/ble_link_panel.yaml and INSTEAD OF
+# packages/remote_display.yaml. All three provide the same ids and would
+# collide on every one of them.
+#
+# See packages/ble_link_v3.yaml for why v3 is a fork rather than a version
+# bump in the shared file. Short version: the v2 parser rejects anything
+# that is not exactly 15 fields, that strictness is correct, and the round
+# AMOLED panel depends on it. This file and its controller half are used
+# only by the large dual-system tank.
+#
+# WHAT THIS ADDS OVER ble_link_panel.yaml
+#   water_temp_b     second probe, published in Celsius like water_temp
+#   temp_gradient    signed A-B, already degF on the wire
+#   water_ph
+#   r_grad_heating   degF, gradient mean while heating
+#   r_grad_idle      degF, gradient mean while idle
+#
+# Every v2 id is still here and unchanged, so a board file written against
+# the v2 panel package works against this one untouched.
+#
+# ---------------------------------------------------------------------
+# Finding the controller's BLE MAC
+# ---------------------------------------------------------------------
+# ble_client can only address a peer by MAC. The controller prints its own
+# at boot:  [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
+# Put that in the wrapper as s3_ble_mac. There is deliberately NO default:
+# a wrong MAC compiles cleanly and then never connects, which is the worst
+# failure this project keeps meeting. An unset substitution fails loudly.
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Only ever looking for one known MAC. Passive scanning does not
+    # transmit at all, which matters on a board sharing one antenna with
+    # the WiFi station.
+    active: false
+    interval: 1100ms
+    window: 100ms
+
+ble_client:
+  - id: ctrl_ble
+    mac_address: ${s3_ble_mac}
+    on_connect:
+      - lambda: |-
+          id(r_ble_connected) = true;
+          ESP_LOGI("ble", "controller connected");
+    on_disconnect:
+      - lambda: |-
+          id(r_ble_connected) = false;
+          ESP_LOGW("ble", "controller disconnected");
+
+globals:
+  # restore_value so a rebooted panel shows the last known reading straight
+  # away instead of dashes until the next notify.
+  - id: r_setpoint_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_swing_c
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_heat
+    type: float
+    restore_value: true
+    initial_value: '0'
+  - id: r_fan
+    type: float
+    restore_value: true
+    initial_value: '0'
+  # Demand, not contact position. At 14% duty the contacts are open for 13
+  # of every 15 minutes and a panel mirroring that would read as chaos.
+  - id: r_heat_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: r_fan_on
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: r_fault
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # ---- v3 ----
+  - id: r_grad_heating
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_grad_idle
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: r_confidence
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  # Which transport last delivered data. Not restored: after a reboot the
+  # honest answer is "nothing has arrived yet".
+  - id: r_src
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: r_ble_connected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: r_stamp
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Same event on millis(). Link Age wants a wall clock; the connectivity
+  # sensor must work before SNTP has synced.
+  - id: r_stamp_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+sensor:
+  # Published by the notify parser below, never polled. update_interval:
+  # never because there is no local source -- the value only exists when a
+  # packet arrives, and a lambda returning a stale copy on a timer would
+  # defeat the staleness detection entirely.
+  - platform: template
+    id: water_temp
+    internal: true
+    update_interval: never
+  - platform: template
+    id: tds
+    internal: true
+    update_interval: never
+  - platform: template
+    id: tds_mean
+    internal: true
+    update_interval: never
+  - platform: template
+    id: tank_lux
+    internal: true
+    update_interval: never
+  # ---- v3 ----
+  - platform: template
+    id: water_temp_b
+    internal: true
+    update_interval: never
+  # Already degF on the wire. The controller owns the conversion for the
+  # same reason it owns the TDS mean: one board computes a number, every
+  # screen shows the same one.
+  - platform: template
+    id: temp_gradient
+    internal: true
+    update_interval: never
+  - platform: template
+    id: water_ph
+    internal: true
+    update_interval: never
+
+text_sensor:
+  - platform: template
+    name: "Panel Transport"
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {"ble-v3"};'
+
+  - platform: ble_client
+    ble_client_id: ctrl_ble
+    id: ble_tele
+    internal: true
+    service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+    characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+    notify: true
+    on_value:
+      - lambda: |-
+          // MTU: BLE's default is 23 bytes and a v3 payload is ~155, so a
+          // client that failed to negotiate a larger MTU receives a
+          // TRUNCATED string. Truncation is silent at the transport layer
+          // and produces plausible-looking garbage -- an atof() of a
+          // half-written float is still a float. So the parse is checked
+          // rather than trusted: wrong field count or wrong version means
+          // publish NOTHING and say so. A stale screen that admits it is
+          // stale beats a fresh screen that is lying.
+          const std::string &s = x;
+          float f[20];
+          int n = 0;
+          size_t start = 0;
+          while (n < 20 && start <= s.size()) {
+            const size_t comma = s.find(',', start);
+            const std::string tok = (comma == std::string::npos)
+                                      ? s.substr(start)
+                                      : s.substr(start, comma - start);
+            if (tok.empty()) break;
+            f[n++] = atof(tok.c_str());
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+          }
+          if (n != 20) {
+            ESP_LOGW("ble", "bad payload: %d of 20 fields in %u bytes -- MTU too small?",
+                     n, (unsigned) s.size());
+            return;
+          }
+          if ((int) f[0] != 3) {
+            ESP_LOGW("ble", "payload format v%d, this panel speaks v3 -- reflash one end",
+                     (int) f[0]);
+            return;
+          }
+
+          // -999 is the controller's not-a-number sentinel. Turning it back
+          // into NAN here means every downstream isnan() check keeps working.
+          const auto val = [](float v) { return v <= -998.0f ? NAN : v; };
+
+          id(water_temp).publish_state(val(f[1]));
+          id(r_setpoint_c) = val(f[2]);
+          id(tds).publish_state(val(f[3]));
+          id(tds_mean).publish_state(val(f[4]));
+          id(tank_lux).publish_state(val(f[5]));
+          id(r_swing_c)    = val(f[6]);
+          id(r_confidence) = val(f[8]);
+          id(r_heat)       = val(f[9]);
+          id(r_fan)        = val(f[10]);
+          id(r_heat_on)    = f[11] > 0.5f;
+          id(r_fan_on)     = f[12] > 0.5f;
+          id(r_fault)      = f[13] > 0.5f;
+          // ---- v3 ----
+          id(water_temp_b).publish_state(val(f[15]));
+          id(temp_gradient).publish_state(val(f[16]));
+          id(water_ph).publish_state(val(f[17]));
+          id(r_grad_heating) = val(f[18]);
+          id(r_grad_idle)    = val(f[19]);
+
+          // Stamp last, and only on a payload that fully parsed, so Link
+          // Age never reports fresh data off a frame that was rejected.
+          id(r_stamp) = id(sntp_time).now().is_valid()
+                        ? id(sntp_time).now().timestamp
+                        : 0;
+          id(r_stamp_ms) = millis();
+          id(r_src) = 2;
+
+  - platform: template
+    name: "Link Source"
+    id: link_source
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 10s
+    lambda: |-
+      // Stale beats loyal: if nothing has arrived recently say so, rather
+      // than naming whichever transport happened to speak last.
+      if (id(r_stamp_ms) == 0 || (millis() - id(r_stamp_ms)) > 45000)
+        return {"none"};
+      switch (id(r_src)) {
+        case 1: return {"esp-now"};
+        case 2: return {"ble"};
+        default: return {"unknown"};
+      }
+
+  - platform: template
+    name: "Link Age"
+    id: link_age
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: |-
+      if (id(r_stamp) == 0) return {"no data"};
+      if (!id(sntp_time).now().is_valid()) return {"unknown"};
+      const uint32_t age = id(sntp_time).now().timestamp - id(r_stamp);
+      char buf[24];
+      if (age < 90)         snprintf(buf, sizeof(buf), "%us ago", (unsigned) age);
+      else if (age < 5400)  snprintf(buf, sizeof(buf), "%um ago", (unsigned) (age / 60));
+      else                  snprintf(buf, sizeof(buf), "%uh ago", (unsigned) (age / 3600));
+      return {buf};
+
+binary_sensor:
+  # The controller notifies every 5s, so 45s is nine missed rounds -- long
+  # enough not to flap on a dropped notification, short enough to notice
+  # before you have made a decision based on a stale screen.
+  #
+  # Deliberately NOT the same thing as r_ble_connected: a GATT connection
+  # can stay up while notifications stop, and that failure looks identical
+  # to a healthy link if you only watch the connection state.
+  - platform: template
+    name: "Controller Link"
+    id: controller_link
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: |-
+      if (id(r_stamp_ms) == 0) return false;
+      return (millis() - id(r_stamp_ms)) < 45000;
+
+  - platform: template
+    name: "BLE Connected"
+    id: ble_connected
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: "return id(r_ble_connected);"
