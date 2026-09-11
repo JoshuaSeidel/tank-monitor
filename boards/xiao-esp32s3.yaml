@@ -136,17 +136,43 @@ output:
   # contacts: a shorter window would give finer control at the cost of
   # burning through switching cycles. Pinned full-on or full-off costs
   # nothing, so the wear only happens at partial duty.
+  #
+  # BUG FIX 2026-09-11: these two outputs were missing state_change_action,
+  # and this board is the live controller. packages/control.yaml DEFINES
+  # heater_relay and fan_relay but deliberately does not publish them -- its
+  # own comment says they are "published from slow_pwm's state_change_action
+  # in the board file". It seeds both false in on_boot and then waits.
+  #
+  # So the "Heater" and "Fan" entities read off permanently: the tank
+  # regulated correctly the whole time while Home Assistant showed a heater
+  # that never ran, and any history or automation keyed on them was wrong.
+  # Silent in exactly the way this project keeps getting caught by -- nothing
+  # logs it, and the number it sits at is a plausible one.
+  #
+  # boards/esp32-wroom32.yaml, lafvin-esp32c6.yaml and esp32s3-mini.yaml all
+  # had this from the start. Only this file missed it.
+  #
+  # Purely additive: nothing about the switching, the duty or the control
+  # loop changes. Two entities that were frozen start telling the truth.
   - platform: slow_pwm
     id: heater_output
     # Silkscreen D8.
     pin: GPIO7
     period: 900s
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return state;"
 
   - platform: slow_pwm
     id: fan_output
     # Silkscreen D9.
     pin: GPIO8
     period: 900s
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
 
 # ---------------------------------------------------------------
 # BUILD GUARD: this controller carries the BLE link, and must
