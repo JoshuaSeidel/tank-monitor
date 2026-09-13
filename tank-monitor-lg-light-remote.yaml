@@ -1,13 +1,32 @@
 # LARGE TANK light bridge -- Chihiros WRGB II Pro 120 over BLE.
 # Put THIS file in the ESPHome dashboard.
 #
-# A dedicated ESP32-S3-N16R8 that does one thing: connect to the light,
-# push a schedule or a colour, disconnect. It is deliberately NOT on the
-# lg-dual controller (which runs a BLE server for the panel) and NOT on the
-# 4.3" panel (which holds a persistent BLE client to the controller). The
+# A dedicated board that does one thing: connect to the light, push a
+# schedule or a colour, disconnect. It is deliberately NOT on the lg-dual
+# controller (which runs a BLE server for the panel) and NOT on the 4.3"
+# panel (which holds a persistent BLE client to the controller). The
 # Chihiros bridge firmware crashes under concurrent BLE connections -- its
 # own README says so -- and lights are not life support. Keep it away from
 # the boards that are.
+#
+# ---------------------------------------------------------------------
+# BOARD: currently a WROOM-32, and that is an EXPERIMENT
+# ---------------------------------------------------------------------
+# The bridge's reference target is an ESP32-S3-N16R8. It is built here
+# for a classic ESP32 devkit because that is what is on the bench. The
+# classic ESP32 is BLE 4.2; the upstream author says Chihiros fixtures use
+# BLE 5.0 extended advertising and will not be detected. That is an
+# empirical claim, not a datasheet fact, and this build exists to test it:
+#
+#   sees the light -> the log shows
+#       [ble_scan] Chihiros found: WRGB2 Pro light -> set as wrgb2_mac ... MAC=...
+#       within a minute of boot. Put that MAC below and carry on.
+#
+#   does not      -> no "Chihiros found" line ever appears. The S3 is not
+#       optional. Swap the board line in files: below to
+#       aquarium-ble-bridge-board-s3.yaml and reflash on an S3.
+#
+# Either way the rest of this file is unchanged.
 #
 # ---------------------------------------------------------------------
 # Pulled from a DIFFERENT repo
@@ -78,6 +97,9 @@ packages:
     url: https://github.com/JoshuaSeidel/chihiros-esphome
     ref: main
     files:
+      # ONE board file. wroom32 = classic ESP32 devkit (4 MB, BLE 4.2).
+      # s3 = ESP32-S3-N16R8 (16 MB, BLE 5.0), the reference target.
+      - aquarium-ble-bridge-board-wroom32.yaml
       - aquarium-ble-bridge-core.yaml
       # Optional: logs any Chihiros device in range that is not in
       # known_macs. Keep it for the first flash; drop it later for a
