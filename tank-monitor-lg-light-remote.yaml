@@ -1,0 +1,97 @@
+# LARGE TANK light bridge -- Chihiros WRGB II Pro 120 over BLE.
+# Put THIS file in the ESPHome dashboard.
+#
+# A dedicated ESP32-S3-N16R8 that does one thing: connect to the light,
+# push a schedule or a colour, disconnect. It is deliberately NOT on the
+# lg-dual controller (which runs a BLE server for the panel) and NOT on the
+# 4.3" panel (which holds a persistent BLE client to the controller). The
+# Chihiros bridge firmware crashes under concurrent BLE connections -- its
+# own README says so -- and lights are not life support. Keep it away from
+# the boards that are.
+#
+# ---------------------------------------------------------------------
+# Pulled from a DIFFERENT repo
+# ---------------------------------------------------------------------
+# Every other wrapper here pulls JoshuaSeidel/tank-monitor. This one pulls
+# JoshuaSeidel/chihiros-esphome -- a fork of BartdeJonge/chihiros-esphome
+# carrying the WRGB II Pro white-channel support (upstream PR #4) and an
+# English translation. Its substitution names differ from tank-monitor's
+# (`name`, not `device_name`) because they are that project's, not ours.
+#
+# Secret key names ARE ours: wifi_ssid, wifi_password, timezone,
+# tank_monitor_ota_password and tank_monitor_api_key. The last one is new --
+# tank-monitor is MQTT-only and never needed a native-API key, but this
+# bridge gates every BLE connect on the native API being up. Generate with
+# `openssl rand -base64 32` and add it to the dashboard's secrets.yaml.
+#
+# ---------------------------------------------------------------------
+# wrgb2_mac -- you must set this
+# ---------------------------------------------------------------------
+# Flash once as-is: the build FAILS on the placeholder below, which is the
+# point. Set a real-looking dummy and it would compile, boot, and never
+# connect. Instead, temporarily set a known-bad-but-valid MAC like
+# 00:00:00:00:00:01, flash, and read the discovery log:
+#
+#   [ble_scan] Chihiros found: WRGB2 Pro light -> set as wrgb2_mac, wrgb2_pro: true | MAC=...
+#
+# The Pro 120 advertises as DYWPR120 (no O). Put that MAC in BOTH
+# wrgb2_mac and known_macs, reflash, and discovery goes quiet.
+#
+# ---------------------------------------------------------------------
+# What this does NOT do
+# ---------------------------------------------------------------------
+# It does not drive the light continuously. The light holds its own
+# schedule on its internal RTC; this bridge pushes changes and re-syncs the
+# clock. It does not talk to the lg-dual controller. The controller's two
+# BH1750s see the light regardless of who commands it, which is how the
+# lux-verification and CO2-on-measured-light automations work -- from
+# Home Assistant, off entities both devices publish.
+substitutions:
+  name: tank-monitor-lg-light
+  friendly_name: Tank Monitor LG Light
+
+  # ---- REPLACE THIS with the light's BLE MAC (see above) ----
+  wrgb2_mac:   "SET-ME-FROM-THE-DISCOVERY-LOG"
+  known_macs:  "SET-ME-FROM-THE-DISCOVERY-LOG"
+
+  # WRGB II Pro 120 = true WRGB, four channels. This is what turns the
+  # white channel on; leave it "true" for this fixture.
+  wrgb2_pro:   "true"
+
+  # Nordic UART Service UUIDs, shared by every Chihiros device.
+  ble_service: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+  ble_tx:      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+  ble_rx:      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+
+# The C++ protocol helpers come from the same repo as the packages. Both
+# refresh at 0s so a push to that fork's main is all the next build needs.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/chihiros-esphome
+      ref: main
+    components: [chihiros_ble]
+    refresh: 0s
+
+packages:
+  chihiros:
+    url: https://github.com/JoshuaSeidel/chihiros-esphome
+    ref: main
+    files:
+      - aquarium-ble-bridge-core.yaml
+      # Optional: logs any Chihiros device in range that is not in
+      # known_macs. Keep it for the first flash; drop it later for a
+      # quieter log if you like.
+      - aquarium-ble-bridge-discover.yaml
+      - aquarium-ble-bridge-schedule.yaml
+      - aquarium-ble-bridge-wrgb2.yaml
+    refresh: 0s
+
+# The one piece of logic a top-level file owns: which devices to tell when
+# the photoperiod moves. Only the light here.
+script:
+  - id: schedule_changed
+    mode: restart
+    then:
+      - delay: 1500ms
+      - script.execute: wrgb2_connect_when_ready
