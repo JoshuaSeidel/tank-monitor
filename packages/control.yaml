@@ -34,6 +34,14 @@ tank_controller:
   # Kept well above the 15 min actuator window so the controller isn't
   # demanding changes faster than the relay can actually resolve them.
   response_time: 30min
+  # How far above target the water must sit before the fan may run, degF.
+  # First-boot default only -- the "Fan Deadband" number below changes it
+  # live and the controller persists it, exactly like the setpoint. Was a
+  # fixed 0.5 in the component and showed up in the data as a 0.5 degF
+  # daytime plateau: the tank rose to exactly target+0.5 under the light and
+  # the fan held it there. 0.25 halves that for more fan time (and so more
+  # evaporation); watch a week of Temperature Swing before moving it again.
+  fan_deadband: 0.25
   update_interval: 30s
 
 number:
@@ -70,6 +78,29 @@ number:
       - tank_controller.set_setpoint:
           id: controller
           setpoint: !lambda "return (x - 32.0f) * 5.0f / 9.0f;"
+
+  # Same shape as Target Temperature, for the same reason: the controller
+  # owns and persists the value, this is a view onto it plus a way to
+  # change it. A span rather than a point, so the conversion is 5/9 with
+  # no 32 -- see _f_delta_to_c in the component.
+  #
+  # Trade-off it controls: smaller = tighter daytime hold, more fan runtime,
+  # more evaporation to top off. 0 = the fan answers any warm error at all.
+  - platform: template
+    name: "Fan Deadband"
+    id: fan_deadband
+    icon: "mdi:fan-alert"
+    unit_of_measurement: "°F"
+    min_value: 0.0
+    max_value: 2.0
+    step: 0.05
+    entity_category: config
+    lambda: "return id(controller).get_fan_deadband() * 9.0f / 5.0f;"
+    update_interval: 30s
+    set_action:
+      - tank_controller.set_fan_deadband:
+          id: controller
+          fan_deadband: !lambda "return x * 5.0f / 9.0f;"
 
 switch:
   - platform: template

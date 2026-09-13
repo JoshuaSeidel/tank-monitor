@@ -106,14 +106,26 @@ static const float GUARD_DEADBAND_F = 0.1f;
 static const float GUARD_DEADBAND = GUARD_DEADBAND_F * 5.0f / 9.0f;
 
 // How far above setpoint the tank must sit before the fan is worth running.
-// Deliberately much wider than GUARD_DEADBAND, and deliberately asymmetric
-// with the heater, because the tank is not symmetric: it sheds heat to a
-// cooler room at roughly 3.3 degF/h all by itself, so a small warm
-// excursion corrects on its own and a small cold one does not. Running an
-// evaporative fan against drift that is already going the right way costs
-// water and risks pushing the tank into the cool bands for nothing.
-static const float FAN_DEADBAND_F = 0.5f;
-static const float FAN_DEADBAND = FAN_DEADBAND_F * 5.0f / 9.0f;
+// Wider than GUARD_DEADBAND, and asymmetric with the heater on purpose:
+// running an evaporative fan against a small warm excursion costs water
+// and risks pushing the tank into the cool bands for nothing.
+//
+// This is now a runtime setting (fan_deadband_, the "Fan Deadband" number)
+// and this is only its first-boot default; the value is persisted like the
+// setpoint. It was a fixed 0.5 degF, justified by the tank shedding
+// "roughly 3.3 degF/h all by itself" so that warm excursions self-correct.
+// That figure is stale: with the mesh lid the tank measured 0.23 degF/h
+// unaided (2026-09-12, 0.7 degF in three hours after the light ramped
+// down), and the fixed band showed up in the data as a flat 0.5 degF
+// daytime plateau -- the tank rose to exactly setpoint+0.5 and the fan
+// held it there, the whole light period, every day. Half of the 0.9 degF
+// daily swing was this constant.
+//
+// The first-boot default itself lives with the other config defaults in
+// __init__.py (fan_deadband: 0.25). Only the ceiling is enforced here, in
+// degF for the human and converted once; see GUARD_DEADBAND_F.
+static const float FAN_DEADBAND_MAX_F = 2.0f;
+static const float FAN_DEADBAND_MAX = FAN_DEADBAND_MAX_F * 5.0f / 9.0f;
 
 // RLS forgetting factor. Very close to 1: the tank changes character over
 // days (evaporation, a new heater, summer), not over minutes.
@@ -174,6 +186,7 @@ void TankController::setup() {
   this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model_v3"));
   this->light_pref_ = global_preferences->make_preference<LightProfile>(fnv1_hash("tank_light"));
   this->setpoint_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_setpoint"));
+  this->fan_deadband_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_fan_deadband"));
 
   ThermalModel stored{};
   if (this->model_pref_.load(&stored) && !std::isnan(stored.theta[0])) {
@@ -188,6 +201,10 @@ void TankController::setup() {
   float sp = NAN;
   if (this->setpoint_pref_.load(&sp) && !std::isnan(sp))
     this->setpoint_ = clampf(sp, this->min_temp_, this->max_temp_);
+
+  float db = NAN;
+  if (this->fan_deadband_pref_.load(&db) && !std::isnan(db))
+    this->fan_deadband_ = clampf(db, 0.0f, FAN_DEADBAND_MAX);
 
   // Start with everything off until the first real reading arrives.
   this->apply_outputs_(0.0f, 0.0f);
@@ -205,6 +222,18 @@ void TankController::set_setpoint(float v) {
   // Old integral was accumulated against a different target.
   this->integral_ = 0.0f;
   this->setpoint_pref_.save(&v);
+}
+
+void TankController::set_fan_deadband(float v) {
+  if (std::isnan(v))
+    return;
+  v = clampf(v, 0.0f, FAN_DEADBAND_MAX);
+  if (v == this->fan_deadband_)
+    return;
+  this->fan_deadband_ = v;
+  // The integral is deliberately left alone: the clamps in update() zero
+  // whatever part of it the new band makes unusable on the next tick.
+  this->fan_deadband_pref_.save(&v);
 }
 
 void TankController::reset_learning() {
@@ -681,7 +710,7 @@ void TankController::update() {
              error * 9.0f / 5.0f);
     fan = 0.0f;
     this->state_text_ = "coasting (overruled)";
-  } else if (fan > 0.0f && error > -FAN_DEADBAND) {
+  } else if (fan > 0.0f && error > -this->fan_deadband_) {
     // Warm, but not by enough to be worth evaporating water over. Ordered
     // AFTER the sign guard on purpose: this branch is wide enough to
     // swallow the pathological below-setpoint case, and that one has to
@@ -693,6 +722,34 @@ void TankController::update() {
   // Anti-windup: if we're pinned at an actuator limit, stop integrating.
   if ((heater >= 1.0f && error > 0.0f) || (fan >= 1.0f && error < 0.0f))
     this->integral_ -= error * dt_min * ki;
+
+  // The same idea for the other end of the range. A rule that forbids an
+  // actuator is a saturation at zero, and the check above did not see it
+  // as one: the fan deadband zeroed the fan without touching the integral,
+  // so through every light period the tank sat inside the band, the error
+  // stayed negative, and the integral wound up to its cooling clamp asking
+  // for a fan it was not allowed to have. When the light ramped down and
+  // the water crossed back under setpoint, that stored demand had to
+  // unwind before the heater could command anything -- 50 minutes at a
+  // 0.2 degF error against the 1/rt^2 gain -- and the tank fell 0.3 degF
+  // below target waiting for it (2026-09-12: heater at 0.4% at 19:00,
+  // 13.7% at 20:00, water at 74.2 F against 74.5).
+  //
+  // Keyed on the rules, not on whether an actuator happened to be asked
+  // for this tick: integral in a direction the rules currently forbid is
+  // not a correction, it is a debt, whatever the rest of the sum did. And
+  // it is cleared rather than merely frozen -- freezing would still carry
+  // over whatever the fan had accumulated legitimately before the band
+  // closed. The heater's own integral is untouched while the fan is
+  // forbidden; that is exactly what catches the light-off cooling.
+  //
+  // Gated on a fan existing. Without one the negative side is the only
+  // thing that can trim an over-confident heater model, and clearing it
+  // would hand a fan-less tank a permanent warm offset.
+  if (this->fan_available_ && error > -this->fan_deadband_ && this->integral_ < 0.0f)
+    this->integral_ = 0.0f;
+  if (error < -GUARD_DEADBAND && this->integral_ > 0.0f)
+    this->integral_ = 0.0f;
 
   this->apply_outputs_(heater, fan);
 
@@ -761,6 +818,7 @@ void TankController::dump_config() {
                 this->min_temp_ * 9.0f / 5.0f + 32.0f, this->max_temp_ * 9.0f / 5.0f + 32.0f);
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
   ESP_LOGCONFIG(TAG, "  Fan available: %s", YESNO(this->fan_available_));
+  ESP_LOGCONFIG(TAG, "  Fan deadband: %.2f degF above setpoint", this->fan_deadband_ * 9.0f / 5.0f);
   ESP_LOGCONFIG(TAG, "  Learning: %s (%" PRIu32 " steps, %.0f%% confidence)", ONOFF(this->learning_enabled_),
                 this->model_.updates, this->get_confidence());
   ESP_LOGCONFIG(TAG, "  Model: kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", this->model_.theta[0], -this->model_.theta[1],

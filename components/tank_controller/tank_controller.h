@@ -98,6 +98,10 @@ class TankController : public PollingComponent {
 
   void set_setpoint(float v);
   float get_setpoint() const { return this->setpoint_; }
+  // How far above setpoint the water must be before the fan may run, degC.
+  // Persisted like the setpoint; the config value is the first-boot default.
+  void set_fan_deadband(float v);
+  float get_fan_deadband() const { return this->fan_deadband_; }
   void set_min_temperature(float v) { this->min_temp_ = v; }
   void set_max_temperature(float v) { this->max_temp_ = v; }
   void set_full_scale_lux(float v) { this->full_scale_lux_ = v; }
@@ -175,8 +179,12 @@ class TankController : public PollingComponent {
   ESPPreferenceObject model_pref_;
   ESPPreferenceObject light_pref_;
   ESPPreferenceObject setpoint_pref_;
+  ESPPreferenceObject fan_deadband_pref_;
 
   float setpoint_{25.0f};
+  // Overwritten from config before setup() and from flash during it; the
+  // literal only matters if neither happens. 0.25 degF.
+  float fan_deadband_{0.25f * 5.0f / 9.0f};
   float min_temp_{20.0f};
   float max_temp_{30.0f};
   float full_scale_lux_{2000.0f};
@@ -252,6 +260,16 @@ template<typename... Ts> class SetSetpointAction : public Action<Ts...> {
   explicit SetSetpointAction(TankController *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(float, value)
   void play(const Ts &...x) override { this->parent_->set_setpoint(this->value_.value(x...)); }
+
+ protected:
+  TankController *parent_;
+};
+
+template<typename... Ts> class SetFanDeadbandAction : public Action<Ts...> {
+ public:
+  explicit SetFanDeadbandAction(TankController *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(float, value)
+  void play(const Ts &...x) override { this->parent_->set_fan_deadband(this->value_.value(x...)); }
 
  protected:
   TankController *parent_;

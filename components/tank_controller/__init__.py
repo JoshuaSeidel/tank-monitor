@@ -22,6 +22,7 @@ CONF_MAX_TEMPERATURE = "max_temperature"
 CONF_FULL_SCALE_LUX = "full_scale_lux"
 CONF_RESPONSE_TIME = "response_time"
 CONF_LEARNING = "learning"
+CONF_FAN_DEADBAND = "fan_deadband"
 
 tank_controller_ns = cg.esphome_ns.namespace("tank_controller")
 TankController = tank_controller_ns.class_("TankController", cg.PollingComponent)
@@ -30,6 +31,9 @@ ResetLearningAction = tank_controller_ns.class_(
     "ResetLearningAction", automation.Action
 )
 SetSetpointAction = tank_controller_ns.class_("SetSetpointAction", automation.Action)
+SetFanDeadbandAction = tank_controller_ns.class_(
+    "SetFanDeadbandAction", automation.Action
+)
 SetLearningAction = tank_controller_ns.class_("SetLearningAction", automation.Action)
 ImportModelAction = tank_controller_ns.class_("ImportModelAction", automation.Action)
 
@@ -53,6 +57,17 @@ def _f_to_c(f):
     detail; nothing a user sets or reads is in it.
     """
     return (f - 32.0) * 5.0 / 9.0
+
+
+def _f_delta_to_c(f):
+    """A temperature *difference* in Fahrenheit, to Celsius.
+
+    Separate from _f_to_c on purpose: a deadband is a span, not a point, and
+    the 32 offset does not apply. Running 0.25 degF through _f_to_c gives
+    -17.6 degC, which the controller would clamp to zero -- a fan with no
+    deadband at all, silently.
+    """
+    return f * 5.0 / 9.0
 
 
 def _validate(config):
@@ -82,6 +97,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FULL_SCALE_LUX, default=2000.0): cv.positive_float,
             cv.Optional(CONF_RESPONSE_TIME, default="20min"): cv.positive_time_period_minutes,
             cv.Optional(CONF_LEARNING, default=True): cv.boolean,
+            # How far above setpoint the water must sit before the fan may
+            # run, degF. First-boot default only: the "Fan Deadband" number
+            # in control.yaml changes it at runtime and the controller
+            # persists it. 2.0 matches FAN_DEADBAND_MAX_F in the component.
+            cv.Optional(CONF_FAN_DEADBAND, default=0.25): cv.float_range(min=0.0, max=2.0),
         }
     ).extend(cv.polling_component_schema("30s")),
     _validate,
@@ -113,6 +133,7 @@ async def to_code(config):
     cg.add(var.set_full_scale_lux(config[CONF_FULL_SCALE_LUX]))
     cg.add(var.set_response_time(config[CONF_RESPONSE_TIME].total_minutes))
     cg.add(var.set_learning_enabled(config[CONF_LEARNING]))
+    cg.add(var.set_fan_deadband(_f_delta_to_c(config[CONF_FAN_DEADBAND])))
 
 
 CONTROLLER_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(TankController)})
@@ -143,6 +164,21 @@ async def set_setpoint_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, paren)
     cg.add(var.set_value(await cg.templatable(config[CONF_SETPOINT], args, float)))
+    return var
+
+
+@automation.register_action(
+    "tank_controller.set_fan_deadband",
+    SetFanDeadbandAction,
+    CONTROLLER_ACTION_SCHEMA.extend(
+        {cv.Required(CONF_FAN_DEADBAND): cv.templatable(cv.float_)}
+    ),
+    synchronous=True,
+)
+async def set_fan_deadband_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, paren)
+    cg.add(var.set_value(await cg.templatable(config[CONF_FAN_DEADBAND], args, float)))
     return var
 
 
