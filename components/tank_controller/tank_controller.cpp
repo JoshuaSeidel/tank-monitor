@@ -92,7 +92,19 @@ static const float INFO_MIN = 5e-5f;
 
 // Ceiling on what the integral term alone may command, as a fraction of
 // heater duty. See the clamp for why this is not a fixed rate.
-static const float INTEGRAL_AUTHORITY = 0.3f;
+//
+// 0.3 -> 0.5 on 2026-09-14. The 0.3 was sized against an overshoot that
+// happened when a flat clamp let the integral outvote the measurement;
+// since then the sign guard forbids heat above setpoint+0.1 F and the
+// clearing below zeroes any positive integral the moment it does, so the
+// integral cannot carry heat through setpoint any more and the overshoot
+// that 0.3 guarded against is bounded by those instead (~0.2 F). What 0.3
+// could NOT do was hold a steady load the model has not learned yet: the
+// tank moved to the floor and lost the canister's heat, its passive loss
+// went past 30% of heater authority, and it sat cold with the integral
+// pinned while RLS caught up. Half the heater is enough headroom for any
+// room this tank will sit in.
+static const float INTEGRAL_AUTHORITY = 0.5f;
 
 // Sign guard deadband. Inside it the feedforward is free to act
 // predictively; outside it the measured error decides the direction.
@@ -104,6 +116,22 @@ static const float INTEGRAL_AUTHORITY = 0.3f;
 // or a screen.
 static const float GUARD_DEADBAND_F = 0.1f;
 static const float GUARD_DEADBAND = GUARD_DEADBAND_F * 5.0f / 9.0f;
+
+// Readings outside this window are not temperatures, they are faults, and
+// they take the no-probe path (heater off after SENSOR_TIMEOUT_MS) rather
+// than the under/over-temperature cutouts. The cutouts assume the number
+// is real; these bounds are where that assumption stops. A DS18B20 with a
+// marginal data line reads all zeros, and CRC(0...0) == 0 passes, so the
+// probe delivers a perfectly valid 0.0 C. On 2026-09-13 that ran the
+// heater at 100% for 25 minutes into a 74.5 F tank, because 0 C is below
+// min_temperature and that branch heats. sensors.yaml converts the two
+// known signatures (0 C, 85 C power-on) to NaN before they get here; this
+// is the backstop for any board that does not, and for whatever the next
+// bogus number turns out to be. 41-140 F: no aquarium on earth is outside it.
+static const float PLAUSIBLE_MIN_F = 41.0f;
+static const float PLAUSIBLE_MAX_F = 140.0f;
+static const float PLAUSIBLE_MIN = (PLAUSIBLE_MIN_F - 32.0f) * 5.0f / 9.0f;
+static const float PLAUSIBLE_MAX = (PLAUSIBLE_MAX_F - 32.0f) * 5.0f / 9.0f;
 
 // How far above setpoint the tank must sit before the fan is worth running.
 // Wider than GUARD_DEADBAND, and asymmetric with the heater on purpose:
@@ -472,7 +500,13 @@ void TankController::update() {
   const float dt_min = (now - this->last_update_ms_) / 60000.0f;
   this->last_update_ms_ = now;
 
-  const float t = this->temp_sensor_ == nullptr ? NAN : this->temp_sensor_->state;
+  float t = this->temp_sensor_ == nullptr ? NAN : this->temp_sensor_->state;
+
+  if (!std::isnan(t) && (t < PLAUSIBLE_MIN || t > PLAUSIBLE_MAX)) {
+    ESP_LOGW(TAG, "Reading of %.1f degF is not a water temperature - treating the probe as missing",
+             t * 9.0f / 5.0f + 32.0f);
+    t = NAN;
+  }
 
   if (std::isnan(t)) {
     if (this->missing_since_ms_ == 0)

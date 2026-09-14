@@ -31,9 +31,13 @@ tank_controller:
   # Bright aquarium light at the sensor, in lux. Used to normalise.
   full_scale_lux: 3000
   # How aggressively to close a temperature error. Longer = gentler.
-  # Kept well above the 15 min actuator window so the controller isn't
+  # Kept above the 15 min actuator window so the controller isn't
   # demanding changes faster than the relay can actually resolve them.
-  response_time: 30min
+  # 30 -> 20 on 2026-09-14: the tank moved from 4 ft up to the floor and
+  # lost the canister filter's heat, so it now cools faster than the old
+  # gentle setting could chase -- low-temperature alerts fired. 20 is
+  # 1.5x the proportional gain and 2.25x the integral gain (ki = 1/rt^2).
+  response_time: 20min
   # How far above target the water must sit before the fan may run, degF.
   # First-boot default only -- the "Fan Deadband" number below changes it
   # live and the controller persists it, exactly like the setpoint. Was a

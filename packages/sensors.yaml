@@ -29,6 +29,21 @@ sensor:
           window_size: 5
           send_every: 1
           send_first_at: 1
+      # Plausibility, AFTER the median so a single glitch is still absorbed
+      # and only a sustained bogus value gets through to here. Two readings a
+      # DS18B20 produces that are never a water temperature: exactly 0.0 C,
+      # which is an all-zero bus read on a marginal data line -- and the CRC
+      # of all zeros is zero, so it PASSES -- and 85.0 C, the power-on reset
+      # value. On 2026-09-13, after the tank was moved, the probe returned a
+      # clean 0.0 C for 25 minutes; the controller took it at face value as
+      # an ice-cold tank and ran the heater at 100% into water that was
+      # actually at 74.5 F. Converted to NaN, not dropped: a dropped sample
+      # leaves the last good value in id(water_temp).state forever, which
+      # is the stale-reading failure the comment above is about. NaN makes
+      # the controller cut the heater after 120 s, the same as a dead probe.
+      - lambda: |-
+          if (x == 0.0f || x >= 85.0f) return NAN;
+          return x;
       # Calibration offset, applied HERE rather than on the published
       # Fahrenheit sensor: the controller reads this one, so correcting it
       # anywhere else would leave the control loop working from the
