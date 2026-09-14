@@ -137,10 +137,14 @@ sensor:
     update_interval: 30s
     entity_category: diagnostic
     lambda: "if (isnan(id(chem_gh))) return {}; return id(chem_gh);"
+  # ppm, like GH: the wire carries the raw helper state and both helpers
+  # are ppm. This label said dKH for a while and the value never was --
+  # Home Assistant converts nothing, it just repeats what we declare.
+  # Degrees live in the HA-side *_log sensors (value / 17.9), nowhere here.
   - platform: template
     name: "Chem KH"
-    unit_of_measurement: "dKH"
-    accuracy_decimals: 1
+    unit_of_measurement: "ppm"
+    accuracy_decimals: 0
     update_interval: 30s
     entity_category: diagnostic
     lambda: "if (isnan(id(chem_kh))) return {}; return id(chem_kh);"
