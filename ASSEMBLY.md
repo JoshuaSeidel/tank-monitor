@@ -10,6 +10,9 @@ Four boards are covered here and they wire up differently:
   headless controller. Same wiring as the C6 on different pins.
 - **[ESP32-S3 mini (`tank-monitor-s3`)](#esp32-s3-mini-tank-monitor-s3)** —
   headless controller in 23 × 18 mm. Solder directly to the board.
+- **[XIAO ESP32-S3, large tank (`tank-monitor-lg`)](#xiao-esp32-s3-large-tank-tank-monitor-lg)** —
+  headless controller, two of everything. Sensors on an ADS1115, three relay
+  channels, two 1-Wire buses. Needs a power rail, not a splice.
 
 Build order matters on both: power bus first, sensors one at a time, relay
 last. That way if something is wrong you know which step caused it.
@@ -489,3 +492,311 @@ each other's entities as fast as they appear.
 To let a remote panel read this board instead of the C6, uncomment
 `packages/espnow_link.yaml` in the wrapper **and** point that panel's
 `source_device` substitution at this device's name.
+
+
+# XIAO ESP32-S3, large tank (`tank-monitor-lg`)
+
+The second tank's controller. Same silicon as the 12-gal XIAO, a different
+wet side: **two DS18B20 probes, two BH1750 light sensors, pH and TDS on an
+ADS1115, and three relay channels** — heater A, heater B, fan. Config is
+`boards/xiao-esp32s3-lg-dual.yaml`; wrapper is `tank-monitor-lg-remote.yaml`.
+
+Follow the C6 build for technique: steps 2 (pre-tin), 8 (inspect) and 10
+(before it goes near water) apply unchanged. The power step is **different**
+— see below — because this board has roughly twice the conductors of any
+other in this file.
+
+## What you need
+
+- The XIAO ESP32-S3 (8 MB flash / 8 MB PSRAM — check the label, the S3 mini
+  is a different board and a different config)
+- ADS1115 breakout (16-bit, 4-channel, I2C)
+- 2 × DS18B20 waterproof probes
+- 2 × BH1750 breakouts
+- DFRobot Gravity TDS board (SEN0244) + probe
+- DFRobot Gravity pH board **SEN0169-V2** + BNC probe — the V2 specifically,
+  it outputs 0–3 V. The classic SEN0169 outputs 0–5 V and will damage the
+  ADS1115 at the 3.3 V rail it must run on
+- D-1585TL 4-channel IoT relay outlet (the 4-outlet sibling of the D-1584TL
+  you already run)
+- 2 × 4.7 kΩ resistors, 1/4 W
+- A scrap of perfboard, ~20 × 40 mm, for the power rails
+- 26–28 AWG silicone hookup wire, heat shrink, iron, multimeter — as for the C6
+
+Optional: 100 µF electrolytic + 100 nF ceramic across 3V3/GND at the rail.
+The XIAO regulates better than the S3 mini and the 12-gal XIAO has run
+without them; cheap insurance if you have them in the drawer.
+
+## Read this before you pick up the iron
+
+**The pad labels are not GPIO numbers.** The XIAO is silkscreened `D0`–`D10`
+and those are *not* the GPIOs the config uses — `D3` is GPIO4, `D8` is GPIO7.
+Wiring to the pad whose printed number matches a GPIO lands on the wrong pin,
+and every symptom of that is silent: a probe on the wrong bus reports "No
+devices", an analog input on the wrong pad reads plausible nonsense. **Wire
+by the `D` column of the table below and nothing else.**
+
+**`D2` stays empty.** It is GPIO3, an S3 strapping pin. Nothing may hold it
+at a level during boot.
+
+**Ignore the small alternate-function labels.** Next to the `D` numbers the
+silkscreen also prints `SDA` beside `D4` and `SCL` beside `D5` — the chip's
+*default* I2C pair — and `TX`/`RX` beside `D6`/`D7`. This config does **not**
+use them that way: I2C is on `D6`/`D7`, `D4` is a relay, `D5` is a probe.
+Wire I2C to the pads marked `SDA`/`SCL` and you have put the light sensors
+on the heater-B relay line. Follow the `D` number, nothing else.
+
+**The ADS1115 runs from 3V3, not 5V.** Its I2C logic threshold is 0.7 × VDD:
+at 5 V that is 3.5 V, and the XIAO drives 3.3 V, so highs are marginal and it
+fails intermittently. Its absolute-max analog input is VDD + 0.3 V, so the
+3.3 V rail also caps what the Gravity boards may feed it.
+
+## Pin map
+
+Top view, USB-C at the top. Left column `D0`–`D6` top to bottom; right column
+`5V`, `GND`, `3V3`, `D10`, `D9`, `D8`, `D7` top to bottom.
+
+| Pad | GPIO | Goes to |
+|---|---|---|
+| `D0` | 1 | DS18B20 **B** yellow (DQ) — cross-check probe, bus B |
+| `D1` | 2 | *spare* (ADC1) |
+| `D2` | 3 | **nothing — strapping pin** |
+| `D3` | 4 | *spare* (ADC1) |
+| `D4` | 5 | Relay Ch2 `IN+` — **heater B** |
+| `D5` | 6 | DS18B20 **A** yellow (DQ) — control probe, bus A |
+| `D6` | 43 | I2C `SDA` — ADS1115, both BH1750s |
+| `D7` | 44 | I2C `SCL` — ADS1115, both BH1750s |
+| `D8` | 7 | Relay Ch1 `IN+` — **heater A** |
+| `D9` | 8 | Relay Ch3 `IN+` — **fan(s)** |
+| `D10` | 9 | *spare* (ADC1) |
+| `3V3` | — | the 3V3 rail (one pigtail) |
+| `GND` | — | the GND rail (one pigtail) |
+| `5V` | — | unused |
+
+Heater A and probe A are the **same half of the tank**; B and B the other.
+That pairing is a wiring fact the firmware cannot verify, and if it is
+backwards every gradient reading points at the wrong end. Label the probe
+leads before they go in the water.
+
+I2C is on `D6`/`D7` = GPIO43/44, which are also UART0. That is fine: the
+XIAO's console is native USB, so UART0 is free. It is why the **relays are
+not** on those pads — the ROM bootloader prints on TX at every reset, and a
+few milliseconds of that on an optocoupled relay input is an audible click
+of the heater on every boot.
+
+## Power distribution — build a rail, do not splice
+
+Count the conductors:
+
+| Rail | Wires |
+|---|---|
+| 3V3 | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, BH1750 B `ADDR`, ADS1115 `VDD`, TDS board, pH board, pull-up A, pull-up B — **10** |
+| GND | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, ADS1115 `GND`, ADS1115 `ADDR`, TDS board, pH board, relay `IN−` — **9** |
+
+Twenty conductors. The C6 section says ten is past what one twisted joint
+holds; this is twice that. So: **perfboard**.
+
+Take the scrap of perfboard. Pick two rows a few holes apart and bridge each
+row with a run of solder or a length of bare bus wire — that gives you a
+3V3 rail and a GND rail, each with a dozen tinned holes. Solder one pigtail
+from each rail to the XIAO's `3V3` and `GND` pads. Every sensor's power lead
+then goes to a hole on the appropriate rail, one wire per hole, each with
+its own joint.
+
+Mark which rail is which with a permanent marker before the first wire goes
+on. A 3V3/GND swap on a rail takes every sensor with it.
+
+If you are using the decoupling caps, they go across the two rails on the
+perfboard, right where the XIAO pigtails land.
+
+## 1. Prep and pre-tin
+
+C6 steps 1–2. Tin only the pads in the table: `D0`, `D4`, `D5`, `D6`, `D7`,
+`D8`, `D9`, `3V3`, `GND`. Leave `D2` untouched — bare, untinned, nothing
+near it.
+
+## 2. Build the rails
+
+As above. Pigtails to the XIAO first, then check continuity from each rail
+to its pad with the meter. Then nothing else on the rails until step 3.
+
+## 3. The ADS1115 — first on the bus, closest to the board
+
+This is the one I2C device that carries analog signals, so it sits **as
+close to the XIAO as the wiring allows** — a few centimetres of `SDA`/`SCL`,
+not a run.
+
+| ADS1115 pin | Goes to |
+|---|---|
+| `VDD` | 3V3 rail |
+| `GND` | GND rail |
+| `SDA` | `D6` |
+| `SCL` | `D7` |
+| `ADDR` | GND rail — **explicitly**, not floating. 0x48 |
+| `ALRT` | unconnected |
+| `A0` | TDS board signal (step 4) |
+| `A1` | pH board signal (step 4) |
+| `A2`, `A3` | unconnected |
+
+Two more wires now go to `D6` and `D7` later (the BH1750s). Leave enough
+tinned pad to land them, or better, bring `SDA` and `SCL` from the XIAO to
+two more perfboard holes and fan out from there — same idea as the rails.
+
+## 4. pH and TDS into the ADS1115
+
+Both Gravity boards run from the **3V3 rail**. The TDS board (SEN0244)
+outputs 0–2.3 V; the pH board (SEN0169-V2) outputs 0–3.0 V. Both sit under
+the ADS1115's 3.6 V ceiling. Confirm you have the V2 before this step.
+
+| Board | Wire | Goes to |
+|---|---|---|
+| TDS | red / `+` | 3V3 rail |
+| TDS | black / `−` | GND rail |
+| TDS | `A` | ADS1115 `A0` |
+| pH | red | 3V3 rail |
+| pH | black | GND rail |
+| pH | blue (analog out) | ADS1115 `A1` |
+
+**Route both signal wires away from the relay module's mains cord**, and
+from each other's power leads where you can. The pH signal in particular is
+the one that will pick up 60 Hz hum and give you a wandering reading that
+is not a probe fault.
+
+## 5. The two BH1750s and their addresses
+
+They share the I2C bus with the ADS1115 and tell themselves apart by the
+`ADDR` pin. **This is the whole trick** — two identical boards, one address
+pin each, wired opposite:
+
+| | `VCC` | `GND` | `SDA` | `SCL` | `ADDR` | Address |
+|---|---|---|---|---|---|---|
+| BH1750 **A** | 3V3 rail | GND rail | `D6` | `D7` | **unconnected** | 0x23 |
+| BH1750 **B** | 3V3 rail | GND rail | `D6` | `D7` | **3V3 rail** | 0x5C |
+
+Get both `ADDR` pins the same way round and the I2C scan shows one device
+where you expect two — and the config's second sensor never publishes.
+
+These are the two devices most likely to sit far from the board, up near
+the light. I2C is not built for length: **keep each run under ~1 m and use
+shielded or twisted-pair cable** for `SDA`/`SCL`. If the boot log shows I2C
+errors or one sensor comes and goes, the run is too long — halving the bus
+speed (`frequency: 50kHz` under `i2c:` in the board file) is the fix before
+rewiring is.
+
+## 6. Two 1-Wire buses, two pull-ups
+
+Two probes, and they are **deliberately on separate buses** so neither
+needs an address in the config and a flooded probe takes down only itself.
+Each bus is exactly the C6's step 6, done twice:
+
+| Probe | Red | Black | Yellow (DQ) | 4.7 kΩ |
+|---|---|---|---|---|
+| DS18B20 **A** (control, heater-A half) | 3V3 rail | GND rail | `D5` | between `D5` and the 3V3 rail |
+| DS18B20 **B** (cross-check, heater-B half) | 3V3 rail | GND rail | `D0` | between `D0` and the 3V3 rail |
+
+Pull-up at the *board* end, not out at the probe. Sleeve both resistor legs.
+Without it that bus reports "No devices, can't auto-select address", which
+is indistinguishable from the probe being on the wrong pad.
+
+Label the probe leads **A** and **B** now, at the board, before they are
+routed. Once they are in the tank they look identical.
+
+## 7. Relay control, three channels
+
+Low-voltage terminals only. Do not open the module or touch its mains side
+— it has its own cord. The D-1585TL takes 3–120 V DC on its control
+terminals and is **active-high**, so the XIAO's 3.3 V drives it directly.
+
+| XIAO pad | D-1585TL |
+|---|---|
+| `D8` | Channel 1 `IN+` — **heater A** |
+| `D4` | Channel 2 `IN+` — **heater B** |
+| `D9` | Channel 3 `IN+` — **fan(s)**, all in parallel on this one outlet |
+| GND rail | `IN−` on channels 1, 2 and 3, jumpered together |
+| — | Channel 4 — spare, nothing connected |
+
+Note `D4` for heater B, not `D3` — `D3` is a spare ADC pin and `D4` is
+GPIO5. Easy to land one pad over.
+
+3.3 V is the **bottom** of the module's 3–120 V control range. It works —
+your 2-channel D-1584TL runs on it today — but it means the internal opto
+LED is at minimum forward current. If a channel ever latches on and will not
+release, that is the symptom, and the fix is feeding that `IN+` through the
+GPIO from the XIAO's `5V` pad rather than 3.3 V. Not a reason to change
+anything now.
+
+## 8. Inspect
+
+C6 step 8. Then three checks specific to this build, all with the board
+**unpowered**:
+
+- Meter from `D2` to everything. It should be open to all of it.
+- Meter from the 3V3 rail to the GND rail. Open. If it beeps, one of the
+  twenty wires is on the wrong rail — find it now, not with smoke.
+- Meter from BH1750 A's `ADDR` to BH1750 B's `ADDR`. Open. If they are
+  connected, they are on the same address.
+
+## 9. Power up in stages — what the log should say
+
+USB-C from a wall adapter. Flash `tank-monitor-lg-remote.yaml` and watch the
+serial log. In order:
+
+**I2C scan** — the first thing you want to see, and it names all three:
+
+```
+[I][i2c.idf]: Found i2c device at address 0x23
+[I][i2c.idf]: Found i2c device at address 0x48
+[I][i2c.idf]: Found i2c device at address 0x5C
+```
+
+One missing is a wiring fault on that device. `0x23` present and `0x5C`
+absent is BH1750 B's `ADDR` not reaching 3V3. `0x48` absent is the ADS1115
+— check its `VDD` is on 3V3 and `ADDR` is actually tied to GND.
+
+**Two 1-Wire buses**, each reporting one device:
+
+```
+[I][one_wire.gpio]: Found devices:
+[I][one_wire.gpio]:   0x...   (bus on GPIO6)
+[I][one_wire.gpio]: Found devices:
+[I][one_wire.gpio]:   0x...   (bus on GPIO1)
+```
+
+"No devices" on one bus and not the other is that bus's pull-up or its
+yellow wire on the wrong pad.
+
+**Then** check Home Assistant: `Water Temperature` and `Water Temperature B`
+both reporting and roughly agreeing, `TDS` and `pH` present and not NaN,
+both light levels present, and — the one people forget — the relay
+binary sensors present and **off**: `Heater` (the pair), `Heater Left`,
+`Heater Right` and `Fan`. The side names come from `side_a_name` /
+`side_b_name` in the wrapper; if you changed those, the entities follow.
+
+**Then** the relays. From HA, raise the setpoint a few degrees above the
+water temperature and watch `Heater Left` and `Heater Right` go on
+**together** — both, at the same moment. They share one duty and one
+phase-locked window. If only one goes, its `IN+` is on the wrong pad.
+
+**This can take up to fifteen minutes.** The heaters are driven by a
+time-proportional window of 900 s, and a duty change is picked up at the
+next window boundary, not instantly. Wait it out before deciding something
+is wrong — and listen for the relay click, which is unmistakable. Then drop
+the setpoint and watch both release, again within a window.
+
+## 10. Before it goes near water
+
+C6 step 10, then two things this board needs that the others did not:
+
+**Cross-calibrate the probes in one cup.** Two DS18B20 are ±0.5 °C absolute
+and can read nearly a degree apart in identical water. Put both in the same
+glass, wait ten minutes, and set `Cal Temp Offset B` until they agree. Every
+gradient reading on this tank is downstream of that number, and the
+`Probe Disagreement` alarm fires off it.
+
+**Recalibrate pH and TDS.** The stored calibration in NVS is in volts read by
+a *different* ADC, and it survives a flash. The C6 → S3 swap moved TDS by
+~30 % for exactly this reason. Both calibration procedures are in the
+README; do them before believing any chemistry number this board reports.
+
+Then set `side_a_name` / `side_b_name` in the wrapper to match how you
+actually mounted things, and label the outside of the tank to match.
