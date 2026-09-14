@@ -89,8 +89,20 @@ ch422g:
 display:
   - platform: rpi_dpi_rgb
     id: tank_display
-    update_interval: 1s
-    auto_clear_enabled: true
+    # 5s: the controller notifies every 5s, so nothing changes faster than
+    # that. Redrawing at 1s was pure waste -- and a full redraw here costs
+    # ~2.4s, not the ~30ms first estimated, because every primitive on this
+    # driver lands as ONE esp_lcd call PER PIXEL (see the frect helper).
+    update_interval: 5s
+    # NEVER auto-clear on an RGB panel. The peripheral streams the
+    # framebuffer to the glass continuously, so a clear-then-redraw is
+    # watched live: black, then a top-to-bottom paint, every cycle. Instead
+    # each region repaints its own background before its content, and the
+    # only full clear is the first frame and a page change -- see
+    # panel_dirty.
+    auto_clear_enabled: false
+    on_page_change:
+      - lambda: id(panel_dirty) = true;
     color_order: RGB
     pclk_frequency: 14MHz
     dimensions:
@@ -140,13 +152,35 @@ display:
           const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
           const Color GOOD(12, 163, 12), BAD(208, 59, 59), TRACK(30, 37, 46);
 
-          it.fill(BG);
+          // ---- bulk fill ----
+          // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
+          // call per pixel, and every base-class primitive -- fill,
+          // filled_rectangle, horizontal_line -- is built on it. A full
+          // screen is 384,000 driver calls and takes ~2.4s. This writes one
+          // prepared row per call instead: a card is ~124 calls, a full
+          // clear 480. Same pixel format the driver's own draw_pixel_at
+          // uses. Rotation is not applied (this panel is rotation 0).
+          auto frect = [&](int x, int y, int w, int h, Color c) {
+            if (w <= 0 || h <= 0) return;
+            static uint16_t row[800];
+            if (w > 800) w = 800;
+            const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
+            for (int i = 0; i < w; i++) row[i] = px;
+            for (int j = 0; j < h; j++)
+              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+                                display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
+                                true, 0, 0, 0);
+          };
+          if (id(panel_dirty)) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
+          // The top bar carries the clock, so its background is repainted
+          // every update; everything else repaints inside its own card.
+          frect(0, 0, 800, 42, BG);
 
           // Rounded rectangle. There is no rrect primitive, so: a cross of
           // two rects plus four corner circles. Cheap and exact.
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
-            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
-            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            frect(x + r, y, w - 2 * r, h, c);
+            frect(x, y + r, w, h - 2 * r, c);
             it.filled_circle(x + r, y + r, r, c);
             it.filled_circle(x + w - r - 1, y + r, r, c);
             it.filled_circle(x + r, y + h - r - 1, r, c);
@@ -255,21 +289,21 @@ display:
             it.print(342 + 108, 254, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F");
             // Diverging bar: centre tick, fill from centre toward the sign.
             const int bx = 342, by = 278, bw = 424;
-            it.filled_rectangle(bx, by, bw, 5, TRACK);
+            frect(bx, by, bw, 5, TRACK);
             float gc = g / 1.0f;
             if (gc > 1.0f) gc = 1.0f;
             if (gc < -1.0f) gc = -1.0f;
             const int half = bw / 2, len = (int) (half * (gc < 0 ? -gc : gc));
-            if (gc >= 0) it.filled_rectangle(bx + half, by, len, 5, ORANGE);
-            else         it.filled_rectangle(bx + half - len, by, len, 5, BLUE);
-            it.filled_rectangle(bx + half, by - 4, 2, 13, MUTED);
+            if (gc >= 0) frect(bx + half, by, len, 5, ORANGE);
+            else         frect(bx + half - len, by, len, 5, BLUE);
+            frect(bx + half, by - 4, 2, 13, MUTED);
           }
 
           tile(326, 310, 224, 116, "PH", id(water_ph).state, "%.2f", "", INK);
           tile(558, 310, 224, 116, "TDS", id(tds_mean).state, "%.0f", "ppm", INK);
 
           // ---- bottom bar ----
-          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          frect(0, 432, 800, 1, HAIR);
           auto pill = [&](int x, const char *txt, bool on, Color c) {
             const int w = 108;
             rr(x, 444, w, 26, 13, on ? Color(52, 30, 20) : CARD);
@@ -281,7 +315,7 @@ display:
           px = pill(px, "HEATER", id(r_heat_on), HEAT);
           px = pill(px, "FANS", id(r_fan_on), BLUE);
           // Page dots: current page is a bar, not a dot.
-          it.filled_rectangle(718, 454, 18, 6, BLUE);
+          frect(718, 454, 18, 6, BLUE);
           it.filled_circle(750, 457, 3, TRACK);
           it.filled_circle(768, 457, 3, TRACK);
 
@@ -302,10 +336,32 @@ display:
           const Color BLUE(57, 135, 229), HEAT(255, 138, 92), GOOD(12, 163, 12), BAD(208, 59, 59);
           const Color TRACK(30, 37, 46);
 
-          it.fill(BG);
+          // ---- bulk fill ----
+          // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
+          // call per pixel, and every base-class primitive -- fill,
+          // filled_rectangle, horizontal_line -- is built on it. A full
+          // screen is 384,000 driver calls and takes ~2.4s. This writes one
+          // prepared row per call instead: a card is ~124 calls, a full
+          // clear 480. Same pixel format the driver's own draw_pixel_at
+          // uses. Rotation is not applied (this panel is rotation 0).
+          auto frect = [&](int x, int y, int w, int h, Color c) {
+            if (w <= 0 || h <= 0) return;
+            static uint16_t row[800];
+            if (w > 800) w = 800;
+            const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
+            for (int i = 0; i < w; i++) row[i] = px;
+            for (int j = 0; j < h; j++)
+              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+                                display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
+                                true, 0, 0, 0);
+          };
+          if (id(panel_dirty)) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
+          // The top bar carries the clock, so its background is repainted
+          // every update; everything else repaints inside its own card.
+          frect(0, 0, 800, 42, BG);
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
-            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
-            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            frect(x + r, y, w - 2 * r, h, c);
+            frect(x, y + r, w, h - 2 * r, c);
             it.filled_circle(x + r, y + r, r, c);
             it.filled_circle(x + w - r - 1, y + r, r, c);
             it.filled_circle(x + r, y + h - r - 1, r, c);
@@ -325,19 +381,41 @@ display:
           const int BX0 = 130, BY0 = 104, BX1 = 446, BY1 = 302;  // back wall
           const Color WATER(20, 74, 106);
 
-          // Water surface seen from below.
-          it.filled_triangle(FX0, FY0, FX1, FY0, BX1, BY0, Color(120, 200, 226));
-          it.filled_triangle(FX0, FY0, BX1, BY0, BX0, BY0, Color(120, 200, 226));
-          // Side panes.
-          it.filled_triangle(FX0, FY0, BX0, BY0, BX0, BY1, Color(14, 44, 64));
-          it.filled_triangle(FX0, FY0, BX0, BY1, FX0, FY1, Color(14, 44, 64));
-          it.filled_triangle(FX1, FY0, BX1, BY0, BX1, BY1, Color(14, 44, 64));
-          it.filled_triangle(FX1, FY0, BX1, BY1, FX1, FY1, Color(14, 44, 64));
-          // Back wall, lit from above: one horizontal_line per row.
+          // Every quad below is drawn as ONE bulk span per row. filled_triangle
+          // is per-pixel on this driver and the two panes alone were ~55k
+          // calls; as spans they are ~330.
+          //
+          // Water surface seen from below: a trapezoid narrowing toward the
+          // back wall.
+          for (int y = FY0; y < BY0; y++) {
+            const float p = (float) (y - FY0) / (BY0 - FY0);
+            const int xl = (int) (FX0 + (BX0 - FX0) * p);
+            const int xr = (int) (FX1 + (BX1 - FX1) * p);
+            frect(xl, y, xr - xl, 1, mix(Color(120, 200, 226), Color(90, 170, 200), p));
+          }
+          // Side panes: for each row, the pane spans from the front edge to
+          // the back edge's x at that height. Above the back wall's top and
+          // below its bottom the inner edge follows the surface/floor.
+          for (int y = FY0; y < FY1; y++) {
+            int inner_l, inner_r;
+            if (y < BY0) {           // between surface and back-wall top
+              const float p = (float) (y - FY0) / (BY0 - FY0);
+              inner_l = (int) (FX0 + (BX0 - FX0) * p);
+              inner_r = (int) (FX1 + (BX1 - FX1) * p);
+            } else if (y < BY1) {    // alongside the back wall
+              inner_l = BX0; inner_r = BX1;
+            } else {                 // between back-wall bottom and floor
+              const float p = (float) (y - BY1) / (FY1 - BY1);
+              inner_l = (int) (BX0 + (FX0 - BX0) * p);
+              inner_r = (int) (BX1 + (FX1 - BX1) * p);
+            }
+            frect(FX0, y, inner_l - FX0, 1, Color(14, 44, 64));
+            frect(inner_r, y, FX1 - inner_r, 1, Color(14, 44, 64));
+          }
+          // Back wall, lit from above.
           for (int y = BY0; y < BY1; y++) {
             const float p = (float) (y - BY0) / (BY1 - BY0);
-            it.horizontal_line(BX0, y, BX1 - BX0,
-                               mix(Color(58, 144, 184), Color(12, 47, 71), p));
+            frect(BX0, y, BX1 - BX0, 1, mix(Color(58, 144, 184), Color(12, 47, 71), p));
           }
 
           // Substrate: black sand cap over Stratum, banked up at the back.
@@ -346,38 +424,48 @@ display:
             const float p = (float) (y - SBY) / (FY1 - SBY);
             const int xl = (int) (BX0 + (FX0 - BX0) * p);
             const int xr = (int) (BX1 + (FX1 - BX1) * p);
-            it.horizontal_line(xl, y, xr - xl, mix(Color(53, 67, 78), Color(36, 36, 42), p));
+            frect(xl, y, xr - xl, 1, mix(Color(53, 67, 78), Color(36, 36, 42), p));
           }
           // Cross-section through the front glass: 1.5in sand over 2in Stratum.
-          it.filled_rectangle(FX0, SFY, FX1 - FX0, 12, Color(38, 38, 44));
-          it.filled_rectangle(FX0, SFY + 12, FX1 - FX0, 16, Color(45, 34, 24));
-          it.horizontal_line(FX0, SFY + 12, FX1 - FX0, Color(74, 58, 42));
+          frect(FX0, SFY, FX1 - FX0, 12, Color(38, 38, 44));
+          frect(FX0, SFY + 12, FX1 - FX0, 16, Color(45, 34, 24));
+          frect(FX0, SFY + 12, FX1 - FX0, 1, Color(74, 58, 42));
 
           // Spray bar across the back, just under the surface.
-          it.filled_rectangle(BX0 + 8, 118, (BX1 - BX0) - 16, 8, Color(23, 67, 90));
-          it.filled_rectangle(284, 106, 9, 14, Color(23, 67, 90));
+          frect(BX0 + 8, 118, (BX1 - BX0) - 16, 8, Color(23, 67, 90));
+          frect(284, 106, 9, 14, Color(23, 67, 90));
           for (int x = BX0 + 24; x < BX1 - 16; x += 38)
             it.filled_circle(x, 128, 2, Color(58, 125, 153));
 
           // Intake, back-right corner.
-          it.filled_rectangle(430, 132, 10, 164, Color(18, 48, 63));
+          frect(430, 132, 10, 164, Color(18, 48, 63));
 
           // Heaters: vertical, inboard, mirrored about the centre feed.
           // Glow is nested filled_circle in precomputed blends -- the
           // background here is the known back-wall colour, so no alpha.
           auto heater = [&](int cx, bool on) {
-            if (on)
-              for (int r = 54; r > 0; r -= 6)
-                it.filled_circle(cx, 216, r, mix(WATER, Color(255, 122, 60), 0.42f * (1.0f - r / 54.0f)));
-            it.filled_rectangle(cx - 6, 150, 12, 108, Color(45, 77, 95));
-            it.filled_rectangle(cx - 4, 166, 8, 84, on ? Color(232, 130, 63) : Color(70, 86, 96));
+            // Glow as four stepped ellipses drawn row-by-row. filled_circle is
+            // per-pixel; nine nested ones per heater were ~40k calls each.
+            if (on) {
+              const int rs[4] = {54, 40, 27, 14};
+              for (int k = 0; k < 4; k++) {
+                const int r = rs[k];
+                const Color c = mix(WATER, Color(255, 122, 60), 0.42f * (1.0f - r / 54.0f));
+                for (int dy = -r; dy <= r; dy++) {
+                  const int half = (int) sqrtf((float) (r * r - dy * dy));
+                  frect(cx - half, 216 + dy, 2 * half, 1, c);
+                }
+              }
+            }
+            frect(cx - 6, 150, 12, 108, Color(45, 77, 95));
+            frect(cx - 4, 166, 8, 84, on ? Color(232, 130, 63) : Color(70, 86, 96));
           };
           heater(212, id(r_heat_on));
           heater(364, id(r_heat_on));
 
           // Probes: mirrored inboard, lateral to each heater.
           auto probe = [&](int cx) {
-            it.filled_rectangle(cx - 4, 172, 8, 66, Color(38, 54, 63));
+            frect(cx - 4, 172, 8, 66, Color(38, 54, 63));
             it.filled_circle(cx, 242, 6, Color(74, 163, 240));
           };
           probe(250);
@@ -393,7 +481,7 @@ display:
           it.line(BX0, BY0, BX0, BY1, EDGE);
           it.line(BX0, BY1, FX0, FY1, EDGE);
           it.line(BX0, BY0, BX1, BY0, EDGE);
-          it.filled_rectangle(282, FY0, 13, 48, Color(168, 216, 236));
+          frect(282, FY0, 13, 48, Color(168, 216, 236));
 
           // In-place probe readouts.
           const float ta_c = id(water_temp).state, tb_c = id(water_temp_b).state;
@@ -436,9 +524,9 @@ display:
           if (std::isnan(gi)) it.print(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
           else it.printf(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "%+.2f", gi);
 
-          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          frect(0, 432, 800, 1, HAIR);
           it.filled_circle(722, 457, 3, TRACK);
-          it.filled_rectangle(740, 454, 18, 6, BLUE);
+          frect(740, 454, 18, 6, BLUE);
           it.filled_circle(772, 457, 3, TRACK);
 
       # ===========================================================
@@ -450,10 +538,32 @@ display:
           const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
           const Color BLUE(57, 135, 229), AQUA(25, 158, 112), BAD(208, 59, 59), TRACK(30, 37, 46);
 
-          it.fill(BG);
+          // ---- bulk fill ----
+          // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
+          // call per pixel, and every base-class primitive -- fill,
+          // filled_rectangle, horizontal_line -- is built on it. A full
+          // screen is 384,000 driver calls and takes ~2.4s. This writes one
+          // prepared row per call instead: a card is ~124 calls, a full
+          // clear 480. Same pixel format the driver's own draw_pixel_at
+          // uses. Rotation is not applied (this panel is rotation 0).
+          auto frect = [&](int x, int y, int w, int h, Color c) {
+            if (w <= 0 || h <= 0) return;
+            static uint16_t row[800];
+            if (w > 800) w = 800;
+            const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
+            for (int i = 0; i < w; i++) row[i] = px;
+            for (int j = 0; j < h; j++)
+              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+                                display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
+                                true, 0, 0, 0);
+          };
+          if (id(panel_dirty)) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
+          // The top bar carries the clock, so its background is repainted
+          // every update; everything else repaints inside its own card.
+          frect(0, 0, 800, 42, BG);
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
-            it.filled_rectangle(x + r, y, w - 2 * r, h, c);
-            it.filled_rectangle(x, y + r, w, h - 2 * r, c);
+            frect(x + r, y, w - 2 * r, h, c);
+            frect(x, y + r, w, h - 2 * r, c);
             it.filled_circle(x + r, y + r, r, c);
             it.filled_circle(x + w - r - 1, y + r, r, c);
             it.filled_circle(x + r, y + h - r - 1, r, c);
@@ -534,12 +644,22 @@ display:
                 std::isnan(id(r_swing_c)) ? NAN : id(r_swing_c) * 9.0f / 5.0f, "%.2f", INK2, nullptr);
           small(658, "CONFIDENCE", id(r_confidence), "%.0f", INK2, nullptr);
 
-          it.filled_rectangle(0, 432, 800, 1, HAIR);
+          frect(0, 432, 800, 1, HAIR);
           it.print(20, 457, id(f_micro), MUTED, TextAlign::CENTER_LEFT,
                    id(link_age).state.c_str());
           it.filled_circle(722, 457, 3, TRACK);
           it.filled_circle(740, 457, 3, TRACK);
-          it.filled_rectangle(758, 454, 18, 6, BLUE);
+          frect(758, 454, 18, 6, BLUE);
+
+globals:
+  # True until the first frame has painted, and set again on every page
+  # change. Each page lambda does one full clear when it sees this, then
+  # lowers it. Not restored: after a reboot the framebuffer is garbage and
+  # must be cleared regardless.
+  - id: panel_dirty
+    type: bool
+    restore_value: false
+    initial_value: 'true'
 
 # Touch. Tap the right half for the next page, left half for the previous.
 # Page dots on every page show where you are, so there is a visible
