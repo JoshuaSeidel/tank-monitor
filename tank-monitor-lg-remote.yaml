@@ -26,6 +26,12 @@
 # ---------------------------------------------------------------------
 # device_name
 # ---------------------------------------------------------------------
+# Deployed as tank-monitor-75-gallon, and Home Assistant is wired to that:
+# the log-manual-test script, both dashboards and the chemistry automation
+# all address entities as tank_monitor_75_gallon_*. Renaming the device
+# re-registers 60-odd entities under a new prefix and orphans every one of
+# those references.
+#
 # Must not collide with tank-monitor-s3, -s3mini, -round, -v2 or -w32. The
 # name sets the MQTT topic prefix, discovery object ids, mDNS hostname and
 # the fallback AP name all at once; two devices answering to one name
@@ -42,8 +48,8 @@
 # cannot be relabelled from a wrapper, so the UNSUFFIXED temperature is
 # always side A. Set the names to match how you actually mounted them.
 substitutions:
-  device_name: tank-monitor-lg
-  friendly_name: Tank Monitor LG
+  device_name: tank-monitor-75-gallon
+  friendly_name: Tank Monitor 75 Gallon
 
   # ---- REPLACE with the physical arrangement ----
   # Heater A + probe A are inboard on the back wall, left of the centre

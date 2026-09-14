@@ -10,7 +10,7 @@ Four boards are covered here and they wire up differently:
   headless controller. Same wiring as the C6 on different pins.
 - **[ESP32-S3 mini (`tank-monitor-s3`)](#esp32-s3-mini-tank-monitor-s3)** —
   headless controller in 23 × 18 mm. Solder directly to the board.
-- **[XIAO ESP32-S3, large tank (`tank-monitor-lg`)](#xiao-esp32-s3-large-tank-tank-monitor-lg)** —
+- **[XIAO ESP32-S3, large tank (`tank-monitor-75-gallon`)](#xiao-esp32-s3-large-tank-tank-monitor-75-gallon)** —
   headless controller, two of everything. Sensors on an ADS1115, three relay
   channels, two 1-Wire buses. Needs a power rail, not a splice.
 
@@ -494,7 +494,7 @@ To let a remote panel read this board instead of the C6, uncomment
 `source_device` substitution at this device's name.
 
 
-# XIAO ESP32-S3, large tank (`tank-monitor-lg`)
+# XIAO ESP32-S3, large tank (`tank-monitor-75-gallon`)
 
 The second tank's controller. Same silicon as the 12-gal XIAO, a different
 wet side: **two DS18B20 probes, two BH1750 light sensors, pH and TDS on an
