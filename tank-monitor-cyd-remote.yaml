@@ -21,6 +21,10 @@
 substitutions:
   device_name: tank-monitor-v2
   friendly_name: Tank Monitor v2
+  # chemistry.yaml derives its MQTT prefix from device_name. This panel
+  # predates that, and Home Assistant publishes the nano tank's tests under
+  # the original prefix -- pin it so nothing changes here.
+  chem_topic_prefix: tank-monitor
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor

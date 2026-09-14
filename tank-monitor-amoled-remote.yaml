@@ -45,6 +45,10 @@ substitutions:
   friendly_name: Tank Monitor Round
   # ---- REPLACE THIS with the S3 controller's BLE MAC (see above) ----
   s3_ble_mac: "SET-ME-FROM-THE-S3-BOOT-LOG"
+  # chemistry.yaml derives its MQTT prefix from device_name. This panel
+  # predates that, and Home Assistant publishes the nano tank's tests under
+  # the original prefix -- pin it so nothing changes here.
+  chem_topic_prefix: tank-monitor
 
 packages:
   tank_monitor:

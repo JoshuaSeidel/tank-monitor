@@ -55,7 +55,7 @@
 # it actually is. Override in the wrapper. Everything on the back wall is
 # placed from these -- change the width and every position rescales.
 substitutions:
-  tank_width_in:     "48"    # interior width, left glass to right glass
+  tank_width_in:     "48"    # interior width -- standard 75 gal is 48 x 18 x 21
   heater_inset_in:   "4"     # each heater this far in from its end
   spray_bar_len_in:  "12"    # centred on the back wall
   intake_from_left_in: "1"   # intake pipe, measured from the LEFT end

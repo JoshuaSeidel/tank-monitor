@@ -17,13 +17,17 @@
 #
 # TOPIC PREFIX. There are two tanks now, and a panel subscribing to the
 # wrong one's chemistry would show it as its own -- which is worse than
-# showing nothing. The default below is the topic every existing board has
-# always used, so nothing changes for them; a second tank's panel sets
-# chem_topic_prefix in its wrapper and Home Assistant publishes that tank's
-# tests under the matching prefix.
+# showing nothing. The prefix follows the device name, so a new panel
+# reads its own topics with nothing extra to set, and Home Assistant
+# publishes each tank's tests under that panel's name.
+#
+# The nano tank's panels predate this and Home Assistant already publishes
+# their chemistry under the original "tank-monitor" prefix, so those two
+# wrappers pin chem_topic_prefix to keep reading it. Everything newer
+# derives.
 
 substitutions:
-  chem_topic_prefix: tank-monitor
+  chem_topic_prefix: ${device_name}
 
 globals:
   - id: chem_ph
