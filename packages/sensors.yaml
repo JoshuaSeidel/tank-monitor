@@ -44,6 +44,25 @@ sensor:
       - lambda: |-
           if (x == 0.0f || x >= 85.0f) return NAN;
           return x;
+      # Rate guard. The night after the two signatures above went in, the
+      # same bus produced 11.8 C -- exactly half the tank, a one-bit slip --
+      # which is a real temperature somewhere and passed everything. Water
+      # in this tank moves ~3 degF per hour flat out, so a sample more than
+      # 2 C from the last accepted one is not water. Twelve rejections in a
+      # row (two minutes) re-anchor on the new value, so a genuine step
+      # across a probe outage recovers instead of being refused forever;
+      # by then the controller has already cut the heater on the NaNs.
+      - lambda: |-
+          static float last = NAN;
+          static uint8_t rejected = 0;
+          if (isnan(x)) return NAN;
+          if (!isnan(last) && fabsf(x - last) > 2.0f && rejected < 12) {
+            rejected++;
+            return NAN;
+          }
+          rejected = 0;
+          last = x;
+          return x;
       # Calibration offset, applied HERE rather than on the published
       # Fahrenheit sensor: the controller reads this one, so correcting it
       # anywhere else would leave the control loop working from the

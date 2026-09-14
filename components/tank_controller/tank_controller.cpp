@@ -133,6 +133,22 @@ static const float PLAUSIBLE_MAX_F = 140.0f;
 static const float PLAUSIBLE_MIN = (PLAUSIBLE_MIN_F - 32.0f) * 5.0f / 9.0f;
 static const float PLAUSIBLE_MAX = (PLAUSIBLE_MAX_F - 32.0f) * 5.0f / 9.0f;
 
+// The window above was not enough. The night after it went in, the same
+// marginal bus produced 11.8 C -- exactly half of the 23.6 C tank, a
+// one-bit slip in the read -- which is a perfectly plausible temperature
+// for some aquarium and sat inside the window, below min_temperature, and
+// drove the heater to 100% for 2.5 minutes (2026-09-14 03:49). No fixed
+// window can tell a corrupted 53 F from a real one. What can is the rate:
+// this tank moves at most ~3 degF per HOUR flat out, so a reading more
+// than a degree away from the one 30 s earlier is not the water. Only
+// judged against a RECENT reading -- after DISCONTINUITY_MS with nothing
+// valid the guard stands down and accepts whatever arrives, so a genuine
+// step across a probe outage (a water change with the probe out) is
+// re-anchored on rather than rejected forever. sensors.yaml applies the
+// same idea per 10 s sample; this is the backstop for boards that do not.
+static const float MAX_STEP_F = 1.8f;
+static const float MAX_STEP = MAX_STEP_F * 5.0f / 9.0f;
+
 // How far above setpoint the tank must sit before the fan is worth running.
 // Wider than GUARD_DEADBAND, and asymmetric with the heater on purpose:
 // running an evaporative fan against a small warm excursion costs water
@@ -507,6 +523,12 @@ void TankController::update() {
              t * 9.0f / 5.0f + 32.0f);
     t = NAN;
   }
+  if (!std::isnan(t) && !std::isnan(this->last_temp_) && this->last_valid_ms_ != 0 &&
+      now - this->last_valid_ms_ <= DISCONTINUITY_MS && fabsf(t - this->last_temp_) > MAX_STEP) {
+    ESP_LOGW(TAG, "Reading jumped %.1f degF in %" PRIu32 "s - not water, treating the probe as missing",
+             (t - this->last_temp_) * 9.0f / 5.0f, (now - this->last_valid_ms_) / 1000);
+    t = NAN;
+  }
 
   if (std::isnan(t)) {
     if (this->missing_since_ms_ == 0)
@@ -530,6 +552,7 @@ void TankController::update() {
   // and the swing figure would report a range that was never observed.
   const uint32_t since_valid = this->last_valid_ms_ == 0 ? 0 : now - this->last_valid_ms_;
   this->last_valid_ms_ = now;
+  this->last_temp_ = t;
   if (since_valid > HISTORY_WIPE_MS) {
     ESP_LOGW(TAG, "Gap of %" PRIu32 "s in readings - discarding swing history", since_valid / 1000);
     this->history_idx_ = 0;
