@@ -99,6 +99,14 @@ i2c:
   scl: GPIO44       # D7
   scan: true
 
+# The cross-check probe below is also the controller's veto: if the two
+# probes disagree by more than the band for five minutes the heater goes
+# off (control.yaml's "Probes Disagree"). Distinct from "Probe Disagreement"
+# further down, which is the instantaneous gradient against its own
+# threshold -- that one tells you about the tank, this one stops the heater.
+tank_controller:
+  cross_check: water_temp_b
+
 # ---------------------------------------------------------------
 # ADS1115 -- pH and TDS off the internal ADC
 # ---------------------------------------------------------------

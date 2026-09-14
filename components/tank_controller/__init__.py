@@ -23,6 +23,8 @@ CONF_FULL_SCALE_LUX = "full_scale_lux"
 CONF_RESPONSE_TIME = "response_time"
 CONF_LEARNING = "learning"
 CONF_FAN_DEADBAND = "fan_deadband"
+CONF_CROSS_CHECK = "cross_check"
+CONF_DISAGREEMENT_BAND = "disagreement_band"
 
 tank_controller_ns = cg.esphome_ns.namespace("tank_controller")
 TankController = tank_controller_ns.class_("TankController", cg.PollingComponent)
@@ -33,6 +35,9 @@ ResetLearningAction = tank_controller_ns.class_(
 SetSetpointAction = tank_controller_ns.class_("SetSetpointAction", automation.Action)
 SetFanDeadbandAction = tank_controller_ns.class_(
     "SetFanDeadbandAction", automation.Action
+)
+SetDisagreementBandAction = tank_controller_ns.class_(
+    "SetDisagreementBandAction", automation.Action
 )
 SetLearningAction = tank_controller_ns.class_("SetLearningAction", automation.Action)
 ImportModelAction = tank_controller_ns.class_("ImportModelAction", automation.Action)
@@ -102,6 +107,14 @@ CONFIG_SCHEMA = cv.All(
             # in control.yaml changes it at runtime and the controller
             # persists it. 2.0 matches FAN_DEADBAND_MAX_F in the component.
             cv.Optional(CONF_FAN_DEADBAND, default=0.25): cv.float_range(min=0.0, max=2.0),
+            # A second DS18B20 on its own bus. Never controlled on: the loop
+            # stays on `temperature`. If the two disagree by more than
+            # disagreement_band (degF) for five minutes the heater goes off,
+            # because one of them is lying and there is no telling which.
+            cv.Optional(CONF_CROSS_CHECK): cv.use_id(sensor.Sensor),
+            # First-boot default; the "Probe Disagreement Band" number
+            # changes it live. 5.0 matches DISAGREE_BAND_MAX_F.
+            cv.Optional(CONF_DISAGREEMENT_BAND, default=2.0): cv.float_range(min=0.0, max=5.0),
         }
     ).extend(cv.polling_component_schema("30s")),
     _validate,
@@ -134,6 +147,9 @@ async def to_code(config):
     cg.add(var.set_response_time(config[CONF_RESPONSE_TIME].total_minutes))
     cg.add(var.set_learning_enabled(config[CONF_LEARNING]))
     cg.add(var.set_fan_deadband(_f_delta_to_c(config[CONF_FAN_DEADBAND])))
+    cg.add(var.set_disagreement_band(_f_delta_to_c(config[CONF_DISAGREEMENT_BAND])))
+    if CONF_CROSS_CHECK in config:
+        cg.add(var.set_cross_check_sensor(await cg.get_variable(config[CONF_CROSS_CHECK])))
 
 
 CONTROLLER_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(TankController)})
@@ -179,6 +195,21 @@ async def set_fan_deadband_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, paren)
     cg.add(var.set_value(await cg.templatable(config[CONF_FAN_DEADBAND], args, float)))
+    return var
+
+
+@automation.register_action(
+    "tank_controller.set_disagreement_band",
+    SetDisagreementBandAction,
+    CONTROLLER_ACTION_SCHEMA.extend(
+        {cv.Required(CONF_DISAGREEMENT_BAND): cv.templatable(cv.float_)}
+    ),
+    synchronous=True,
+)
+async def set_disagreement_band_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, paren)
+    cg.add(var.set_value(await cg.templatable(config[CONF_DISAGREEMENT_BAND], args, float)))
     return var
 
 

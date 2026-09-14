@@ -89,6 +89,9 @@ class TankController : public PollingComponent {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
   void set_temperature_sensor(sensor::Sensor *s) { this->temp_sensor_ = s; }
+  // Optional second probe on its own bus. Never controlled on; only used
+  // to veto the control probe when the two disagree.
+  void set_cross_check_sensor(sensor::Sensor *s) { this->cross_sensor_ = s; }
   void set_illuminance_sensor(sensor::Sensor *s) { this->lux_sensor_ = s; }
   void set_heater(output::FloatOutput *o) { this->heater_ = o; }
   void set_fan(output::FloatOutput *o) { this->fan_ = o; }
@@ -102,6 +105,9 @@ class TankController : public PollingComponent {
   // Persisted like the setpoint; the config value is the first-boot default.
   void set_fan_deadband(float v);
   float get_fan_deadband() const { return this->fan_deadband_; }
+  // How far the two probes may differ before it counts as disagreement, degC.
+  void set_disagreement_band(float v);
+  float get_disagreement_band() const { return this->disagree_band_; }
   void set_min_temperature(float v) { this->min_temp_ = v; }
   void set_max_temperature(float v) { this->max_temp_ = v; }
   void set_full_scale_lux(float v) { this->full_scale_lux_ = v; }
@@ -139,6 +145,9 @@ class TankController : public PollingComponent {
   // water is going the WRONG way. A merely feeble fan will not trip it;
   // watch get_fan_gain() for that.
   bool is_fan_stalled() const { return this->fan_stalled_; }
+  // Control and cross-check probes have disagreed for DISAGREE_MS; heater
+  // is off until they agree again. Always false with no cross-check probe.
+  bool is_probe_disagreement() const { return this->probe_disagreement_; }
   // Peak-to-peak temperature swing over the last hour, in degC.
   // NAN until there is enough history to mean anything.
   float get_swing() const;
@@ -167,6 +176,7 @@ class TankController : public PollingComponent {
   void save_state_();
 
   sensor::Sensor *temp_sensor_{nullptr};
+  sensor::Sensor *cross_sensor_{nullptr};
   sensor::Sensor *lux_sensor_{nullptr};
   output::FloatOutput *heater_{nullptr};
   output::FloatOutput *fan_{nullptr};
@@ -180,11 +190,16 @@ class TankController : public PollingComponent {
   ESPPreferenceObject light_pref_;
   ESPPreferenceObject setpoint_pref_;
   ESPPreferenceObject fan_deadband_pref_;
+  ESPPreferenceObject disagree_band_pref_;
 
   float setpoint_{25.0f};
   // Overwritten from config before setup() and from flash during it; the
   // literal only matters if neither happens. 0.25 degF.
   float fan_deadband_{0.25f * 5.0f / 9.0f};
+  // 2.0 degF: two uncalibrated DS18B20 (+/-0.5 degC each) can legitimately
+  // sit 1.8 degF apart, so anything tighter false-trips until the
+  // cross-check probe has been offset-calibrated in the same cup.
+  float disagree_band_{2.0f * 5.0f / 9.0f};
   float min_temp_{20.0f};
   float max_temp_{30.0f};
   float full_scale_lux_{2000.0f};
@@ -238,6 +253,12 @@ class TankController : public PollingComponent {
   float fan_stall_temp_{NAN};
   bool fan_stalled_{false};
 
+  // Cross-check disagreement, and when the current reading was last
+  // accepted without a recent predecessor (boot or after a gap).
+  uint32_t disagree_since_ms_{0};
+  bool probe_disagreement_{false};
+  uint32_t reanchor_ms_{0};
+
   float last_temp_{NAN};
   uint32_t last_update_ms_{0};
   uint32_t missing_since_ms_{0};
@@ -270,6 +291,16 @@ template<typename... Ts> class SetFanDeadbandAction : public Action<Ts...> {
   explicit SetFanDeadbandAction(TankController *parent) : parent_(parent) {}
   TEMPLATABLE_VALUE(float, value)
   void play(const Ts &...x) override { this->parent_->set_fan_deadband(this->value_.value(x...)); }
+
+ protected:
+  TankController *parent_;
+};
+
+template<typename... Ts> class SetDisagreementBandAction : public Action<Ts...> {
+ public:
+  explicit SetDisagreementBandAction(TankController *parent) : parent_(parent) {}
+  TEMPLATABLE_VALUE(float, value)
+  void play(const Ts &...x) override { this->parent_->set_disagreement_band(this->value_.value(x...)); }
 
  protected:
   TankController *parent_;

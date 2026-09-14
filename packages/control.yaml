@@ -46,6 +46,14 @@ tank_controller:
   # the fan held it there. 0.25 halves that for more fan time (and so more
   # evaporation); watch a week of Temperature Swing before moving it again.
   fan_deadband: 0.25
+  # How far the control probe and an optional cross-check probe may differ
+  # before the controller stops trusting either, degF. First-boot default;
+  # the "Probe Disagreement Band" number below changes it live. The
+  # cross-check probe itself is bound by the board file (cross_check:),
+  # since it is a pin. 2.0 because two uncalibrated DS18B20 can honestly
+  # sit 1.8 degF apart -- tighten only after both are offset-calibrated
+  # in the same cup.
+  disagreement_band: 2.0
   update_interval: 30s
 
 number:
@@ -105,6 +113,25 @@ number:
       - tank_controller.set_fan_deadband:
           id: controller
           fan_deadband: !lambda "return x * 5.0f / 9.0f;"
+
+  # Same shape again. Meaningless on a board with no cross-check probe, but
+  # harmless, and keeping it here means every board has the entity the day
+  # it grows a second bus.
+  - platform: template
+    name: "Probe Disagreement Band"
+    id: probe_disagreement_band
+    icon: "mdi:thermometer-alert"
+    unit_of_measurement: "°F"
+    min_value: 0.0
+    max_value: 5.0
+    step: 0.1
+    entity_category: config
+    lambda: "return id(controller).get_disagreement_band() * 9.0f / 5.0f;"
+    update_interval: 30s
+    set_action:
+      - tank_controller.set_disagreement_band:
+          id: controller
+          disagreement_band: !lambda "return x * 5.0f / 9.0f;"
 
 switch:
   - platform: template
@@ -208,6 +235,18 @@ binary_sensor:
     device_class: problem
     entity_category: diagnostic
     lambda: "return id(controller).is_fan_stalled();"
+
+  # The control probe and the cross-check probe have disagreed by more than
+  # the band for five minutes, and the controller has cut the heater until
+  # they agree again. One of them is lying and there is no way to know
+  # which -- this is the fault a plausible-but-wrong reading produces, the
+  # one no single-probe check can see. Always off on a board with no
+  # cross-check probe. Self-clearing.
+  - platform: template
+    name: "Probes Disagree"
+    device_class: problem
+    entity_category: diagnostic
+    lambda: "return id(controller).is_probe_disagreement();"
 
 text_sensor:
   - platform: template

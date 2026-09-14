@@ -22,8 +22,34 @@ static const uint32_t HISTORY_WIPE_MS = 300000;    // 5 min
 
 // Heater at full for this long with less than this much rise means it is
 // not actually heating: unplugged, failed, or a dead relay channel.
-static const uint32_t HEAT_STALL_MS = 2700000;     // 45 minutes
+//
+// 45 -> 20 minutes on 2026-09-14. This is also the last line of defence
+// against a probe that reads a steady wrong number: the rate guards
+// reject a jump, but a value that arrives after a probe outage is
+// re-anchored on, and if it is bogus AND cold the heater runs flat out
+// until this trips. At 45 minutes that was +2.4 degF of real heat into
+// the tank; at 20 it is about +1. A genuine cold tank at full power
+// rises ~1 degF in 20 minutes, twenty times the 0.05 degC bar, so there
+// is no false trip to trade against.
+static const uint32_t HEAT_STALL_MS = 1200000;     // 20 minutes
 static const float HEAT_STALL_RISE = 0.05f;        // degC
+
+// A reading accepted across a gap -- boot, or a probe outage long enough
+// that the rate guard stood down -- is the one reading nothing else has
+// vouched for. For this long afterwards the heater is capped, so if that
+// reading was wrong the damage is bounded while the stall detector and
+// the cross-check catch up. Half power for ten minutes costs a genuinely
+// cold tank a few minutes of recovery; it caps a bogus one at ~+0.4 degF.
+static const uint32_t REANCHOR_SETTLE_MS = 600000;  // 10 minutes
+static const float REANCHOR_HEAT_CAP = 0.5f;
+
+// Two probes that disagree by more than the band for this long mean one of
+// them is lying and there is no way to know which. Heater off is the only
+// safe answer to that. Five minutes rides through a single glitchy
+// sample on either side without tripping.
+static const uint32_t DISAGREE_MS = 300000;         // 5 minutes
+static const float DISAGREE_BAND_MAX_F = 5.0f;
+static const float DISAGREE_BAND_MAX = DISAGREE_BAND_MAX_F * 5.0f / 9.0f;
 
 // Fan equivalent. The bar is deliberately low -- merely "did not fall at
 // all" -- because passive loss alone should drop this tank well over a
@@ -231,6 +257,7 @@ void TankController::setup() {
   this->light_pref_ = global_preferences->make_preference<LightProfile>(fnv1_hash("tank_light"));
   this->setpoint_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_setpoint"));
   this->fan_deadband_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_fan_deadband"));
+  this->disagree_band_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_disagree_band"));
 
   ThermalModel stored{};
   if (this->model_pref_.load(&stored) && !std::isnan(stored.theta[0])) {
@@ -250,10 +277,26 @@ void TankController::setup() {
   if (this->fan_deadband_pref_.load(&db) && !std::isnan(db))
     this->fan_deadband_ = clampf(db, 0.0f, FAN_DEADBAND_MAX);
 
+  float dz = NAN;
+  if (this->disagree_band_pref_.load(&dz) && !std::isnan(dz))
+    this->disagree_band_ = clampf(dz, 0.0f, DISAGREE_BAND_MAX);
+
   // Start with everything off until the first real reading arrives.
   this->apply_outputs_(0.0f, 0.0f);
   this->last_update_ms_ = millis();
   this->last_save_ms_ = millis();
+  // The first reading after boot has no history behind it either.
+  this->reanchor_ms_ = millis();
+}
+
+void TankController::set_disagreement_band(float v) {
+  if (std::isnan(v))
+    return;
+  v = clampf(v, 0.0f, DISAGREE_BAND_MAX);
+  if (v == this->disagree_band_)
+    return;
+  this->disagree_band_ = v;
+  this->disagree_band_pref_.save(&v);
 }
 
 void TankController::set_setpoint(float v) {
@@ -564,6 +607,42 @@ void TankController::update() {
     this->acc_n_ = 0;
     this->heat_stall_since_ms_ = 0;
     this->fan_stall_since_ms_ = 0;
+    // This reading was accepted without a recent one to check it against.
+    this->reanchor_ms_ = now;
+  }
+  const bool settling = this->reanchor_ms_ != 0 && now - this->reanchor_ms_ < REANCHOR_SETTLE_MS;
+
+  // --- cross-check probe -------------------------------------------------
+  // A second DS18B20 on its own bus. Not a control input -- the loop
+  // regulates on the control probe alone -- but the only thing that can
+  // catch the control probe reading a steady, plausible, wrong number,
+  // which is exactly what a flooded probe produced on 2026-09-14: 11.8 C,
+  // half the tank, inside every window, for minutes at a time. Sustained
+  // disagreement means one probe is lying and there is no telling which,
+  // so the heater goes off until they agree again. Either probe reading
+  // NaN is not a disagreement; the missing-probe path covers the control
+  // side and the cross-check simply stands down.
+  if (this->cross_sensor_ != nullptr) {
+    const float b = this->cross_sensor_->state;
+    if (!std::isnan(b) && fabsf(t - b) > this->disagree_band_) {
+      if (this->disagree_since_ms_ == 0)
+        this->disagree_since_ms_ = now;
+      if (now - this->disagree_since_ms_ > DISAGREE_MS) {
+        if (!this->probe_disagreement_)
+          ESP_LOGE(TAG, "Probes disagree: control %.2f degF, cross-check %.2f degF for %" PRIu32 " min - heater off",
+                   t * 9.0f / 5.0f + 32.0f, b * 9.0f / 5.0f + 32.0f, DISAGREE_MS / 60000);
+        this->probe_disagreement_ = true;
+        this->state_text_ = "fault: probes disagree";
+        this->integral_ = 0.0f;
+        this->apply_outputs_(0.0f, 0.0f);
+        return;
+      }
+    } else {
+      if (this->probe_disagreement_)
+        ESP_LOGI(TAG, "Probes agree again - resuming");
+      this->disagree_since_ms_ = 0;
+      this->probe_disagreement_ = false;
+    }
   }
 
   this->history_[this->history_idx_] = t;
@@ -659,7 +738,7 @@ void TankController::update() {
   if (t <= this->min_temp_) {
     this->state_text_ = "under temperature";
     this->integral_ = 0.0f;
-    this->apply_outputs_(1.0f, 0.0f);
+    this->apply_outputs_(settling ? REANCHOR_HEAT_CAP : 1.0f, 0.0f);
     return;
   }
 
@@ -808,6 +887,9 @@ void TankController::update() {
   if (error < -GUARD_DEADBAND && this->integral_ > 0.0f)
     this->integral_ = 0.0f;
 
+  if (settling && heater > REANCHOR_HEAT_CAP)
+    heater = REANCHOR_HEAT_CAP;
+
   this->apply_outputs_(heater, fan);
 
   // Where the model says we'll be in 15 minutes at this output level.
@@ -876,6 +958,8 @@ void TankController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
   ESP_LOGCONFIG(TAG, "  Fan available: %s", YESNO(this->fan_available_));
   ESP_LOGCONFIG(TAG, "  Fan deadband: %.2f degF above setpoint", this->fan_deadband_ * 9.0f / 5.0f);
+  ESP_LOGCONFIG(TAG, "  Cross-check probe: %s (disagreement band %.1f degF)", YESNO(this->cross_sensor_ != nullptr),
+                this->disagree_band_ * 9.0f / 5.0f);
   ESP_LOGCONFIG(TAG, "  Learning: %s (%" PRIu32 " steps, %.0f%% confidence)", ONOFF(this->learning_enabled_),
                 this->model_.updates, this->get_confidence());
   ESP_LOGCONFIG(TAG, "  Model: kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", this->model_.theta[0], -this->model_.theta[1],

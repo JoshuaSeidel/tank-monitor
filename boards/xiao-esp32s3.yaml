@@ -38,13 +38,14 @@
 #   signal              SILKSCREEN   GPIO
 #   TDS analog          D1           2      ADC1
 #   pH analog           D3           4      ADC1
-#   DS18B20 data        D5           6      + 4.7k pull-up
+#   DS18B20 data        D5           6      + 4.7k pull-up  (control probe)
+#   DS18B20 #2 data     D0           1      + 4.7k pull-up  (cross-check probe)
 #   I2C SDA (BH1750)    D6           43
 #   I2C SCL             D7           44
 #   heater relay IN+    D8           7
 #   fan relay IN+       D9           8
 #
-# Spare: D0 (GPIO1, ADC1 -- free for ORP), D4 (GPIO5), D10 (GPIO9, ADC1).
+# Spare: D4 (GPIO5), D10 (GPIO9, ADC1).
 # D2 = GPIO3 is left EMPTY on purpose: it is an ESP32-S3 STRAPPING PIN
 # ({0, 3, 45, 46}) and nothing should hold it high or low at boot.
 #
@@ -84,12 +85,43 @@ mqtt:
   discovery_unique_id_generator: mac
 
 
+# Two 1-Wire buses, one probe each, on purpose -- the same design as the
+# large tank's board and for the same reason: a shorted or flooded probe
+# takes down its own bus and nothing else. On 2026-09-13/14 the control
+# probe did exactly that ("1-wire bus is held low", nine dropouts in seven
+# hours, plus 0 C and half-value reads that passed CRC). On a shared bus a
+# second probe would have gone down with it, which is the one moment it is
+# needed. Separate buses also mean neither probe needs an address, so
+# packages/sensors.yaml drops in unmodified.
 one_wire:
   - platform: gpio
+    id: onewire_a
     # Silkscreen D5. Needs a 4.7k pull-up to 3V3 -- without it the bus never
     # pulls high and the scan reports "No devices, can't auto-select address",
     # which is indistinguishable from the probe being on the wrong pin.
     pin: GPIO6
+  - platform: gpio
+    id: onewire_b
+    # Silkscreen D0. Its own 4.7k pull-up to 3V3. With nothing wired here
+    # the boot log says "No devices" for this bus, the cross-check reads
+    # unavailable, and the controller simply has no second opinion -- so
+    # this can be flashed before the second probe exists.
+    pin: GPIO1
+
+# Bind the controller's cross-check input. Lives here, not in control.yaml,
+# because the probe is a pin and the pin is this board's.
+tank_controller:
+  cross_check: water_temp_b
+
+globals:
+  # Probe B's own offset. Two DS18B20 are +/-0.5 degC absolute EACH, so
+  # two uncalibrated probes can read 1.8 degF apart in the same water and
+  # trip a disagreement band tighter than that. Calibrate both in one cup
+  # before tightening the band.
+  - id: cal_temp_offset_b_c
+    type: float
+    restore_value: true
+    initial_value: '0.0'
 
 i2c:
   # Silkscreen D6 / D7.
@@ -98,6 +130,63 @@ i2c:
   scan: true
 
 sensor:
+  # Bind the shared package's probe to bus A. With two buses declared,
+  # sensors.yaml's address-less probe fails config with "Too many candidates
+  # found for 'one_wire_id'" (verified on 2026.8.2); this !extend resolves it
+  # without touching the shared file.
+  - id: !extend water_temp
+    one_wire_id: onewire_a
+
+  # ---------------------------------------------------------------
+  # Cross-check temperature probe
+  # ---------------------------------------------------------------
+  # NOT a control input. The loop regulates on water_temp alone; this probe
+  # exists to answer the one question the control probe cannot answer about
+  # itself -- "am I still telling the truth". The controller compares the
+  # two and cuts the heater if they disagree for five minutes.
+  #
+  # Same filter chain as the control probe, for the same reasons: median
+  # for single glitches, the two DS18B20 fault signatures to NaN, a rate
+  # guard for corrupted-but-plausible values. A cross-check that can be
+  # fooled the same way is not a cross-check.
+  - platform: dallas_temp
+    one_wire_id: onewire_b
+    internal: true
+    id: water_temp_b
+    update_interval: 10s
+    accuracy_decimals: 2
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+          send_first_at: 1
+      - lambda: |-
+          if (x == 0.0f || x >= 85.0f) return NAN;
+          return x;
+      - lambda: |-
+          static float last = NAN;
+          static uint8_t rejected = 0;
+          if (isnan(x)) return NAN;
+          if (!isnan(last) && fabsf(x - last) > 2.0f && rejected < 12) {
+            rejected++;
+            return NAN;
+          }
+          rejected = 0;
+          last = x;
+          return x;
+      - lambda: return x + id(cal_temp_offset_b_c);
+
+  - platform: template
+    name: "Cross-check Temperature"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 30s
+    lambda: |-
+      if (std::isnan(id(water_temp_b).state)) return {};
+      return id(water_temp_b).state * 9.0f / 5.0f + 32.0f;
+
   # Raw TDS probe voltage. Internal only; packages/sensors.yaml does the maths.
   - platform: adc
     # Silkscreen D1.
@@ -130,6 +219,22 @@ sensor:
           window_size: 10
           send_every: 5
           send_first_at: 5
+
+number:
+  - platform: template
+    name: "Cal Temp Offset B"
+    id: cal_temp_offset_b_num
+    icon: "mdi:thermometer-plus"
+    entity_category: config
+    min_value: -5.0
+    max_value: 5.0
+    step: 0.1
+    unit_of_measurement: "°F"
+    update_interval: 60s
+    # Celsius inside, Fahrenheit on the face, like the control probe's offset.
+    lambda: "return id(cal_temp_offset_b_c) * 9.0f / 5.0f;"
+    set_action:
+      - lambda: id(cal_temp_offset_b_c) = x * 5.0f / 9.0f;
 
 output:
   # Time-proportional over a 15 minute window. These are mechanical relay
