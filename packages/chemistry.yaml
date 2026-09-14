@@ -14,6 +14,16 @@
 #
 # Deliberately NOT in packages/base.yaml: the C6 must not inherit any of
 # this. Include it from a board wrapper that wants it.
+#
+# TOPIC PREFIX. There are two tanks now, and a panel subscribing to the
+# wrong one's chemistry would show it as its own -- which is worse than
+# showing nothing. The default below is the topic every existing board has
+# always used, so nothing changes for them; a second tank's panel sets
+# chem_topic_prefix in its wrapper and Home Assistant publishes that tank's
+# tests under the matching prefix.
+
+substitutions:
+  chem_topic_prefix: tank-monitor
 
 globals:
   - id: chem_ph
@@ -58,42 +68,42 @@ script:
 sensor:
   - platform: mqtt_subscribe
     id: sub_ph
-    topic: tank-monitor/chem/ph
+    topic: ${chem_topic_prefix}/chem/ph
     internal: true
     on_value:
       - lambda: id(chem_ph) = x;
       - script.execute: chem_stamp_now
   - platform: mqtt_subscribe
     id: sub_nh3
-    topic: tank-monitor/chem/nh3
+    topic: ${chem_topic_prefix}/chem/nh3
     internal: true
     on_value:
       - lambda: id(chem_nh3) = x;
       - script.execute: chem_stamp_now
   - platform: mqtt_subscribe
     id: sub_gh
-    topic: tank-monitor/chem/gh
+    topic: ${chem_topic_prefix}/chem/gh
     internal: true
     on_value:
       - lambda: id(chem_gh) = x;
       - script.execute: chem_stamp_now
   - platform: mqtt_subscribe
     id: sub_kh
-    topic: tank-monitor/chem/kh
+    topic: ${chem_topic_prefix}/chem/kh
     internal: true
     on_value:
       - lambda: id(chem_kh) = x;
       - script.execute: chem_stamp_now
   - platform: mqtt_subscribe
     id: sub_no2
-    topic: tank-monitor/chem/no2
+    topic: ${chem_topic_prefix}/chem/no2
     internal: true
     on_value:
       - lambda: id(chem_no2) = x;
       - script.execute: chem_stamp_now
   - platform: mqtt_subscribe
     id: sub_no3
-    topic: tank-monitor/chem/no3
+    topic: ${chem_topic_prefix}/chem/no3
     internal: true
     on_value:
       - lambda: id(chem_no3) = x;

@@ -12,6 +12,7 @@ substitutions:
   device_name: tank-monitor-lg-panel-test
   friendly_name: Tank Monitor LG Panel TEST
   s3_ble_mac: "00:00:00:00:00:00"
+  chem_topic_prefix: tank-monitor-lg
 packages:
   base: !include packages/base.yaml
   webui: !include packages/webui.yaml

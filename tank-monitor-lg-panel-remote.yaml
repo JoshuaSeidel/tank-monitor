@@ -48,6 +48,13 @@ substitutions:
   # ---- REPLACE THIS with the LG controller's BLE MAC (see above) ----
   s3_ble_mac: "SET-ME-FROM-THE-LG-CONTROLLER-BOOT-LOG"
 
+  # GH, KH and the rest of the manual chemistry arrive over MQTT, not BLE,
+  # and chemistry.yaml's topics default to the 12-gal tank's. THIS panel
+  # must read the large tank's, so Home Assistant has to publish that
+  # tank's tests under this prefix: tank-monitor-lg/chem/gh and so on.
+  # Without it, page 3 would show the other tank's water as this one's.
+  chem_topic_prefix: tank-monitor-lg
+
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
