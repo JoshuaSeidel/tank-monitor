@@ -765,8 +765,8 @@ anything now.
 
 The LS-2600 is not a bare pair of tabs. There is a transistor behind them:
 the datasheet calls it *open circuit when dry, roughly 1.4 MΩ when wet*,
-and it is **polarised** — red to +V, white to the input. Wet, it sources
-current from red to white. So the input wants a pull-**down**, and reads
+and it is **polarised** — red to +V, the other wire (black here, white on
+some units) to the input. Wet, it sources current from red to black. So the input wants a pull-**down**, and reads
 0 V dry and 1–2 V wet. (A pull-up, the obvious thing for a "switch", fails
 here: against the sensor's 1.4 MΩ the wet and dry voltages end up within
 a volt of each other.)
@@ -778,13 +778,13 @@ own header**. The XIAO is not touched.
 | | Goes to |
 |---|---|
 | **Red** | ADS1115 `VDD` pin (3V3) |
-| **White** | ADS1115 `A2` |
+| **Black** (white on some units) | ADS1115 `A2` |
 | 2 × 1 MΩ **in series** (= 2 MΩ; one 1 MΩ alone also works) | between `A2` and the breakout's `GND` pin |
 | 100 nF ceramic | between `A2` and the breakout's `GND` pin, as close to `A2` as it sits |
 
-Three things on one header pin: white lead, resistor leg, cap leg. Tin
+Three things on one header pin: black lead, resistor leg, cap leg. Tin
 them together in one go. "In series" = twist one leg of each resistor
-together and solder; the two free legs are the ends. Get red and white the right way round — reversed,
+together and solder; the two free legs are the ends. Get red and black the right way round — reversed,
 the transistor never conducts and the sensor is silently dead.
 
 The config calls anything over 0.5 V a leak, holds it 3 s before believing
@@ -798,7 +798,7 @@ nothing else in the circuit; on 5 V a wet sensor can push 4 V+ into `A2`,
 which kills the ADC. A transistor follower does not mind 3V3. If it turns
 out this one does — `Leak Sensor Voltage` stays at 0 with the tabs wet in
 step 9 — the fallback is red on the XIAO's `5V` pad and a 1 MΩ in series
-between white and `A2`. That is the one case that reopens the board.
+between black and `A2`. That is the one case that reopens the board.
 
 Put the sensor where water collects first — the lowest point under the
 tank. The 6 ft lead reaches from wherever the board ends up.
@@ -814,7 +814,7 @@ C6 step 8. Then three checks specific to this build, all with the board
 - Meter from BH1750 A's `ADDR` to BH1750 B's `ADDR`. Open. If they are
   connected, they are on the same address.
 - Meter from ADS1115 `A2` to its `GND` pin: the pull-down, ~2 MΩ. `A2`
-  to `VDD`: open — if it reads low, red and white are swapped or the
+  to `VDD`: open — if it reads low, red and black are swapped or the
   sensor is wet. (There is a transistor in the sensor, so a wet-finger
   test with the meter proves nothing; that check is in step 9, powered.)
 
@@ -858,7 +858,7 @@ binary sensors present and **off**: `Heater` (the pair), `Heater Left`,
 Sensor Voltage` (under diagnostics) should sit at **0.0 V** with the tabs
 dry. Wet a fingertip and hold it across both tabs: it climbs to **1–2 V**
 and after 3 s `Leak` turns on. Dry the tabs, and 10 s later it clears.
-If it stays at 0 V wet, first check red is on `VDD` and white on `A2` —
+If it stays at 0 V wet, first check red is on `VDD` and black on `A2` —
 swapped, the sensor is silently dead. If that is right, this sensor will
 not wake on 3V3: see §7b for the 5 V fallback.
 

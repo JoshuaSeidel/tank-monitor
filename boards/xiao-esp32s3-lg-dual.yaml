@@ -187,7 +187,8 @@ sensor:
   # Floor leak sensor under the stand -- a Level Sense LS-2600. Not a bare
   # pair of tabs: there is a transistor behind them, and the datasheet
   # describes it as "open circuit when dry, roughly 1.4 MOhm when wet",
-  # polarised, red to +V and white to the input. It SOURCES current when
+  # polarised, red to +V and the other wire (black on this unit,
+  # white on some) to the input. It SOURCES current when
   # wet, so the input wants a pull-DOWN and reads 0V dry, up when wet.
   # That 1.4M is why a pull-UP arrangement fails here: against any sane
   # pull-up the wet and dry voltages land within a volt of each other.
@@ -195,7 +196,7 @@ sensor:
   # Everything is on the ADS1115 breakout, none of it on the XIAO:
   #
   #   red   -> breakout VDD (3V3)      2.2M  between A2 and breakout GND
-  #   white -> A2                      100nF between A2 and breakout GND
+  #   black -> A2                      100nF between A2 and breakout GND
   #
   # Dry: 0V. Wet: the sensor's ~1.4M against 2.2M in parallel with the
   # ADC's own ~6M input impedance gives ~1.8V; with very clean water
@@ -208,7 +209,7 @@ sensor:
   # maximum with no series resistor -- at 5V a wet sensor can put 4V+ on
   # A2 and that is a dead ADC. If it will not wake at 3V3 (Leak Sensor
   # Voltage stays at 0 with the tabs wet), the fallback is red on the
-  # XIAO's 5V pad with 1M in series between white and A2.
+  # XIAO's 5V pad with 1M in series between black and A2.
   - platform: ads1115
     multiplexer: 'A2_GND'
     gain: 4.096
