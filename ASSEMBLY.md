@@ -689,9 +689,9 @@ a run that long needs. Your side of the bargain:
   Put `SDA` and `SCL` on **diagonally opposite** cores, and `3V3`/`GND` on
   the other diagonal, so a supply line sits between the two signals in
   every direction. Same assignment at both ends, obviously.
-- **Better:** a shielded Cat6A patch cable (Monoprice S/FTP, 10 ft, cut in
-  half gives both runs). Four twisted pairs, foil on each pair, braid over
-  all. Use it like this — each signal twisted with a DC line, never the two
+- **Better: Cat6.** Any Cat6 — plain UTP is fine; the twist is what matters,
+  a shield (S/FTP) is a bonus. A 10 ft patch cable cut in half gives both
+  runs. Use it like this — each signal twisted with a DC line, never the two
   signals twisted together:
 
   | Pair | Use |
@@ -700,10 +700,12 @@ a run that long needs. Your side of the bargain:
   | orange / orange-white | `SCL` / `3V3` |
   | green / green-white | second `GND` / second `3V3` (parallel the supply) |
   | brown / brown-white | unused |
-  | drain + braid | `GND` at the **board end only** — leave it floating at the sensor |
+  | drain + braid (shielded cable only) | `GND` at the **board end only** — leave it floating at the sensor |
 
-  Grounding the shield at both ends makes a loop that picks up exactly the
-  relay noise you bought the shield to keep out.
+  Grounding a shield at both ends makes a loop that picks up exactly the
+  relay noise the shield was meant to keep out. Solid-core bulk Cat6 solders
+  into the perfboard rail fine but hates being flexed — strain-relieve it
+  where it leaves the board.
 - **Route it away from the heater cords and the relay module.** A slow clock
   buys capacitance margin, not noise immunity; a relay snapping next to an
   unshielded I2C pair is a corrupted lux reading, not an error.
