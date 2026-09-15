@@ -638,11 +638,13 @@ not a run.
 | `ALRT` | unconnected |
 | `A0` | TDS board signal (step 4) |
 | `A1` | pH board signal (step 4) |
-| `A2`, `A3` | unconnected |
+| `A2` | leak sensor (step 7b) |
+| `A3` | unconnected |
 
-Two more wires now go to `D6` and `D7` later (the BH1750s). Leave enough
-tinned pad to land them, or better, bring `SDA` and `SCL` from the XIAO to
-two more perfboard holes and fan out from there — same idea as the rails.
+The BH1750s' `SDA`/`SCL` (step 5) need the same two lines. Land them on the
+**ADS1115 breakout's `SDA` and `SCL` pins**, not back on the XIAO — it is
+one bus, so the breakout's header is electrically the same point as `D6`/
+`D7`, and it means the XIAO's pads are soldered once and never reopened.
 
 ## 4. pH and TDS into the ADS1115
 
