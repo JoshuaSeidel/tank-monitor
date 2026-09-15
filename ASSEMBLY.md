@@ -513,7 +513,7 @@ other in this file.
 - ADS1115 breakout (16-bit, 4-channel, I2C)
 - 2 × DS18B20 waterproof probes
 - 2 × BH1750 breakouts
-- Floor leak sensor (two-tab contact type, 6 ft lead) + 1 MΩ resistor + 100 nF ceramic
+- Level Sense LS-2600 floor leak sensor (6 ft lead) + 2.2 MΩ resistor (1–4.7 MΩ) + 100 nF ceramic
 - DFRobot Gravity TDS board (SEN0244) + probe
 - DFRobot Gravity pH board **SEN0169-V2** + BNC probe — the V2 specifically,
   it outputs 0–3 V. The classic SEN0169 outputs 0–5 V and will damage the
@@ -763,36 +763,44 @@ anything now.
 
 ## 7b. Floor leak sensor — on the ADS1115, nothing on the XIAO
 
-It is a switch — two metal tabs that water bridges — and a switch would
-normally take a GPIO. It does not need to. The ADS1115 is already on the
-bus with `A2` and `A3` unused, so the sensor is read as a voltage on `A2`
-and every connection lands on the **breakout's own header**. The XIAO is
-not touched.
+The LS-2600 is not a bare pair of tabs. There is a transistor behind them:
+the datasheet calls it *open circuit when dry, roughly 1.4 MΩ when wet*,
+and it is **polarised** — red to +V, white to the input. Wet, it sources
+current from red to white. So the input wants a pull-**down**, and reads
+0 V dry and 1–2 V wet. (A pull-up, the obvious thing for a "switch", fails
+here: against the sensor's 1.4 MΩ the wet and dry voltages end up within
+a volt of each other.)
+
+The ADS1115 is already on the bus with `A2` and `A3` unused, so the sensor
+is read as a voltage on `A2` and every connection lands on the **breakout's
+own header**. The XIAO is not touched.
 
 | | Goes to |
 |---|---|
-| Sensor lead 1 | ADS1115 `A2` |
-| Sensor lead 2 | ADS1115 `GND` pin |
-| 1 MΩ (100 kΩ–1 MΩ, whatever you have) | between `A2` and the breakout's `VDD` pin |
+| **Red** | ADS1115 `VDD` pin (3V3) |
+| **White** | ADS1115 `A2` |
+| 2.2 MΩ (anything 1–4.7 MΩ) | between `A2` and the breakout's `GND` pin |
 | 100 nF ceramic | between `A2` and the breakout's `GND` pin, as close to `A2` as it sits |
 
-Three things on one header pin: lead, resistor leg, cap leg. Tin them
-together in one go.
+Three things on one header pin: white lead, resistor leg, cap leg. Tin
+them together in one go. Get red and white the right way round — reversed,
+the transistor never conducts and the sensor is silently dead.
 
-Water is **not** a short — across two small tabs it reads tens of kilohms.
-With the pull-up, dry sits near 2.8 V and wet drops under 0.5 V; the config
-calls anything under 1.8 V a leak, holds it 3 s before believing it and
-10 s before clearing. `Leak Sensor Voltage` is published as a diagnostic so
-you can watch it move. The cap matters: a megohm node on 6 ft of cable is
-an antenna without it.
+The config calls anything over 0.5 V a leak, holds it 3 s before believing
+it and 10 s before clearing. `Leak Sensor Voltage` is published as a
+diagnostic so you can watch it move. The cap matters: a megohm node on
+6 ft of cable is an antenna without it.
+
+**On 3V3 instead of the rated 5 V, deliberately.** 3V3 keeps a wet sensor's
+output under the ADS1115's absolute-maximum input (VDD + 0.3 V) with
+nothing else in the circuit; on 5 V a wet sensor can push 4 V+ into `A2`,
+which kills the ADC. A transistor follower does not mind 3V3. If it turns
+out this one does — `Leak Sensor Voltage` stays at 0 with the tabs wet in
+step 9 — the fallback is red on the XIAO's `5V` pad and a 1 MΩ in series
+between white and `A2`. That is the one case that reopens the board.
 
 Put the sensor where water collects first — the lowest point under the
 tank. The 6 ft lead reaches from wherever the board ends up.
-
-If yours has three wires (`V+`, `GND`, signal — the NPN variant), `V+` to
-the XIAO's `5V` pad, `GND` to the breakout's `GND`, signal to `A2`, and the
-resistor and cap exactly as above. Open-collector; it pulls `A2` low the
-same way.
 
 ## 8. Inspect
 
@@ -804,10 +812,10 @@ C6 step 8. Then three checks specific to this build, all with the board
   twenty wires is on the wrong rail — find it now, not with smoke.
 - Meter from BH1750 A's `ADDR` to BH1750 B's `ADDR`. Open. If they are
   connected, they are on the same address.
-- Meter from ADS1115 `A2` to its `VDD` pin: ~1 MΩ (or whatever you used).
-  `A2` to `GND`: open (the cap). Now wet a fingertip and bridge the
-  sensor's tabs — `A2` to `GND` drops to tens of kΩ. Dry it and it goes
-  open again. That is the whole sensor.
+- Meter from ADS1115 `A2` to its `GND` pin: the pull-down, ~2.2 MΩ. `A2`
+  to `VDD`: open — if it reads low, red and white are swapped or the
+  sensor is wet. (There is a transistor in the sensor, so a wet-finger
+  test with the meter proves nothing; that check is in step 9, powered.)
 
 ## 9. Power up in stages — what the log should say
 
@@ -844,6 +852,14 @@ both light levels present, and — the one people forget — the relay
 binary sensors present and **off**: `Heater` (the pair), `Heater Left`,
 `Heater Right` and `Fan`. The side names come from `side_a_name` /
 `side_b_name` in the wrapper; if you changed those, the entities follow.
+
+**Then the leak sensor**, which is the one check that needs power. `Leak
+Sensor Voltage` (under diagnostics) should sit at **0.0 V** with the tabs
+dry. Wet a fingertip and hold it across both tabs: it climbs to **1–2 V**
+and after 3 s `Leak` turns on. Dry the tabs, and 10 s later it clears.
+If it stays at 0 V wet, first check red is on `VDD` and white on `A2` —
+swapped, the sensor is silently dead. If that is right, this sensor will
+not wake on 3V3: see §7b for the 5 V fallback.
 
 **Then** the relays. From HA, raise the setpoint a few degrees above the
 water temperature and watch `Heater Left` and `Heater Right` go on
