@@ -30,10 +30,11 @@
 #   Heater A control          D8           7
 #   Heater B control          D4           5
 #   Fan control               D9           8
+#   Leak sensor (floor)       D1           2
 #
-# Spare: D1 (GPIO2), D3 (GPIO4), D10 (GPIO9) -- all ADC1, all free because
-# pH and TDS now live on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3
-# strapping pin and nothing may hold it at a level during boot.
+# Spare: D3 (GPIO4), D10 (GPIO9) -- both ADC1, free because pH and TDS live
+# on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and
+# nothing may hold it at a level during boot.
 #
 # WHAT THIS FILE OWES THE SHARED PACKAGES -- the board contract:
 #   one_wire bus                 -> dallas_temp in packages/sensors.yaml
@@ -338,6 +339,34 @@ binary_sensor:
     lambda: |-
       if (std::isnan(id(temp_gradient).state)) return {};
       return fabsf(id(temp_gradient).state) > id(cal_gradient_alarm_f);
+
+  # Floor leak sensor under the stand: two metal tabs that water bridges.
+  # It is a switch, not a voltage, so it lives on a GPIO and not on the
+  # ADS1115 -- the ADC's spare channels stay for things that are analog.
+  #
+  # Water is not a short. Across two small tabs it is tens of kilohms, and
+  # against the S3's ~45k internal pull-up that lands the pin mid-rail,
+  # which is the one place a digital input must never sit. So: NO internal
+  # pull-up; a 1M external pull-up to 3V3 at the board end, which makes
+  # even 100k of water a clean low; and 100nF from the pin to GND, because
+  # a 1M node on 6 ft of cable is otherwise an antenna. Sensor lead 1 to
+  # D1, lead 2 to the GND rail. Wet = pin low = ON.
+  #
+  # The delays are the debounce. A drip that bridges the tabs for a second
+  # is not a leak; a leak does not un-bridge them in ten. If the sensor
+  # turns out to be the three-wire NPN variant, power it from the 5V pad,
+  # leave the pull-up and cap exactly as they are, and it behaves the same.
+  - platform: gpio
+    name: "Leak"
+    id: leak_floor
+    pin:
+      number: GPIO2   # D1
+      mode: input
+      inverted: true
+    device_class: moisture
+    filters:
+      - delayed_on: 3s
+      - delayed_off: 10s
 
 # ---------------------------------------------------------------
 # Heaters: ONE loop, TWO relays, BOTH heating together

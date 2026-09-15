@@ -513,6 +513,7 @@ other in this file.
 - ADS1115 breakout (16-bit, 4-channel, I2C)
 - 2 × DS18B20 waterproof probes
 - 2 × BH1750 breakouts
+- Floor leak sensor (two-tab contact type, 6 ft lead) + 1 MΩ resistor + 100 nF ceramic
 - DFRobot Gravity TDS board (SEN0244) + probe
 - DFRobot Gravity pH board **SEN0169-V2** + BNC probe — the V2 specifically,
   it outputs 0–3 V. The classic SEN0169 outputs 0–5 V and will damage the
@@ -559,7 +560,7 @@ Top view, USB-C at the top. Left column `D0`–`D6` top to bottom; right column
 | Pad | GPIO | Goes to |
 |---|---|---|
 | `D0` | 1 | DS18B20 **B** yellow (DQ) — cross-check probe, bus B |
-| `D1` | 2 | *spare* (ADC1) |
+| `D1` | 2 | Leak sensor lead 1 — 1 MΩ to 3V3 rail, 100 nF to GND rail |
 | `D2` | 3 | **nothing — strapping pin** |
 | `D3` | 4 | *spare* (ADC1) |
 | `D4` | 5 | Relay Ch2 `IN+` — **heater B** |
@@ -590,10 +591,10 @@ Count the conductors:
 
 | Rail | Wires |
 |---|---|
-| 3V3 | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, BH1750 B `ADDR`, ADS1115 `VDD`, TDS board, pH board, pull-up A, pull-up B — **10** |
-| GND | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, ADS1115 `GND`, ADS1115 `ADDR`, TDS board, pH board, relay `IN−` — **9** |
+| 3V3 | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, BH1750 B `ADDR`, ADS1115 `VDD`, TDS board, pH board, pull-up A, pull-up B, leak pull-up — **11** |
+| GND | DS18B20 A, DS18B20 B, BH1750 A, BH1750 B, ADS1115 `GND`, ADS1115 `ADDR`, TDS board, pH board, relay `IN−`, leak lead 2, leak cap — **11** |
 
-Twenty conductors. The C6 section says ten is past what one twisted joint
+Twenty-two conductors. The C6 section says ten is past what one twisted joint
 holds; this is twice that. So: **perfboard**.
 
 Take the scrap of perfboard. Pick two rows a few holes apart and bridge each
@@ -759,6 +760,34 @@ release, that is the symptom, and the fix is feeding that `IN+` through the
 GPIO from the XIAO's `5V` pad rather than 3.3 V. Not a reason to change
 anything now.
 
+## 7b. Floor leak sensor
+
+It is a switch — two metal tabs that water bridges — so it goes on a GPIO,
+not on the ADS1115. The 6 ft lead reaches the floor of the stand from
+wherever the board ends up; put the sensor where water would collect first,
+under the lowest point of the tank or beside the canister.
+
+Water is **not** a short. Across two small tabs it reads tens of kilohms,
+and the S3's internal pull-up (~45 kΩ) would leave the pin sitting at
+mid-rail — the one place a digital input must never be. So the pull-up is
+external and deliberately large:
+
+| | Goes to |
+|---|---|
+| Sensor lead 1 | `D1` |
+| Sensor lead 2 | GND rail |
+| 1 MΩ | between `D1` and the 3V3 rail — at the board, not out at the sensor |
+| 100 nF | between `D1` and the GND rail — as close to the pad as it will sit |
+
+The capacitor matters: a 1 MΩ node on 6 ft of cable is an antenna without
+it. Wet reads LOW; the config inverts that to `Leak: ON`, and holds it for
+3 s before believing it and 10 s before clearing.
+
+If yours turns out to have three wires (`V+`, `GND`, signal — the NPN
+variant), power `V+` from the `5V` pad, `GND` to the rail, signal to `D1`,
+and keep the 1 MΩ and 100 nF exactly as above. The output is open-collector
+so it pulls the pin low the same way.
+
 ## 8. Inspect
 
 C6 step 8. Then three checks specific to this build, all with the board
@@ -769,6 +798,9 @@ C6 step 8. Then three checks specific to this build, all with the board
   twenty wires is on the wrong rail — find it now, not with smoke.
 - Meter from BH1750 A's `ADDR` to BH1750 B's `ADDR`. Open. If they are
   connected, they are on the same address.
+- Meter from `D1` to the 3V3 rail: ~1 MΩ. To the GND rail: open (the cap).
+  Now wet a fingertip and bridge the sensor's tabs — `D1` to GND drops to
+  tens of kΩ. Dry it and it goes open again. That is the whole sensor.
 
 ## 9. Power up in stages — what the log should say
 
