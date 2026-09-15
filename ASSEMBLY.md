@@ -513,7 +513,7 @@ other in this file.
 - ADS1115 breakout (16-bit, 4-channel, I2C)
 - 2 × DS18B20 waterproof probes
 - 2 × BH1750 breakouts
-- Level Sense LS-2600 floor leak sensor (6 ft lead) + 2.2 MΩ resistor (1–4.7 MΩ) + 100 nF ceramic
+- Level Sense LS-2600 floor leak sensor (6 ft lead) + 2 × 1 MΩ resistors (from the kit, in series) + 100 nF ceramic
 - DFRobot Gravity TDS board (SEN0244) + probe
 - DFRobot Gravity pH board **SEN0169-V2** + BNC probe — the V2 specifically,
   it outputs 0–3 V. The classic SEN0169 outputs 0–5 V and will damage the
@@ -779,11 +779,12 @@ own header**. The XIAO is not touched.
 |---|---|
 | **Red** | ADS1115 `VDD` pin (3V3) |
 | **White** | ADS1115 `A2` |
-| 2.2 MΩ (anything 1–4.7 MΩ) | between `A2` and the breakout's `GND` pin |
+| 2 × 1 MΩ **in series** (= 2 MΩ; one 1 MΩ alone also works) | between `A2` and the breakout's `GND` pin |
 | 100 nF ceramic | between `A2` and the breakout's `GND` pin, as close to `A2` as it sits |
 
 Three things on one header pin: white lead, resistor leg, cap leg. Tin
-them together in one go. Get red and white the right way round — reversed,
+them together in one go. "In series" = twist one leg of each resistor
+together and solder; the two free legs are the ends. Get red and white the right way round — reversed,
 the transistor never conducts and the sensor is silently dead.
 
 The config calls anything over 0.5 V a leak, holds it 3 s before believing
@@ -812,7 +813,7 @@ C6 step 8. Then three checks specific to this build, all with the board
   twenty wires is on the wrong rail — find it now, not with smoke.
 - Meter from BH1750 A's `ADDR` to BH1750 B's `ADDR`. Open. If they are
   connected, they are on the same address.
-- Meter from ADS1115 `A2` to its `GND` pin: the pull-down, ~2.2 MΩ. `A2`
+- Meter from ADS1115 `A2` to its `GND` pin: the pull-down, ~2 MΩ. `A2`
   to `VDD`: open — if it reads low, red and white are swapped or the
   sensor is wet. (There is a transistor in the sensor, so a wet-finger
   test with the meter proves nothing; that check is in step 9, powered.)
