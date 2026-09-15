@@ -676,12 +676,23 @@ pin each, wired opposite:
 Get both `ADDR` pins the same way round and the I2C scan shows one device
 where you expect two — and the config's second sensor never publishes.
 
-These are the two devices most likely to sit far from the board, up near
-the light. I2C is not built for length: **keep each run under ~1 m and use
-shielded or twisted-pair cable** for `SDA`/`SCL`. If the boot log shows I2C
-errors or one sensor comes and goes, the run is too long — halving the bus
-speed (`frequency: 50kHz` under `i2c:` in the board file) is the fix before
-rewiring is.
+These two sit at opposite ends of a 48" tank, so each `SDA`/`SCL` pair is a
+4–5 ft run. I2C is not built for that; the board file already runs the bus
+at **10 kHz** (down from the 50 kHz default) to buy the capacitance margin
+a run that long needs. Your side of the bargain:
+
+- **Twisted pair** for `SDA`/`SCL` on each run (a pair pulled from Cat5 is
+  ideal), with `GND` alongside. Not a flat ribbon, not two loose wires.
+- **Route it away from the heater cords and the relay module.** A slow clock
+  buys capacitance margin, not noise immunity; a relay snapping next to an
+  unshielded I2C pair is a corrupted lux reading, not an error.
+- The GY-302 breakouts carry their own pull-ups, so add none. If the scan
+  is intermittent, 2.2 kΩ from `SDA` and `SCL` to 3V3 at the *board* end.
+
+If one sensor still comes and goes in the log after that, the fix is a
+differential I2C extender — a PCA9615 board (SparkFun QwiicBus) at the XIAO
+and one at each sensor, which carries I2C over ordinary twisted pair for
+tens of metres. Do not chase it with thicker wire or a faster clock.
 
 ## 6. Two 1-Wire buses, two pull-ups
 

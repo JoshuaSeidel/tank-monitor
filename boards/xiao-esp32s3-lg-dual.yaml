@@ -94,10 +94,22 @@ one_wire:
     id: onewire_b
     pin: GPIO1      # D0 -- cross-check probe. 4.7k pull-up to 3V3.
 
+# One bus, three devices: the ADS1115 next to the board and two BH1750s at
+# opposite ends of a 48" tank, so each SDA/SCL pair is a 4-5 ft run. I2C
+# was designed for inches; what limits it is bus capacitance against the
+# clock's rise time. At the 50kHz default a run this long is marginal and
+# fails in the worst way -- occasional bit errors that read as a lux value,
+# not as an error. At 10kHz the rise-time budget is five times wider and
+# ordinary twisted pair covers several metres. Cost: a BH1750 read takes
+# ~4 ms instead of ~1 ms, once every 30 s. Nothing here needs faster.
+#
+# Keep the pair away from the heater cords and the relay module -- slowing
+# the clock buys capacitance margin, not noise immunity.
 i2c:
   sda: GPIO43       # D6
   scl: GPIO44       # D7
   scan: true
+  frequency: 10kHz
 
 # The cross-check probe below is also the controller's veto: if the two
 # probes disagree by more than the band for five minutes the heater goes
@@ -285,9 +297,10 @@ sensor:
   # packages/sensors.yaml already claims. Two is the hard ceiling for BH1750
   # on one bus -- the part has exactly these two addresses.
   #
-  # If the two sensors sit far apart, drop the bus to 50kHz and use shielded
-  # cable. I2C down a long run in a humid cabinet returns plausible numbers
-  # rather than failing.
+  # Both sensors are 4-5 ft from the board, which is why the bus runs at
+  # 10kHz (see i2c: above). If one still comes and goes in the log, the
+  # next step is a differential extender (PCA9615) at each end, not a
+  # faster clock or a thicker wire.
   - platform: bh1750
     name: "Tank Light Level ${side_b_name}"
     id: tank_lux_b
