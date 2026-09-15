@@ -30,11 +30,11 @@
 #   Heater A control          D8           7
 #   Heater B control          D4           5
 #   Fan control               D9           8
-#   Leak sensor (floor)       D1           2
+#   Leak sensor (floor)       ADS1115 A2   -- no XIAO pad; see below
 #
-# Spare: D3 (GPIO4), D10 (GPIO9) -- both ADC1, free because pH and TDS live
-# on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and
-# nothing may hold it at a level during boot.
+# Spare: D1 (GPIO2), D3 (GPIO4), D10 (GPIO9) -- all ADC1, all free because
+# pH and TDS now live on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3
+# strapping pin and nothing may hold it at a level during boot.
 #
 # WHAT THIS FILE OWES THE SHARED PACKAGES -- the board contract:
 #   one_wire bus                 -> dallas_temp in packages/sensors.yaml
@@ -183,6 +183,35 @@ sensor:
           window_size: 10
           send_every: 5
           send_first_at: 5
+
+  # Floor leak sensor under the stand: two metal tabs that water bridges.
+  # It is a switch, and a switch would normally go on a GPIO -- but the
+  # ADS1115 was already wired and has two channels spare, and reading it
+  # as a voltage costs nothing but this block. Everything is on the
+  # ADS1115 breakout, none of it on the XIAO:
+  #
+  #   sensor lead 1 -> A2          1M   between A2 and the breakout's VDD
+  #   sensor lead 2 -> breakout GND   100nF between A2 and the breakout's GND
+  #
+  # Water is not a short; across two small tabs it is tens of kilohms. With
+  # the pull-up, dry sits near 2.8V (the ADC's own 6M input impedance loads
+  # the 1M a little) and wet drops under 0.3V. Anything from 100k to 1M
+  # works for the pull-up; the threshold below is far from both. The cap is
+  # because a megohm node on 6 ft of cable is an antenna without one.
+  - platform: ads1115
+    multiplexer: 'A2_GND'
+    gain: 4.096
+    id: leak_voltage
+    name: "Leak Sensor Voltage"
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    update_interval: 2s
+    filters:
+      - median:
+          window_size: 5
+          send_every: 5
+          send_first_at: 3
 
   # ---------------------------------------------------------------
   # Cross-check temperature probe
@@ -340,30 +369,18 @@ binary_sensor:
       if (std::isnan(id(temp_gradient).state)) return {};
       return fabsf(id(temp_gradient).state) > id(cal_gradient_alarm_f);
 
-  # Floor leak sensor under the stand: two metal tabs that water bridges.
-  # It is a switch, not a voltage, so it lives on a GPIO and not on the
-  # ADS1115 -- the ADC's spare channels stay for things that are analog.
-  #
-  # Water is not a short. Across two small tabs it is tens of kilohms, and
-  # against the S3's ~45k internal pull-up that lands the pin mid-rail,
-  # which is the one place a digital input must never sit. So: NO internal
-  # pull-up; a 1M external pull-up to 3V3 at the board end, which makes
-  # even 100k of water a clean low; and 100nF from the pin to GND, because
-  # a 1M node on 6 ft of cable is otherwise an antenna. Sensor lead 1 to
-  # D1, lead 2 to the GND rail. Wet = pin low = ON.
+  # Wet = pin pulled low through the water = under the threshold. Dry is
+  # ~2.8V, wet is well under 0.5V, so 1.8V is a long way from both.
   #
   # The delays are the debounce. A drip that bridges the tabs for a second
-  # is not a leak; a leak does not un-bridge them in ten. If the sensor
-  # turns out to be the three-wire NPN variant, power it from the 5V pad,
-  # leave the pull-up and cap exactly as they are, and it behaves the same.
-  - platform: gpio
+  # is not a leak; a leak does not un-bridge them in ten.
+  - platform: template
     name: "Leak"
     id: leak_floor
-    pin:
-      number: GPIO2   # D1
-      mode: input
-      inverted: true
     device_class: moisture
+    lambda: |-
+      if (std::isnan(id(leak_voltage).state)) return {};
+      return id(leak_voltage).state < 1.8f;
     filters:
       - delayed_on: 3s
       - delayed_off: 10s
