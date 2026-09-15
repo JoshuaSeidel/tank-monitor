@@ -681,8 +681,14 @@ These two sit at opposite ends of a 48" tank, so each `SDA`/`SCL` pair is a
 at **10 kHz** (down from the 50 kHz default) to buy the capacitance margin
 a run that long needs. Your side of the bargain:
 
-- **Twisted pair** for `SDA`/`SCL` on each run (a pair pulled from Cat5 is
-  ideal), with `GND` alongside. Not a flat ribbon, not two loose wires.
+- The cable on hand is **22 AWG 4-conductor UL 2464** (stranded, PVC, no
+  shield, no twist). It works at 10 kHz — roughly 20 pF/ft, so both runs
+  together stay well inside the bus's 400 pF budget — but with untwisted
+  conductors the clock edges couple into the data line if the two lie
+  side by side. So look at the cut end: the four cores sit in a square.
+  Put `SDA` and `SCL` on **diagonally opposite** cores, and `3V3`/`GND` on
+  the other diagonal, so a supply line sits between the two signals in
+  every direction. Same assignment at both ends, obviously.
 - **Route it away from the heater cords and the relay module.** A slow clock
   buys capacitance margin, not noise immunity; a relay snapping next to an
   unshielded I2C pair is a corrupted lux reading, not an error.
