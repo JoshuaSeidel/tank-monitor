@@ -689,6 +689,21 @@ a run that long needs. Your side of the bargain:
   Put `SDA` and `SCL` on **diagonally opposite** cores, and `3V3`/`GND` on
   the other diagonal, so a supply line sits between the two signals in
   every direction. Same assignment at both ends, obviously.
+- **Better:** a shielded Cat6A patch cable (Monoprice S/FTP, 10 ft, cut in
+  half gives both runs). Four twisted pairs, foil on each pair, braid over
+  all. Use it like this — each signal twisted with a DC line, never the two
+  signals twisted together:
+
+  | Pair | Use |
+  |---|---|
+  | blue / blue-white | `SDA` / `GND` |
+  | orange / orange-white | `SCL` / `3V3` |
+  | green / green-white | second `GND` / second `3V3` (parallel the supply) |
+  | brown / brown-white | unused |
+  | drain + braid | `GND` at the **board end only** — leave it floating at the sensor |
+
+  Grounding the shield at both ends makes a loop that picks up exactly the
+  relay noise you bought the shield to keep out.
 - **Route it away from the heater cords and the relay module.** A slow clock
   buys capacitance margin, not noise immunity; a relay snapping next to an
   unshielded I2C pair is a corrupted lux reading, not an error.
