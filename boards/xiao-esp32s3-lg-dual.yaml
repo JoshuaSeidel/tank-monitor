@@ -107,6 +107,7 @@ one_wire:
 # Keep the pair away from the heater cords and the relay module -- slowing
 # the clock buys capacitance margin, not noise immunity.
 i2c:
+  id: bus_a
   sda: GPIO43       # D6
   scl: GPIO44       # D7
   scan: true
@@ -616,3 +617,32 @@ text_sensor:
     entity_category: diagnostic
     update_interval: 60s
     lambda: 'return {id(ble_tx)};'
+
+  # Which of the three I2C devices answer, re-probed every minute and
+  # published to Home Assistant. The boot-time scan says the same thing
+  # once, on a serial console, before WiFi is even up -- which is no use
+  # to someone at the tank with a phone and no meter. This is the same
+  # probe the scan uses (a zero-length write to the address), so "ok" here
+  # is exactly "Found i2c device" there. All three MISSING is the bus
+  # itself: SDA/SCL shorted, swapped, or landed on the wrong pad. One
+  # MISSING is that device's wiring. Note the components themselves only
+  # try at boot; after fixing a wire, this line goes green first and the
+  # readings come back after a restart.
+  - platform: template
+    name: "I2C Devices"
+    id: i2c_devices
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      struct Want { uint8_t addr; const char *what; };
+      static const Want want[] = {
+        {0x48, "ADS1115"}, {0x23, "lux ${side_a_name}"}, {0x5C, "lux ${side_b_name}"}};
+      std::string out;
+      for (const auto &w : want) {
+        const auto err = id(bus_a).write_readv(w.addr, nullptr, 0, nullptr, 0);
+        if (!out.empty()) out += ", ";
+        out += w.what;
+        out += (err == i2c::ERROR_OK) ? " ok" : " MISSING";
+      }
+      return out;
