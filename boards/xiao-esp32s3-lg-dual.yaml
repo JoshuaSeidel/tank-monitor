@@ -142,6 +142,11 @@ i2c:
 # a lambda needs a number, and "GPIO43" is not one.
 esphome:
   on_boot:
+    # Re-apply the persisted mode once the controller exists (LATE = -100;
+    # this runs after it). A restored Cycling stays warm across a reboot.
+    - priority: -200
+      then:
+        - script.execute: apply_mode
     - priority: 1001
       then:
         - lambda: |-
@@ -184,6 +189,21 @@ esphome:
 # threshold -- that one tells you about the tank, this one stops the heater.
 tank_controller:
   cross_check: water_temp_b
+  # Eight degrees, not control.yaml's two. On a 48" tank the two probes sit
+  # 40" apart with a heater beside each; a real gradient of a degree or
+  # two is a MEASUREMENT here (see "Temperature Gradient"), not a fault.
+  # The veto exists for a probe that is lying -- the flooded DS18B20 of
+  # 2026-09-14 read half the water temperature, 35 degF off -- and 8 degF
+  # catches that with room to spare while never firing on the tank itself.
+  # First-boot default only: the controller persists the band, and the
+  # "Probe Disagreement Band" entity (raised to 15 below) changes it live.
+  disagreement_band: 8.0
+  # Hard high cutout raised for cycling. control.yaml's 82 degF sits above
+  # anything the 70-80 slider allows but BELOW a cycling target, and the
+  # setpoint is clamped to the cutout. 88 degF is still nowhere near what
+  # troubles glass, silicone or a Jager; it is a backstop on the water,
+  # not a limit on the target.
+  max_temperature: 88.0
 
 # ---------------------------------------------------------------
 # ADS1115 -- pH and TDS off the internal ADC
@@ -215,6 +235,12 @@ sensor:
   # always has for every other board.
   - id: !extend water_temp
     one_wire_id: onewire_a
+  # Two probes, two names. sensors.yaml calls the published one "Water
+  # Temperature" because on a one-probe board that is all it is; here it
+  # is one end of the tank and says so. The entity id follows the name, so
+  # Home Assistant sees ..._water_temperature_left, not the unsuffixed one.
+  - id: !extend water_temp_f
+    name: "Water Temperature ${side_a_name}"
 
   # Raw TDS probe voltage. Internal only; packages/sensors.yaml does the
   # maths and owns the published entity.
@@ -586,6 +612,56 @@ interval:
             id(grad_idle_ms) = millis();
           }
 
+# ---------------------------------------------------------------
+# Tank mode: Normal / Filling / Cycling
+# ---------------------------------------------------------------
+# Three things a new tank is, in order. The controller does the work
+# (set_hold, set_setpoint_override); this is the switch on the wall.
+#
+#   Filling   Every output held off and nothing judged. Probes in air read
+#             room temperature and disagree; a Jager out of water must not
+#             be powered; the learner must not watch any of it. Releasing
+#             the hold re-anchors the model and caps heat while it settles,
+#             because it is new water.
+#   Cycling   Regulates on "Cycling Target" instead of "Target Temperature"
+#             without touching it, so the owner's number is still there when
+#             the tank is done. Everything else -- fan, learning, faults --
+#             runs as normal.
+#   Normal    The setpoint entity, as on every other board.
+select:
+  - platform: template
+    name: "Tank Mode"
+    id: tank_mode_select
+    icon: "mdi:fishbowl-outline"
+    entity_category: config
+    options: ["Normal", "Filling", "Cycling"]
+    # Reads the global back rather than keeping its own copy -- one owner,
+    # same reason the setpoint number reads the controller.
+    lambda: |-
+      switch (id(tank_mode)) {
+        case 1: return {"Filling"};
+        case 2: return {"Cycling"};
+        default: return {"Normal"};
+      }
+    update_interval: 30s
+    set_action:
+      - lambda: |-
+          id(tank_mode) = (x == "Filling") ? 1 : (x == "Cycling") ? 2 : 0;
+      - script.execute: apply_mode
+
+script:
+  - id: apply_mode
+    mode: restart
+    then:
+      - lambda: |-
+          // A restored Filling is a Filling nobody is standing at.
+          if (id(tank_mode) == 1 && millis() < 15000) id(tank_mode) = 0;
+          const int m = id(tank_mode);
+          id(controller).set_hold(m == 1);
+          id(controller).set_setpoint_override(
+              m == 2 ? (id(cycling_target_f) - 32.0f) * 5.0f / 9.0f : NAN);
+          id(tank_mode_select).publish_state(m == 1 ? "Filling" : m == 2 ? "Cycling" : "Normal");
+
 globals:
   # Result of the boot-time bus autopsy (see esphome: on_boot above).
   - id: i2c_autopsy
@@ -643,7 +719,47 @@ globals:
     restore_value: true
     initial_value: '1.0'
 
+  # Cycling target, degF. 82: nitrifying bacteria double fastest in the low
+  # 80s, and 82 is the top of what an empty tank's equipment shrugs at.
+  - id: cycling_target_f
+    type: float
+    restore_value: true
+    initial_value: '82.0'
+  # 0 normal, 1 filling, 2 cycling. Restored, so a reboot mid-cycle stays
+  # warm. Filling is NOT restored: apply_mode maps a restored 1 back to
+  # normal, because a controller that reboots with its outputs held off
+  # and nobody at the tank is a cold tank by morning.
+  - id: tank_mode
+    type: int
+    restore_value: true
+    initial_value: '0'
+
 number:
+  # The veto band's ceiling. control.yaml caps the entity at 5 degF, which
+  # is right for a one-probe board and wrong for this one -- see the
+  # disagreement_band comment on the controller above.
+  - id: !extend probe_disagreement_band
+    max_value: 15.0
+  # Same reason as the probe's name: two offsets, two names.
+  - id: !extend cal_temp_offset_num
+    name: "Cal Temp Offset ${side_a_name}"
+
+  - platform: template
+    name: "Cycling Target"
+    id: cycling_target_num
+    icon: "mdi:bacteria-outline"
+    entity_category: config
+    unit_of_measurement: "°F"
+    device_class: temperature
+    min_value: 78.0
+    max_value: 86.0
+    step: 0.5
+    update_interval: 60s
+    lambda: "return id(cycling_target_f);"
+    set_action:
+      - lambda: id(cycling_target_f) = x;
+      - script.execute: apply_mode
+
   - platform: template
     name: "Cal Temp Offset ${side_b_name}"
     id: cal_temp_offset_b_num

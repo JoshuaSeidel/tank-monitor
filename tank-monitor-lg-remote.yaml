@@ -44,9 +44,19 @@
 # pairing is a WIRING FACT the board file cannot verify, and if the labels
 # are backwards every gradient reading points at the wrong end.
 #
-# packages/sensors.yaml owns the name "Water Temperature" for probe A and
-# cannot be relabelled from a wrapper, so the UNSUFFIXED temperature is
-# always side A. Set the names to match how you actually mounted them.
+# Both probes carry their side's name: "Water Temperature Left" and
+# "Water Temperature Right" with the values below, and so do the two
+# calibration offsets and the two heater relays. Set the names to match
+# how you actually mounted them.
+#
+# ---------------------------------------------------------------------
+# Tank Mode -- Normal / Filling / Cycling
+# ---------------------------------------------------------------------
+# A select entity on the controller, not a Home Assistant helper. Filling
+# holds every output off and judges nothing (probes in air, heaters maybe
+# too); Cycling regulates on "Cycling Target" (default 82 F) without
+# touching "Target Temperature"; Normal is the setpoint as usual. Filling
+# does not survive a reboot on purpose. Cycling does.
 substitutions:
   device_name: tank-monitor-75-gallon
   friendly_name: Tank Monitor 75 Gallon

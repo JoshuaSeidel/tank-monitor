@@ -22,3 +22,12 @@ packages:
   ph: !include packages/ph.yaml
   ble: !include packages/ble_link_v3.yaml
   board: !include boards/xiao-esp32s3-lg-dual.yaml
+
+# The component from the working tree, not from main -- otherwise a C++
+# edit is tested against whatever was last pushed. Later declarations of
+# the same component name win.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tank_controller]

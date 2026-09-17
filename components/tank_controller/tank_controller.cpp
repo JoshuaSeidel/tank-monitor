@@ -48,7 +48,10 @@ static const float REANCHOR_HEAT_CAP = 0.5f;
 // safe answer to that. Five minutes rides through a single glitchy
 // sample on either side without tripping.
 static const uint32_t DISAGREE_MS = 300000;         // 5 minutes
-static const float DISAGREE_BAND_MAX_F = 5.0f;
+// 15 not 5: a two-heater 48" tank carries a real gradient between its
+// probes, and its band is set wide enough that only a lying probe can
+// cross it. The one-probe boards keep their 2.0 default regardless.
+static const float DISAGREE_BAND_MAX_F = 15.0f;
 static const float DISAGREE_BAND_MAX = DISAGREE_BAND_MAX_F * 5.0f / 9.0f;
 
 // Fan equivalent. The bar is deliberately low -- merely "did not fall at
@@ -309,6 +312,50 @@ void TankController::set_setpoint(float v) {
   // Old integral was accumulated against a different target.
   this->integral_ = 0.0f;
   this->setpoint_pref_.save(&v);
+}
+
+void TankController::set_hold(bool v) {
+  if (v == this->hold_)
+    return;
+  this->hold_ = v;
+  this->integral_ = 0.0f;
+  if (v) {
+    ESP_LOGI(TAG, "Hold: outputs off, learning paused");
+    this->state_text_ = "hold";
+    this->apply_outputs_(0.0f, 0.0f);
+    this->heat_stall_since_ms_ = 0;
+    this->heater_stalled_ = false;
+    this->fan_stall_since_ms_ = 0;
+    this->fan_stalled_ = false;
+    this->disagree_since_ms_ = 0;
+    this->probe_disagreement_ = false;
+    // Whatever the learn window was measuring, the hold cuts across it.
+    this->learn_anchor_temp_ = NAN;
+    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
+    this->acc_n_ = 0;
+  } else {
+    ESP_LOGI(TAG, "Hold released - settling on what may be new water");
+    this->reanchor_ms_ = millis();
+  }
+}
+
+void TankController::set_setpoint_override(float c) {
+  const float prev = this->setpoint_override_;
+  if (std::isnan(c)) {
+    this->setpoint_override_ = NAN;
+    if (!std::isnan(prev)) {
+      ESP_LOGI(TAG, "Setpoint override cleared - back to %.1f degF", this->setpoint_ * 9.0f / 5.0f + 32.0f);
+      this->integral_ = 0.0f;
+    }
+    return;
+  }
+  c = clampf(c, this->min_temp_, this->max_temp_);
+  if (c == prev)
+    return;
+  this->setpoint_override_ = c;
+  this->integral_ = 0.0f;
+  ESP_LOGI(TAG, "Setpoint override %.1f degF (owner's setpoint %.1f degF untouched)", c * 9.0f / 5.0f + 32.0f,
+           this->setpoint_ * 9.0f / 5.0f + 32.0f);
 }
 
 void TankController::set_fan_deadband(float v) {
@@ -612,6 +659,17 @@ void TankController::update() {
   }
   const bool settling = this->reanchor_ms_ != 0 && now - this->reanchor_ms_ < REANCHOR_SETTLE_MS;
 
+  // --- hold --------------------------------------------------------------
+  // Before the cross-check and the stall detectors on purpose: a tank
+  // being filled has probes in air and heaters commanded off, and every
+  // one of those checks would call that a fault. Reading validity above
+  // still runs, so the gap logic does not fire when the hold ends.
+  if (this->hold_) {
+    this->state_text_ = "hold";
+    this->apply_outputs_(0.0f, 0.0f);
+    return;
+  }
+
   // --- cross-check probe -------------------------------------------------
   // A second DS18B20 on its own bus. Not a control input -- the loop
   // regulates on the control probe alone -- but the only thing that can
@@ -773,7 +831,7 @@ void TankController::update() {
   const float trust = clampf(this->get_confidence() / 100.0f, 0.0f, 1.0f) * this->get_model_health();
   const float passive = passive_raw * trust;
 
-  const float error = this->setpoint_ - t;
+  const float error = this->get_active_setpoint() - t;
 
   // Aim to close the error over response_time_ minutes, capped so a big step
   // change doesn't demand a thermally impossible ramp.

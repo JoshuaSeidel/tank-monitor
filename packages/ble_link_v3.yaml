@@ -151,7 +151,11 @@ interval:
             "3,%.3f,%.3f,%.0f,%.0f,%.0f,%.3f,%.4f,%.0f,%.1f,%.1f,%d,%d,%d,%d"
             ",%.3f,%.3f,%.3f,%.3f,%.3f",
             num(id(water_temp).state),
-            num(id(controller).get_setpoint()),
+            // The target the loop is actually holding to. While cycling that
+            // is the cycling target, and the panel should say so; the
+            // owner's setpoint is unchanged underneath and comes back with
+            // Normal.
+            num(id(controller).get_active_setpoint()),
             num(id(tds).state),
             num(id(tds_1h).state),
             num(id(tank_lux).state),

@@ -175,6 +175,9 @@ sensor:
   # other unit it could be in.
   - platform: template
     name: "Water Temperature"
+    # id so a two-probe board can !extend the name ("Water Temperature
+    # Left"). Nothing here references it; the id changes nothing on its own.
+    id: water_temp_f
     unit_of_measurement: "°F"
     device_class: temperature
     state_class: measurement

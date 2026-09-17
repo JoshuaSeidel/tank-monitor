@@ -849,12 +849,22 @@ absent is BH1750 B's `ADDR` not reaching 3V3. `0x48` absent is the ADS1115
 "No devices" on one bus and not the other is that bus's pull-up or its
 yellow wire on the wrong pad.
 
-**Then** check Home Assistant: `Water Temperature` and `Water Temperature B`
-both reporting and roughly agreeing, `TDS` and `pH` present and not NaN,
-both light levels present, and — the one people forget — the relay
-binary sensors present and **off**: `Heater` (the pair), `Heater Left`,
-`Heater Right` and `Fan`. The side names come from `side_a_name` /
-`side_b_name` in the wrapper; if you changed those, the entities follow.
+**Then** check Home Assistant: `Water Temperature Left` and `Water
+Temperature Right` both reporting, `TDS` and `pH` present and not NaN,
+`I2C Devices` reading `ADS1115 ok`, `Leak` off, and — the one people
+forget — the relay binary sensors present and **off**: `Heater` (the
+pair), `Heater Left`, `Heater Right` and `Fan`. The side names come from
+`side_a_name` / `side_b_name` in the wrapper; if you changed those, the
+entities follow.
+
+**Put it in Filling mode now** — `Tank Mode` on the device page — and
+leave it there until the tank is full and both probes are under water.
+Filling holds every output off and judges nothing: probes in air read
+room temperature and disagree, a Jager out of water must not be powered,
+and the learner must not watch any of it. Nothing you do on the bench
+can trip a fault while it is set. Switch to `Cycling` once it is full
+(regulates to `Cycling Target`, 82 °F by default, without touching your
+real setpoint), and `Normal` when the cycle is done.
 
 **Then the leak sensor**, which is the one check that needs power. `Leak
 Sensor Voltage` (under diagnostics) should sit at **0.0 V** with the tabs

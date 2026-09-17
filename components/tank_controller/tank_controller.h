@@ -101,6 +101,26 @@ class TankController : public PollingComponent {
 
   void set_setpoint(float v);
   float get_setpoint() const { return this->setpoint_; }
+
+  // --- Modes -------------------------------------------------------------
+  // Hold: every output off, nothing learned, no fault judged, until
+  // released. For a tank being filled or drained -- the probes are in
+  // air, the heaters may be, and neither the loop nor its detectors
+  // should conclude anything from that. Deliberately not persisted: a
+  // reboot mid-fill comes up regulating, which is the side to err on.
+  // Release re-anchors the learner and caps heat while it settles, the
+  // same as after a gap in readings, because it IS new water.
+  void set_hold(bool v);
+  bool get_hold() const { return this->hold_; }
+  // A target that stands in for the setpoint without touching it or its
+  // persisted copy -- cycling a new tank warm, then back to the number the
+  // owner actually set. Clamped to the cutouts like the setpoint. NAN
+  // clears it. The loop regulates on get_active_setpoint(); the setpoint
+  // entity keeps showing get_setpoint(), which is still the owner's value.
+  void set_setpoint_override(float c);
+  float get_active_setpoint() const {
+    return std::isnan(this->setpoint_override_) ? this->setpoint_ : this->setpoint_override_;
+  }
   // How far above setpoint the water must be before the fan may run, degC.
   // Persisted like the setpoint; the config value is the first-boot default.
   void set_fan_deadband(float v);
@@ -206,6 +226,8 @@ class TankController : public PollingComponent {
   float response_time_{20.0f};
   bool learning_enabled_{true};
   bool fan_available_{true};
+  bool hold_{false};
+  float setpoint_override_{NAN};
 
   float heater_duty_{0.0f};
   float fan_duty_{0.0f};

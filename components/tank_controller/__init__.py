@@ -113,8 +113,8 @@ CONFIG_SCHEMA = cv.All(
             # because one of them is lying and there is no telling which.
             cv.Optional(CONF_CROSS_CHECK): cv.use_id(sensor.Sensor),
             # First-boot default; the "Probe Disagreement Band" number
-            # changes it live. 5.0 matches DISAGREE_BAND_MAX_F.
-            cv.Optional(CONF_DISAGREEMENT_BAND, default=2.0): cv.float_range(min=0.0, max=5.0),
+            # changes it live. 15.0 matches DISAGREE_BAND_MAX_F.
+            cv.Optional(CONF_DISAGREEMENT_BAND, default=2.0): cv.float_range(min=0.0, max=15.0),
         }
     ).extend(cv.polling_component_schema("30s")),
     _validate,
