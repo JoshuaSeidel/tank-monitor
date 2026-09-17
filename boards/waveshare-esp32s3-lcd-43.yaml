@@ -512,19 +512,54 @@ display:
             const float ppi = (float) (BX1 - BX0) / ${tank_width_in};
             const int   cxm = (BX0 + BX1) / 2;
 
-            // Spray bar: centred, ${spray_bar_len_in} in long, fed from its middle.
+            // A canister hose looped over the back rim: an inverted U whose
+            // legs both end at the rim line (BY0). One leg is the pipe inside
+            // the tank; the other drops behind the wall and is hidden by it,
+            // which is exactly what the eye expects. Drawn as an annulus,
+            // row by row, so it is bulk spans and not per-pixel circles.
+            // `lean` is which way the outside leg goes: +1 right, -1 left.
+            const Color HOSE(31, 63, 80);
+            auto rim_loop = [&](int leg_x, int lean, int r_out, int r_in) {
+              const int cx = leg_x + lean * r_out;   // U centre; legs at cx +/- r_out
+              for (int dy = -r_out; dy <= 0; dy++) {
+                const int ho = (int) sqrtf((float) (r_out * r_out - dy * dy));
+                const int hi = (-dy < r_in) ? (int) sqrtf((float) (r_in * r_in - dy * dy)) : 0;
+                if (hi == 0) {
+                  frect(cx - ho, BY0 + dy, 2 * ho, 1, HOSE);
+                } else {
+                  frect(cx - ho, BY0 + dy, ho - hi, 1, HOSE);
+                  frect(cx + hi, BY0 + dy, ho - hi, 1, HOSE);
+                }
+              }
+            };
+
+            // Spray bar: centred, ${spray_bar_len_in} in long, fed from its middle
+            // by a hose over the rim.
             {
               const int half = (int) (${spray_bar_len_in} * ppi / 2.0f);
+              rim_loop(cxm, +1, 13, 5);
+              frect(cxm - 4, BY0, 8, 118 - BY0, HOSE);
               frect(cxm - half, 118, 2 * half, 8, Color(23, 67, 90));
-              frect(cxm - 4, 106, 9, 14, Color(23, 67, 90));
               for (int x = cxm - half + 8; x <= cxm + half - 8; x += 14)
                 it.filled_circle(x, 128, 2, Color(58, 125, 153));
             }
 
-            // Intake pipe, ${intake_from_left_in} in from the LEFT end.
+            // Intake, ${intake_from_left_in} in from the LEFT end: hose over the
+            // rim, a tube down to about half depth, and a slotted strainer
+            // that hangs well clear of the substrate. It is a thing hung
+            // from the rim, not a bar standing on the floor.
             {
               const int ix = BX0 + (int) (${intake_from_left_in} * ppi);
-              frect(ix - 5, 132, 10, 164, Color(18, 48, 63));
+              // Loop leans toward the middle of the tank so a corner intake
+              // stays on the back wall instead of spilling onto the pane.
+              rim_loop(ix, ix > cxm ? -1 : +1, 13, 5);
+              frect(ix - 4, BY0, 8, 226 - BY0, Color(18, 48, 63));
+              frect(ix - 3, BY0, 1, 226 - BY0, Color(46, 88, 108));   // highlight
+              // Strainer: wider cylinder, slotted, rounded off at the bottom.
+              frect(ix - 8, 226, 16, 34, Color(24, 58, 74));
+              for (int y = 231; y < 258; y += 5)
+                frect(ix - 6, y, 12, 1, Color(58, 125, 153));
+              it.filled_circle(ix, 260, 8, Color(24, 58, 74));
             }
 
             // Heaters: vertical, one near each end.
