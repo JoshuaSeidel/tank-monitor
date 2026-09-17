@@ -60,10 +60,20 @@ substitutions:
 
   # ---- I2C pads. Only touch these if SDA/SCL went on the wrong way ----
   # Default is SDA on D6, SCL on D7. If the "I2C Devices" diagnostic says
-  # "no ack" for all three, swap the two values here and reflash before
+  # "no ack" for everything, swap the two values here and reflash before
   # reaching for the iron.
   # i2c_sda: "44"
   # i2c_scl: "43"
+
+  # ---- NO LUX SENSORS, for now (2026-09-17) ----
+  # Both BH1750 runs shorted the 3V3 rail on the bench and the tank went
+  # live without them. The controller treats a missing light reading as
+  # "light = 0" and everything else is unaffected; what is lost is the
+  # thermal model's light-gain term and any future automation keyed off
+  # MEASURED light. The three pieces below are one change: this line, and
+  # the sensor: block at the bottom. To fit the lux sensors later, delete
+  # all three and reflash -- the board file has been lux-capable all along.
+  i2c_expect: "0x48 ADS1115"
 
 packages:
   tank_monitor:
@@ -99,3 +109,16 @@ packages:
 # substitutions:
 #   ph_v_neutral: "1.500"
 #   ph_v_acid: "2.032"
+
+# ---- NO LUX SENSORS, for now -- the other half of i2c_expect above ----
+# Drop both BH1750s from the build so they are not two failed components
+# at every boot, and leave a placeholder that never publishes under the id
+# the controller and the BLE payload reference. The panel shows "--" for
+# light, which is the truth.
+sensor:
+  - id: !remove tank_lux
+  - id: !remove tank_lux_b
+  - platform: template
+    id: tank_lux
+    internal: true
+    update_interval: never
