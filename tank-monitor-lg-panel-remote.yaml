@@ -57,6 +57,12 @@ substitutions:
   # ---- REPLACE THIS with the 75 gal controller's BLE MAC (see above) ----
   s3_ble_mac: "SET-ME-FROM-THE-75-GALLON-CONTROLLER-BOOT-LOG"
 
+  # ---- Where the hardware is, in inches, for the Vessel page ----
+  # The board file draws the back wall from these. Only the ones that
+  # differ from its defaults need to be here. Intake is in the back-RIGHT
+  # corner on this tank: 47 in from the left end of a 48 in wall.
+  intake_from_left_in: "47"
+
 
 packages:
   tank_monitor:
