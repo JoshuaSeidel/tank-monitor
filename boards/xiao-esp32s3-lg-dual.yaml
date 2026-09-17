@@ -66,6 +66,13 @@ substitutions:
   # trims this to the ADS1115 alone, so the diagnostic reports a healthy
   # bus as healthy instead of naming two sensors that were never fitted.
   i2c_expect: "0x48 ADS1115, 0x23 lux ${side_a_name}, 0x5C lux ${side_b_name}"
+  # Leak sensor thresholds, volts on A2. Measured on this tank: wet reads
+  # 2.0-2.7 V; dry on the bench 0.0 V; dry on sealed hardwood beside the
+  # heater cords 0.2-0.5 V, wandering. So: wet above 1.2, dry again below
+  # 0.8, and the gap between is hysteresis -- a reading that hovers around
+  # one line cannot chatter across both.
+  leak_on_v:  "1.2"
+  leak_off_v: "0.8"
 
 esp32:
   board: seeed_xiao_esp32s3
@@ -472,20 +479,27 @@ binary_sensor:
       if (std::isnan(id(temp_gradient).state)) return {};
       return fabsf(id(temp_gradient).state) > id(cal_gradient_alarm_f);
 
-  # Wet = the sensor sources into the pull-down = ABOVE the threshold. Dry
-  # is 0V and wet is 1-2V, so 0.5V is clear of both.
+  # Wet = the sensor sources into the pull-down = the voltage rises. Two
+  # thresholds (substitutions above): above leak_on_v is wet, below
+  # leak_off_v is dry, and in between the answer is "whatever it was" --
+  # returning an empty optional leaves the state alone. That band is what
+  # stops a floor that reads 0.4 V on a humid night from flickering the
+  # alarm; a 0.5 V single threshold did exactly that on 2026-09-17.
   #
-  # The delays are the debounce. A drip that bridges the tabs for a second
-  # is not a leak; a leak does not un-bridge them in ten.
+  # The delays are the debounce on top. A splash that bridges the tabs for
+  # a few seconds is not a leak; a leak does not un-bridge them in ten.
   - platform: template
     name: "Leak"
     id: leak_floor
     device_class: moisture
     lambda: |-
-      if (std::isnan(id(leak_voltage).state)) return {};
-      return id(leak_voltage).state > 0.5f;
+      const float v = id(leak_voltage).state;
+      if (std::isnan(v)) return {};
+      if (v > ${leak_on_v}f) return true;
+      if (v < ${leak_off_v}f) return false;
+      return {};
     filters:
-      - delayed_on: 3s
+      - delayed_on: 5s
       - delayed_off: 10s
 
 # ---------------------------------------------------------------

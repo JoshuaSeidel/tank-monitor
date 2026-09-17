@@ -789,10 +789,15 @@ them together in one go. "In series" = twist one leg of each resistor
 together and solder; the two free legs are the ends. Get red and black the right way round — reversed,
 the transistor never conducts and the sensor is silently dead.
 
-The config calls anything over 0.5 V a leak, holds it 3 s before believing
-it and 10 s before clearing. `Leak Sensor Voltage` is published as a
-diagnostic so you can watch it move. The cap matters: a megohm node on
-6 ft of cable is an antenna without it.
+The config calls it a leak above **1.2 V** and dry again below **0.8 V** —
+the gap is hysteresis, so a floor that hovers near one line cannot
+flicker the alarm — held 5 s before believing it and 10 s before clearing.
+Those two numbers are `leak_on_v` / `leak_off_v` substitutions if your
+floor reads differently: measured here, wet was 2.0–2.7 V, dry on the
+bench 0.0 V, and dry on sealed hardwood beside the heater cords 0.2–0.5 V.
+`Leak Sensor Voltage` is published as a diagnostic so you can see where
+yours sits. The cap matters: a megohm node on 6 ft of cable is an antenna
+without it, and that 0.2–0.5 V floor reading is largely what it picks up.
 
 **On 3V3 instead of the rated 5 V, deliberately.** 3V3 keeps a wet sensor's
 output under the ADS1115's absolute-maximum input (VDD + 0.3 V) with
@@ -867,9 +872,10 @@ can trip a fault while it is set. Switch to `Cycling` once it is full
 real setpoint), and `Normal` when the cycle is done.
 
 **Then the leak sensor**, which is the one check that needs power. `Leak
-Sensor Voltage` (under diagnostics) should sit at **0.0 V** with the tabs
-dry. Wet a fingertip and hold it across both tabs: it climbs to **1–2 V**
-and after 3 s `Leak` turns on. Dry the tabs, and 10 s later it clears.
+Sensor Voltage` (under diagnostics) should sit near **0 V** with the tabs
+dry (up to ~0.5 V once it is lying on a floor is normal). Wet a fingertip
+and hold it across both tabs: it climbs to **2–3 V** and after 5 s `Leak`
+turns on. Dry the tabs, and 10 s later it clears.
 If it stays at 0 V wet, first check red is on `VDD` and black on `A2` —
 swapped, the sensor is silently dead. If that is right, this sensor will
 not wake on 3V3: see §7b for the 5 V fallback.
