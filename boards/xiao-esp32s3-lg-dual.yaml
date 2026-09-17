@@ -653,15 +653,31 @@ text_sensor:
       static const Want want[] = {
         {0x48, "ADS1115"}, {0x23, "lux ${side_a_name}"}, {0x5C, "lux ${side_b_name}"}};
       std::string out;
+      bool all_ok = true;
       for (const auto &w : want) {
         const auto err = id(bus_a).write_readv(w.addr, nullptr, 0, nullptr, 0);
         if (!out.empty()) out += ", ";
         out += w.what;
         switch (err) {
           case i2c::ERROR_OK:               out += " ok"; break;
-          case i2c::ERROR_NOT_ACKNOWLEDGED: out += " no ack"; break;
-          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; break;
-          default:                          out += " error"; break;
+          case i2c::ERROR_NOT_ACKNOWLEDGED: out += " no ack"; all_ok = false; break;
+          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; all_ok = false; break;
+          default:                          out += " error"; all_ok = false; break;
         }
+      }
+      // Something expected is missing: sweep every address, so a device
+      // that is present but at the WRONG address (ADS1115 with ADDR on
+      // VDD is 0x49, floating is anyone's guess) shows up by name of
+      // where it is, instead of as one more "no ack". ~120 ms at 10kHz,
+      // once a minute, only while something is wrong.
+      if (!all_ok) {
+        std::string found;
+        for (uint8_t a = 0x08; a < 0x78; a++) {
+          if (id(bus_a).write_readv(a, nullptr, 0, nullptr, 0) != i2c::ERROR_OK) continue;
+          char b[8];
+          snprintf(b, sizeof(b), "%s0x%02X", found.empty() ? "" : " ", a);
+          found += b;
+        }
+        out += found.empty() ? "; bus sweep: nothing" : "; bus sweep found: " + found;
       }
       return out;
