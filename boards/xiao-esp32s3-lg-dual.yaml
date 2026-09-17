@@ -55,6 +55,12 @@
 substitutions:
   side_a_name: "A"
   side_b_name: "B"
+  # The two I2C pads. Overridable from the wrapper for exactly one reason:
+  # if SDA and SCL were landed the other way round on the XIAO, swapping
+  # these two values is a reflash instead of a desolder. Everything else
+  # about the bus is unchanged.
+  i2c_sda: GPIO43   # D6
+  i2c_scl: GPIO44   # D7
 
 esp32:
   board: seeed_xiao_esp32s3
@@ -108,8 +114,8 @@ one_wire:
 # the clock buys capacitance margin, not noise immunity.
 i2c:
   id: bus_a
-  sda: GPIO43       # D6
-  scl: GPIO44       # D7
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
   scan: true
   frequency: 10kHz
 
@@ -622,12 +628,20 @@ text_sensor:
   # published to Home Assistant. The boot-time scan says the same thing
   # once, on a serial console, before WiFi is even up -- which is no use
   # to someone at the tank with a phone and no meter. This is the same
-  # probe the scan uses (a zero-length write to the address), so "ok" here
-  # is exactly "Found i2c device" there. All three MISSING is the bus
-  # itself: SDA/SCL shorted, swapped, or landed on the wrong pad. One
-  # MISSING is that device's wiring. Note the components themselves only
-  # try at boot; after fixing a wire, this line goes green first and the
-  # readings come back after a restart.
+  # probe the scan uses (a zero-length transaction to the address), so
+  # "ok" here is exactly "Found device" there.
+  #
+  # The failure word is the diagnosis, and it is worth reading closely:
+  #   no ack    the bus works, nobody answered at that address. All three:
+  #             SDA/SCL swapped at the XIAO (try the i2c_sda/i2c_scl
+  #             substitutions the other way round) or the devices are
+  #             unpowered. One: that device's wire, or lux B's ADDR jumper.
+  #   timeout   the bus is stuck -- a line will not move. SDA and SCL
+  #             bridged (solder between the ADS1115 header pins is the
+  #             classic), or a line tied hard to 3V3 (lux B's ADDR->VCC
+  #             jumper touching SDA).
+  # The sensor components only try at boot; after fixing a wire this line
+  # goes green within a minute, the readings come back after a restart.
   - platform: template
     name: "I2C Devices"
     id: i2c_devices
@@ -643,6 +657,11 @@ text_sensor:
         const auto err = id(bus_a).write_readv(w.addr, nullptr, 0, nullptr, 0);
         if (!out.empty()) out += ", ";
         out += w.what;
-        out += (err == i2c::ERROR_OK) ? " ok" : " MISSING";
+        switch (err) {
+          case i2c::ERROR_OK:               out += " ok"; break;
+          case i2c::ERROR_NOT_ACKNOWLEDGED: out += " no ack"; break;
+          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; break;
+          default:                          out += " error"; break;
+        }
       }
       return out;
