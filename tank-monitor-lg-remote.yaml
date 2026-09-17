@@ -62,8 +62,8 @@ substitutions:
   # Default is SDA on D6, SCL on D7. If the "I2C Devices" diagnostic says
   # "no ack" for all three, swap the two values here and reflash before
   # reaching for the iron.
-  # i2c_sda: GPIO44
-  # i2c_scl: GPIO43
+  # i2c_sda: "44"
+  # i2c_scl: "43"
 
 packages:
   tank_monitor:

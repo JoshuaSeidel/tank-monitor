@@ -165,16 +165,22 @@ button:
 # at "unknown" from boot until the first time that relay closes -- which for
 # the fan could be never. Seed them off at startup; slow_pwm's own state at
 # boot is off, so this is the truth, not an assumption.
+#
+# List form, not a bare mapping, on purpose: ESPHome merges package lists by
+# concatenation and mappings by key, so a board file that adds its own
+# on_boot trigger as a list would REPLACE this one if it were a mapping --
+# silently, and the relay entities would go back to "unknown". Same
+# generated code either way; only the merge behaviour differs.
 esphome:
   on_boot:
-    priority: -100
-    then:
-      - binary_sensor.template.publish:
-          id: heater_relay
-          state: false
-      - binary_sensor.template.publish:
-          id: fan_relay
-          state: false
+    - priority: -100
+      then:
+        - binary_sensor.template.publish:
+            id: heater_relay
+            state: false
+        - binary_sensor.template.publish:
+            id: fan_relay
+            state: false
 
 binary_sensor:
   # The relays themselves. Controller State says what the controller is
