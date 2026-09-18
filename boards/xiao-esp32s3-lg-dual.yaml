@@ -591,6 +591,19 @@ output:
     write_action:
       - lambda: |-
           const float d = clamp(state, 0.0f, 1.0f);
+          // From nothing to something -- Filling released, or a call for
+          // heat after coasting -- closes the relays NOW. slow_pwm decides
+          // at the start of each 900 s window whether the contacts close,
+          // so a demand that arrives mid-window would otherwise wait out
+          // the rest of it: up to fifteen minutes of "heating" with both
+          // relays open. Only this edge restarts the window. A duty that
+          // merely changes mid-window keeps its place in it, because
+          // restarting on every 30 s adjustment would hold the contacts
+          // closed for as long as the duty kept creeping up.
+          if (id(heater_demand) <= 0.0f && d > 0.0f) {
+            id(heater_a_pwm).restart_cycle();
+            id(heater_b_pwm).restart_cycle();
+          }
           id(heater_demand) = d;
           // Same duty, same instant, both halves of the tank. If these ever
           // diverge in effect, the gradient sensors above are what tell you.

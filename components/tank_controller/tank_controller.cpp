@@ -334,8 +334,12 @@ void TankController::set_hold(bool v) {
     this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
     this->acc_n_ = 0;
   } else {
-    ESP_LOGI(TAG, "Hold released - settling on what may be new water");
-    this->reanchor_ms_ = millis();
+    // Not a re-anchor. That cap exists for a GAP in readings, where the
+    // first value back has nothing recent to be checked against; through a
+    // hold the readings kept flowing and kept being checked. A tank that
+    // has just been told to heat gets full authority, now -- the learner
+    // was already reset on entry, which is the part that was new water.
+    ESP_LOGI(TAG, "Hold released - regulating");
   }
 }
 
@@ -945,8 +949,11 @@ void TankController::update() {
   if (error < -GUARD_DEADBAND && this->integral_ > 0.0f)
     this->integral_ = 0.0f;
 
-  if (settling && heater > REANCHOR_HEAT_CAP)
+  if (settling && heater > REANCHOR_HEAT_CAP) {
     heater = REANCHOR_HEAT_CAP;
+    // Say what is being driven, not what was wanted.
+    this->state_text_ = "heating (capped)";
+  }
 
   this->apply_outputs_(heater, fan);
 

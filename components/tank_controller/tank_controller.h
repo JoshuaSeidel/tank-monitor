@@ -108,8 +108,9 @@ class TankController : public PollingComponent {
   // air, the heaters may be, and neither the loop nor its detectors
   // should conclude anything from that. Deliberately not persisted: a
   // reboot mid-fill comes up regulating, which is the side to err on.
-  // Release re-anchors the learner and caps heat while it settles, the
-  // same as after a gap in readings, because it IS new water.
+  // Entry resets the learner's window, because what follows is new
+  // water; release regulates at full authority immediately, because the
+  // readings never stopped being checked.
   void set_hold(bool v);
   bool get_hold() const { return this->hold_; }
   // A target that stands in for the setpoint without touching it or its
