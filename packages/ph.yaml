@@ -71,16 +71,22 @@ sensor:
           window_size: 5
           send_every: 1
     lambda: |-
+      // NAN, never {} (no publish), for every way this can fail. A
+      // rejected sample that publishes nothing leaves the LAST ACCEPTED
+      // value on the dashboard indefinitely: an unplugged electrode showed
+      // pH 13.84 for an hour because its floating input had once wandered
+      // through 0.3 V. The median filter below skips NaN, so one bad
+      // sample is still rejected quietly; five in a row go unknown.
       const float v = id(ph_voltage).state;
       if (std::isnan(v))
-        return {};
+        return NAN;
 
       // Two-point fit. Slope is NEGATIVE on this board: more volts, lower pH.
       const float v7 = id(cal_ph_v7);
       const float v4 = id(cal_ph_v4);
       const float slope25 = (v4 - v7) / (4.0f - 7.0f);   // volts per pH at 25 C
       if (fabsf(slope25) < 1e-4f)
-        return {};                                       // calibration unset
+        return NAN;                                      // calibration unset
 
       // The Nernst slope scales with ABSOLUTE temperature, so an electrode
       // calibrated at 25 C reads slightly off at tank temperature. Correcting
@@ -93,7 +99,7 @@ sensor:
 
       const float ph = 7.0f + (v - v7) / slope;
       if (ph < 0.0f || ph > 14.0f)
-        return {};                                       // nothing sane attached
+        return NAN;                                      // nothing sane attached
       return ph;
 
   # The stored calibration, visible so it can be recorded and so a probe
