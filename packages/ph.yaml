@@ -98,8 +98,16 @@ sensor:
       const float slope = slope25 * ((t_c + 273.15f) / 298.15f);
 
       const float ph = 7.0f + (v - v7) / slope;
-      if (ph < 0.0f || ph > 14.0f)
-        return NAN;                                      // nothing sane attached
+      // 3 to 11, not 0 to 14. The electrode only ever sees tank water or a
+      // calibration buffer (4.00, 7.00, occasionally 10.01), all inside
+      // this window with room to spare. What lands OUTSIDE it is an input
+      // with no electrode on it: a floating ADC pin drifts between 0.03
+      // and 0.3 V, and 0.3 V is pH 13.7 -- "legal" under 0-14, and a
+      // number that sat on the dashboard for a day as if it meant
+      // something. Nothing with a real electrode in real water is lost to
+      // this; a tank at pH 3 has bigger problems than a blank reading.
+      if (ph < 3.0f || ph > 11.0f)
+        return NAN;                                      // no electrode attached
       return ph;
 
   # The stored calibration, visible so it can be recorded and so a probe
