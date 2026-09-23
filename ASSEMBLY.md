@@ -1060,32 +1060,44 @@ photoperiod:
   a measurement, and reports as "lots of red" entirely plausibly.
 - **Every band in the low hundreds at full output** → raise it one step.
 
-## Measuring the daylight reference
+## The daylight reference learns itself
 
 The photoperiod runs 09:00–16:00, straight through the brightest part of the
 day, so lux over this tank is fixture **plus** sunshine and a BH1750 cannot
 tell them apart. Left uncorrected, the thermal model learns to attribute
 room-warming daylight to a fixture that was switched off.
 
-NIR separates them. LEDs emit essentially no near-infrared; sunlight is full of
-it and ordinary window glass passes most of the near band. So `NIR Ratio` sits
-near zero under the lamp and well above it under the sun.
+There is nothing to configure for this. The reference maintains itself off a
+physical invariant:
 
-To enable the correction:
+> The fixture emits essentially no near-infrared; sunlight is full of it. So
+> fixture light lands almost entirely in `clear` and barely at all in NIR —
+> which means turning the lamp **on** can only push NIR/clear **down**. Fixture
+> light dilutes the ratio; it can never inflate it.
 
-1. Put the light in **phase 0** (off) and wait for a bright day.
-2. Read `NIR Ratio` from the pod at midday. That is your reference.
-3. Set `nir_daylight_ref` in `tank-monitor-lg-remote.yaml` to that value and
-   reflash the controller.
+So the highest ratio ever observed is the purest daylight sample available, and
+the controller simply keeps it. No sunny-afternoon ritual, no threshold typed
+into a wrapper, no reflash. It decays on about a 16-day half-life so the
+reference follows the seasons, a dirtying window or a moved sensor rather than
+being pinned by one bright afternoon in September.
 
-`tank_lux` is then scaled by the fixture's estimated share: at zero NIR the
-light is all fixture, at the reference it is all sun, linear between.
+Samples are only taken above 50 lux — in a dark room both NIR and clear are
+near zero and their ratio is noise, which would otherwise ratchet the reference
+up on nothing at all.
 
-**It ships at `0`, which disables it** and passes lux through untouched. Do not
-guess a value. The last threshold here that was guessed rather than measured —
-`light_on_lux` at 50 — sat above the daytime maximum and reported "dark" around
-the clock for a year. The gate also fails **open**: if the pod sends no
-spectral, lux passes through rather than being silently zeroed.
+**Both error directions are safe**, which is why this is allowed near a control
+input:
+
+| Reference is | Effect | Recovery |
+|---|---|---|
+| too high | correction under-fires, lux passes closer to raw | decays back down |
+| too low | — | next brighter sample raises it immediately |
+| not set yet | pass-through, today's behaviour exactly | first daylight sets it |
+
+Watch it as **Daylight NIR Reference** (diagnostic). It reads unavailable until
+the first daylight sample lands. If it ever looks wrong — sensor moved, window
+changed — press **Relearn Daylight Reference** and it starts over from
+pass-through.
 
 ## Reading it
 

@@ -75,34 +75,16 @@ substitutions:
   # i2c_sda: "44"
   # i2c_scl: "43"
 
-  # ---- NO LUX SENSORS, for now (2026-09-17) ----
-  # Both BH1750 runs shorted the 3V3 rail on the bench and the tank went
-  # live without them. The controller treats a missing light reading as
-  # "light = 0" and everything else is unaffected; what is lost is the
-  # thermal model's light-gain term and any future automation keyed off
-  # MEASURED light. The three pieces below are one change: this line, and
-  # the sensor: block at the bottom. To fit the lux sensors later, delete
-  # all three and reflash -- the board file has been lux-capable all along.
+  # ---- NO LUX SENSOR ON THIS BOARD'S BUS ----
+  # Both BH1750 runs shorted the 3V3 rail on the bench (2026-09-17) and the
+  # tank went live without them. They are not coming back here: a sensor
+  # that can brown out the board driving two heaters is not worth the
+  # reading.
+  #
+  # Lux now arrives over BLE from tank-monitor-light-pod instead, so this
+  # line stays exactly as it is -- there really is nothing on this I2C bus
+  # but the ADS1115, and the diagnostic should say so.
   i2c_expect: "0x48 ADS1115"
-
-  # ---- Daylight discount for the model's light term. OFF by default ----
-  # The photoperiod runs 09:00-16:00, straight through the brightest part
-  # of the day, so a lux reading over this tank is fixture + sunshine and
-  # a BH1750 cannot tell them apart. The thermal model would learn to
-  # attribute room-warming daylight to a fixture that was switched off.
-  #
-  # The AS7341 can tell them apart: LEDs emit essentially no near-infrared
-  # and sunlight is full of it, so NIR/clear is near zero under the lamp
-  # and well above it under the sun. Set this to the NIR ratio MEASURED
-  # with the fixture OFF on a bright day, and tank_lux below is scaled by
-  # the fixture's estimated share of the light.
-  #
-  # Left at 0 it is disabled and lux passes through untouched, which is
-  # today's behaviour. Do not guess a value here. The last threshold in
-  # this project that was guessed rather than measured -- light_on_lux at
-  # 50 -- sat above the daytime maximum and reported "dark" around the
-  # clock for a year. Measure it, then set it.
-  nir_daylight_ref: "0"
 
 packages:
   tank_monitor:
@@ -184,10 +166,13 @@ sensor:
       if (id(rx_lux_ms) == 0) return {};                      // nothing ever heard
       if (millis() - id(rx_lux_ms) > 180000) return {};       // 3 missed pushes
       const float lux = id(rx_lux);
-      const float ref = ${nir_daylight_ref};
-      // Gate disabled, or no spectral in the last frame: pass lux through
-      // unchanged. Fails OPEN on purpose -- an absent discriminator must
-      // not silently zero the model's light term.
+      // Learned from the frames themselves, not configured -- the fixture
+      // emits no NIR, so the highest ratio ever seen is the purest
+      // daylight sample. Kept in NVS, visible as "Daylight NIR Reference".
+      const float ref = id(cal_nir_ref);
+      // No daylight seen yet, or no spectral in the last frame: pass lux
+      // through unchanged. Fails OPEN on purpose -- an absent
+      // discriminator must not silently zero the model's light term.
       if (ref <= 0.0f || isnan(id(rx_nir))) return lux;
       // Linear unmix: at zero NIR the light is all fixture, at the
       // measured daylight reference it is all sun.

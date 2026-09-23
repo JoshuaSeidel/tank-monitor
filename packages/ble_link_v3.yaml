@@ -139,6 +139,19 @@ globals:
     restore_value: false
     initial_value: 'NAN'
 
+  # The daylight reference: NIR/clear with the fixture OFF on a bright day.
+  # A CALIBRATION CONSTANT, not a feature flag -- it describes this window,
+  # this room and this sensor position, so it cannot be known until the
+  # hardware exists and has seen a sunny afternoon.
+  #
+  # restore_value, like every other calibration here: it survives a reboot
+  # and an OTA, and it is set from the dashboard rather than a reflash.
+  # 0 means "not measured yet", which leaves the correction inert.
+  - id: cal_nir_ref
+    type: float
+    restore_value: true
+    initial_value: '0'
+
 # Two simultaneous BLE clients: the 4.3" panel, and the light pod pushing
 # lux. ESPHome's server resumes advertising after a connection precisely so
 # a second client can still find it -- but max_clients defaults to 1, which
@@ -219,6 +232,23 @@ esp32_ble_server:
                 id(rx_red)  = (R < 0 || R > 100) ? NAN : (float) R;
                 id(rx_nir)  = (N < 0) ? NAN : (float) N / 1000.0f;
                 id(rx_lux_ms) = millis();
+                // Learn the daylight reference from the frame itself.
+                // Fixture light only ever dilutes NIR/clear, so the running
+                // maximum is the purest daylight sample available.
+                //
+                // Only sampled above 50 lux: in a dark room both NIR and
+                // clear are near zero and their ratio is noise, which would
+                // otherwise ratchet the reference up on nothing at all.
+                if (!std::isnan(id(rx_nir)) && L > 50) {
+                  if (id(rx_nir) > id(cal_nir_ref)) {
+                    id(cal_nir_ref) = id(rx_nir);
+                  } else {
+                    // ~16 day half-life at one frame a minute, so the
+                    // reference follows the seasons and a dirtying window
+                    // instead of being pinned by one bright afternoon.
+                    id(cal_nir_ref) *= 0.99997f;
+                  }
+                }
 
 interval:
   - interval: 5s
@@ -259,3 +289,50 @@ interval:
           value: !lambda 'return std::vector<uint8_t>(id(ble_tx).begin(), id(ble_tx).end());'
       - ble_server.characteristic.notify:
           id: tele_char
+
+# ---------------------------------------------------------------------
+# Daylight reference -- LEARNED, not configured
+# ---------------------------------------------------------------------
+# There is nothing to set here and nothing to measure by hand. The
+# reference maintains itself off a physical invariant:
+#
+#   The fixture emits essentially no near-infrared. Sunlight is full of
+#   it. So fixture light lands almost entirely in the `clear` channel and
+#   barely at all in NIR -- which means turning the lamp ON can only push
+#   NIR/clear DOWN. Fixture light dilutes the ratio; it can never inflate
+#   it.
+#
+# Therefore the HIGHEST ratio ever seen is the purest daylight sample
+# available, and it costs nothing to keep. No sunny-afternoon ritual, no
+# threshold typed into a wrapper, no reflash.
+#
+# It decays slowly (about a 16-day half-life) so the reference tracks the
+# seasons, a dirtying window or a moved sensor instead of being pinned
+# forever by one bright afternoon in September.
+#
+# Both error directions are safe, which is why this is allowed near a
+# control input at all:
+#   ref too HIGH -> the correction under-fires and lux passes closer to
+#                   raw, which is exactly today's behaviour.
+#   ref too LOW  -> a brighter sample raises it immediately, because the
+#                   rule is a maximum.
+# And until the first daylight sample it sits at 0, which is pass-through.
+sensor:
+  - platform: template
+    name: "Daylight NIR Reference"
+    id: nir_ref_learned
+    icon: "mdi:white-balance-sunny"
+    entity_category: diagnostic
+    accuracy_decimals: 3
+    update_interval: 60s
+    lambda: 'return id(cal_nir_ref) > 0.0f ? id(cal_nir_ref) : NAN;'
+
+button:
+  - platform: template
+    name: "Relearn Daylight Reference"
+    icon: "mdi:restart"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          ESP_LOGI("cal", "daylight NIR reference cleared (was %.3f); relearning", id(cal_nir_ref));
+          id(cal_nir_ref) = 0.0f;
