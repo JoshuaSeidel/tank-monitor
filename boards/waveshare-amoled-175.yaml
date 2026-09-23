@@ -64,6 +64,16 @@ psram:
   mode: octal
   speed: 80MHz
 
+# PSRAM free, on top of the internal-heap diagnostics in base.yaml. This
+# board is the only one that allocates out of PSRAM in bulk (the 424 KB
+# framebuffer), so it is the only one where PSRAM exhaustion is a way to
+# die -- and internal Heap Free would look healthy the whole way down.
+sensor:
+  - platform: debug
+    psram:
+      name: "PSRAM Free"
+      entity_category: diagnostic
+
 spi:
   - id: amoled_bus
     type: quad

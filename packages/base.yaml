@@ -152,6 +152,24 @@ color:
   - id: COLOR_DIM
     hex: "8A93A0"
 
+# Why a board died, not just that it did.
+#
+# 2026-09-23: the round panel started dropping off and needing a physical
+# unplug to come back, and there was no way to tell a brownout from a
+# software crash from a watchdog -- uptime resets to 0 for all three and
+# HA only sees "unavailable". reset_reason below answers it in one read:
+#   Brownout               -> power. Cable, supply, or a current spike.
+#   Task watchdog / IWDG   -> something blocked the loop.
+#   Panic / exception      -> firmware crash, and the log has a backtrace.
+#   Power on               -> the plug really was pulled.
+#
+# Heap Free and Heap Max Block are the other half: a slow leak shows as
+# Free sagging over days, and fragmentation shows as Max Block collapsing
+# while Free looks fine. Either one ends in a failed allocation and a
+# reboot that would otherwise look spontaneous.
+debug:
+  update_interval: 60s
+
 sensor:
   - platform: wifi_signal
     name: "Wi-Fi Signal"
@@ -162,11 +180,29 @@ sensor:
     name: "Uptime"
     entity_category: diagnostic
 
+  - platform: debug
+    free:
+      name: "Heap Free"
+      entity_category: diagnostic
+    block:
+      name: "Heap Max Block"
+      entity_category: diagnostic
+    loop_time:
+      name: "Loop Time"
+      entity_category: diagnostic
+
 binary_sensor:
   - platform: status
     name: "Status"
 
 text_sensor:
+  # The first thing to read after an unexplained reboot -- see the debug
+  # block above for how to read it.
+  - platform: debug
+    reset_reason:
+      name: "Reset Reason"
+      entity_category: diagnostic
+
   # Which build is actually on the board. Twice now a diagnosis has stalled
   # on "is this the firmware I just pushed, or the one from yesterday" with
   # no way to tell from outside -- once on the model seed, once on a pin
