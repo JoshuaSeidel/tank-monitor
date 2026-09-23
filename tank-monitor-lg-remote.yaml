@@ -85,6 +85,25 @@ substitutions:
   # all three and reflash -- the board file has been lux-capable all along.
   i2c_expect: "0x48 ADS1115"
 
+  # ---- Daylight discount for the model's light term. OFF by default ----
+  # The photoperiod runs 09:00-16:00, straight through the brightest part
+  # of the day, so a lux reading over this tank is fixture + sunshine and
+  # a BH1750 cannot tell them apart. The thermal model would learn to
+  # attribute room-warming daylight to a fixture that was switched off.
+  #
+  # The AS7341 can tell them apart: LEDs emit essentially no near-infrared
+  # and sunlight is full of it, so NIR/clear is near zero under the lamp
+  # and well above it under the sun. Set this to the NIR ratio MEASURED
+  # with the fixture OFF on a bright day, and tank_lux below is scaled by
+  # the fixture's estimated share of the light.
+  #
+  # Left at 0 it is disabled and lux passes through untouched, which is
+  # today's behaviour. Do not guess a value here. The last threshold in
+  # this project that was guessed rather than measured -- light_on_lux at
+  # 50 -- sat above the daytime maximum and reported "dark" around the
+  # clock for a year. Measure it, then set it.
+  nir_daylight_ref: "0"
+
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
@@ -164,7 +183,18 @@ sensor:
     lambda: |-
       if (id(rx_lux_ms) == 0) return {};                      // nothing ever heard
       if (millis() - id(rx_lux_ms) > 180000) return {};       // 3 missed pushes
-      return id(rx_lux);
+      const float lux = id(rx_lux);
+      const float ref = ${nir_daylight_ref};
+      // Gate disabled, or no spectral in the last frame: pass lux through
+      // unchanged. Fails OPEN on purpose -- an absent discriminator must
+      // not silently zero the model's light term.
+      if (ref <= 0.0f || isnan(id(rx_nir))) return lux;
+      // Linear unmix: at zero NIR the light is all fixture, at the
+      // measured daylight reference it is all sun.
+      float frac = 1.0f - (id(rx_nir) / ref);
+      if (frac < 0.0f) frac = 0.0f;
+      if (frac > 1.0f) frac = 1.0f;
+      return lux * frac;
 
   # So a silently dead link is visible rather than inferred from a blank
   # tile -- the same reason the panel carries a link age.
@@ -180,3 +210,43 @@ sensor:
     lambda: |-
       if (id(rx_lux_ms) == 0) return {};
       return (millis() - id(rx_lux_ms)) / 1000.0f;
+
+  # ---- Spectral, as the CONTROLLER sees it ----
+  # internal: true on purpose. Home Assistant already gets the full
+  # ten-channel set straight from the pod over MQTT, and two devices
+  # publishing a "Blue Share" is how you end up reading the wrong one.
+  # These exist so on-device logic -- the gate above, and anything added
+  # later -- can reach the values without a round trip through HA.
+  #
+  # Green is reconstructed rather than received: the shares cover all
+  # eight bands and sum to 100, and leaving it out is what keeps the frame
+  # inside a single 20-byte BLE write.
+  - platform: template
+    id: link_blue_share
+    internal: true
+    unit_of_measurement: "%"
+    update_interval: 30s
+    lambda: 'return isnan(id(rx_blue)) ? NAN : id(rx_blue);'
+
+  - platform: template
+    id: link_red_share
+    internal: true
+    unit_of_measurement: "%"
+    update_interval: 30s
+    lambda: 'return isnan(id(rx_red)) ? NAN : id(rx_red);'
+
+  - platform: template
+    id: link_green_share
+    internal: true
+    unit_of_measurement: "%"
+    update_interval: 30s
+    lambda: |-
+      if (isnan(id(rx_blue)) || isnan(id(rx_red))) return {};
+      return 100.0f - id(rx_blue) - id(rx_red);
+
+  - platform: template
+    id: link_nir_ratio
+    internal: true
+    accuracy_decimals: 3
+    update_interval: 30s
+    lambda: 'return isnan(id(rx_nir)) ? NAN : id(rx_nir);'

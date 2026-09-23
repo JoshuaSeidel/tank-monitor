@@ -118,6 +118,27 @@ globals:
     restore_value: false
     initial_value: '0'
 
+  # Spectral, from the same frame. Blue and red are percentages of all
+  # eight visible bands; green is reconstructed as 100 - blue - red rather
+  # than sent, to keep the frame inside one 20-byte BLE write.
+  #
+  # rx_nir is NIR / clear -- near zero under the fixture, substantially
+  # above it under daylight, because LEDs emit almost no near-infrared and
+  # sunlight is full of it. That is the one spectral value the control loop
+  # can act on; see the fixture-light gate in the wrapper.
+  - id: rx_blue
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: rx_red
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: rx_nir
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
 # Two simultaneous BLE clients: the 4.3" panel, and the light pod pushing
 # lux. ESPHome's server resumes advertising after a connection precisely so
 # a second client can still find it -- but max_clients defaults to 1, which
@@ -167,12 +188,22 @@ esp32_ble_server:
         # tank's target temperature do not belong on one channel, and the
         # pod has no business being able to reach the setpoint at all.
         #
-        #   L<sp><degrees>  ->  "L,412.0"
+        #   L,<lux>,<blue%>,<red%>,<nir/1000>   e.g. "L,412,21,32,4"
         #
-        # Validated before it is believed: right prefix, parses, and inside
-        # a range a real room can produce. A malformed frame becomes NO
-        # reading, never a wrong one -- the staleness guard in the wrapper
-        # then times it out exactly as if the pod had gone quiet.
+        # Five fields, all integers, never more than 19 bytes -- it has to
+        # survive a 20-byte BLE write in case MTU negotiation does not
+        # raise the limit. Green is not sent: the shares cover all eight
+        # bands and sum to 100, so it is reconstructed below.
+        #
+        # -1 in a spectral field means the AS7341 had nothing yet. The
+        # BH1750 updates faster, and lux must not wait on spectral.
+        #
+        # Validated before it is believed, the same way the v3 telemetry
+        # parser rejects any frame that is not exactly 15 fields: sscanf
+        # must fill all four numbers, and lux must be in a range a real
+        # room can produce. A malformed frame becomes NO reading, never a
+        # wrong one -- the staleness guard in the wrapper then times it out
+        # exactly as if the pod had gone quiet.
         - id: sens_char
           uuid: "6e400004-b5a3-f393-e0a9-e50e24dcca9e"
           write: true
@@ -180,10 +211,13 @@ esp32_ble_server:
           on_write:
             - lambda: |-
                 std::string s(x.begin(), x.end());
-                if (s.rfind("L,", 0) != 0) return;
-                const float v = atof(s.c_str() + 2);
-                if (std::isnan(v) || v < 0.0f || v > 100000.0f) return;
-                id(rx_lux) = v;
+                int L = 0, B = 0, R = 0, N = 0;
+                if (sscanf(s.c_str(), "L,%d,%d,%d,%d", &L, &B, &R, &N) != 4) return;
+                if (L < 0 || L > 100000) return;
+                id(rx_lux)  = (float) L;
+                id(rx_blue) = (B < 0 || B > 100) ? NAN : (float) B;
+                id(rx_red)  = (R < 0 || R > 100) ? NAN : (float) R;
+                id(rx_nir)  = (N < 0) ? NAN : (float) N / 1000.0f;
                 id(rx_lux_ms) = millis();
 
 interval:

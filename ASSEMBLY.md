@@ -928,12 +928,36 @@ travel by two different paths:
 | Part | Answers | Goes to | How |
 |---|---|---|---|
 | BH1750 (0x23) | *how much* light, in lux | the 75 gal controller | BLE, peer to peer |
-| AS7341 (0x39) | *which channels* are on | Home Assistant | MQTT |
+| AS7341 (0x39) | *which channels* are on | the controller **and** Home Assistant | BLE (compact) + MQTT (all 10 bands) |
 
 Lux is a control input — it feeds the thermal model's light-gain term — so it
 must not depend on the broker, Home Assistant or the router, and it doesn't.
-The spectral data has no consumer on the controller and is never sent there.
-Both publish to MQTT for history; the BLE path is additive.
+
+The spectral side goes both ways. Home Assistant gets all ten channels over
+MQTT for history and channel verification. The controller gets a compact
+subset over the same BLE frame as lux, because one spectral number —
+**NIR/clear** — is something the control loop can genuinely act on. See the
+daylight reference below.
+
+## The BLE frame
+
+```
+L,<lux>,<blue%>,<red%>,<nir×1000>        e.g.  L,412,21,32,4
+```
+
+Five fields, all integers, **never more than 19 bytes.** That size is
+deliberate: a BLE write carries 20 bytes of payload until MTU negotiation
+succeeds, and while ESPHome requests a larger MTU on connect, the granted size
+is whatever both ends agree — not a promise. A frame that fits the default
+works however that lands.
+
+Green is not sent. The three shares cover all eight bands and sum to 100, so
+the controller reconstructs it as `100 − blue − red`. Blue and red are the ends
+of the spectrum and the channels actually being tuned; green is the inferable
+one.
+
+`-1` in a spectral field means the AS7341 had nothing yet — it updates slower
+than the BH1750, and lux must not wait on it.
 
 ## What you need
 
@@ -1035,6 +1059,33 @@ photoperiod:
 - **Saturated on** → drop gain one step. A pinned channel reads a ceiling, not
   a measurement, and reports as "lots of red" entirely plausibly.
 - **Every band in the low hundreds at full output** → raise it one step.
+
+## Measuring the daylight reference
+
+The photoperiod runs 09:00–16:00, straight through the brightest part of the
+day, so lux over this tank is fixture **plus** sunshine and a BH1750 cannot
+tell them apart. Left uncorrected, the thermal model learns to attribute
+room-warming daylight to a fixture that was switched off.
+
+NIR separates them. LEDs emit essentially no near-infrared; sunlight is full of
+it and ordinary window glass passes most of the near band. So `NIR Ratio` sits
+near zero under the lamp and well above it under the sun.
+
+To enable the correction:
+
+1. Put the light in **phase 0** (off) and wait for a bright day.
+2. Read `NIR Ratio` from the pod at midday. That is your reference.
+3. Set `nir_daylight_ref` in `tank-monitor-lg-remote.yaml` to that value and
+   reflash the controller.
+
+`tank_lux` is then scaled by the fixture's estimated share: at zero NIR the
+light is all fixture, at the reference it is all sun, linear between.
+
+**It ships at `0`, which disables it** and passes lux through untouched. Do not
+guess a value. The last threshold here that was guessed rather than measured —
+`light_on_lux` at 50 — sat above the daytime maximum and reported "dark" around
+the clock for a year. The gate also fails **open**: if the pod sends no
+spectral, lux passes through rather than being silently zeroed.
 
 ## Reading it
 

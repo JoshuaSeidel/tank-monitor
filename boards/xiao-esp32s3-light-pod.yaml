@@ -178,11 +178,37 @@ ble_client:
             id: ctrl_link
             service_uuid: ${link_service}
             characteristic_uuid: ${link_sens_char}
+            # FRAME: L,<lux>,<blue%>,<red%>,<nir/1000>  -- 5 fields, <= 19 bytes.
+            #
+            # The size is not an accident. A BLE write carries 20 bytes of
+            # payload until an MTU negotiation succeeds, and while ESPHome
+            # does request a larger one on connect, the granted size is
+            # whatever both ends agree -- not a promise. A frame that fits
+            # in the default works no matter how that negotiation lands.
+            #
+            # Which is why green is NOT sent: the three shares are computed
+            # over all eight bands and sum to 100, so the controller
+            # reconstructs it as 100 - blue - red. Blue and red are the ends
+            # of the spectrum and the channels actually being tuned; green
+            # is the one that can be inferred.
+            #
+            # -1 means "spectral not ready yet" -- the AS7341 has a slower
+            # update than the BH1750, and lux must not wait on it.
             value: !lambda |-
-              const float v = id(pod_lux).state;
-              char b[24];
-              const int n = snprintf(b, sizeof(b), "L,%.1f", v);
-              return std::vector<uint8_t>(b, b + n);
+              const float lux = id(pod_lux).state;
+              const float b   = id(sp_share_blue).state;
+              const float r   = id(sp_share_red).state;
+              const float n   = id(sp_nir_ratio).state;
+              int L = isnan(lux) ? 0 : (int) lroundf(lux);
+              if (L < 0) L = 0;
+              if (L > 65535) L = 65535;
+              const int B = isnan(b) ? -1 : (int) lroundf(b);
+              const int R = isnan(r) ? -1 : (int) lroundf(r);
+              int N = isnan(n) ? -1 : (int) lroundf(n * 1000.0f);
+              if (N > 999) N = 999;
+              char buf[24];
+              const int len = snprintf(buf, sizeof(buf), "L,%d,%d,%d,%d", L, B, R, N);
+              return std::vector<uint8_t>(buf, buf + len);
         - delay: 200ms
         # Non-persistent by design. Holding the link open would keep the
         # controller at two BLE connections permanently and give the panel
@@ -344,6 +370,30 @@ sensor:
       const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
       if (total <= 0.0f) return {};
       return 100.0f * (f7 + f8) / total;
+
+  # NIR divided by the clear channel -- the daylight discriminator, and the
+  # one spectral number the CONTROLLER has a real use for.
+  #
+  # LEDs emit essentially no near-infrared. Sunlight is full of it, and
+  # ordinary window glass passes most of the near band. So this ratio
+  # separates "the fixture is lighting the tank" (near 0) from "the sun is
+  # up" (substantially above 0) in a way lux cannot -- both look like light
+  # to a BH1750.
+  #
+  # That matters here specifically because the photoperiod moved to
+  # 09:00-16:00, straight through the brightest part of the day. Without
+  # this, daylight through the window is indistinguishable from the lamp,
+  # and the thermal model would learn to attribute room-warming sunshine to
+  # a fixture that was switched off.
+  - platform: template
+    name: "NIR Ratio"
+    id: sp_nir_ratio
+    accuracy_decimals: 3
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float nir = id(sp_nir).state, clear = id(sp_clear).state;
+      if (isnan(nir) || isnan(clear) || clear <= 0.0f) return {};
+      return nir / clear;
 
   # Sum of the eight visible bands. Unlike the shares this DOES scale with
   # gain and exposure, so it is only comparable while those stay untouched.
