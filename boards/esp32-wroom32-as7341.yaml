@@ -1,0 +1,317 @@
+# ESP32-WROOM-32 -- SPECTRAL ADD-ON. One sensor, one job.
+#
+# CLASSIC ESP32, not an S3. The sister file boards/esp32-wroom32.yaml is
+# the same silicon doing the controller job; this one does nothing but
+# read a light.
+#
+# A standalone board that carries a single AS7341 11-channel spectral sensor
+# and publishes it to MQTT. It regulates nothing, drives nothing, and no
+# other device depends on it. If it dies, the tank does not notice.
+#
+# ---------------------------------------------------------------------
+# WHAT THIS ANSWERS, AND WHAT IT DOES NOT
+# ---------------------------------------------------------------------
+# It exists because the Chihiros WRGB II Pro 120 is commanded per channel
+# -- white, red, green, blue -- and nothing verified that a commanded
+# change actually happened. A lux sensor structurally cannot: lux is
+# photopic, weighted to human vision around 555 nm, so it discounts deep
+# red (660 nm) and royal blue (450 nm) hardest. Those are exactly the
+# channels being tuned. Move red from 20% to 36% and a BH1750 barely
+# twitches.
+#
+# This part splits the light into eight visible bands instead, so a
+# per-channel change is visible as a change in the BAND SHARES below.
+#
+# It does NOT measure PAR. The counts are uncalibrated ADC values, not
+# micromoles. The Seneye was returned from this project for exactly that
+# failure mode -- a continuous reading nobody could check, believed for
+# months, wrong the whole time. Do not let a number from this board become
+# a PAR figure. Its only valid use is DIFFERENTIAL: this week against last
+# week, this channel against that one, same sensor, same place, same gain.
+#
+# It is also NOT a lux sensor and must never feed `tank_lux`. The control
+# loop normalises against `full_scale_lux: 3000` and the lights-on test is
+# `light_on_lux: 18`, both in real lux. Feeding AS7341 counts into that id
+# would silently invalidate both numbers while looking like it worked.
+#
+# ---------------------------------------------------------------------
+# MOUNTING -- the readings are worthless if this moves
+# ---------------------------------------------------------------------
+# Everything here is relative, so the geometry IS the calibration:
+#
+#   * Fix it in place. Permanently. A sensor that shifts between readings
+#     turns every week-over-week comparison into noise.
+#   * Close under the fixture, facing up at it, so the lamp dominates.
+#   * Shield the window side. Daylight is broadband -- it carries red and
+#     blue too -- and the photoperiod now runs 09:00-16:00, straight
+#     through the brightest part of the day. Ambient light contaminates
+#     precisely the per-channel comparison this board was bought for.
+#   * Out of the splash zone. There is no conformal coating here.
+#
+# ---------------------------------------------------------------------
+# PIN MAP -- ESP32-WROOM-32 (classic ESP32, NOT an S3)
+# ---------------------------------------------------------------------
+#   signal              GPIO
+#   I2C SDA             26
+#   I2C SCL             27
+#
+# Nothing else is connected. These two were chosen to reuse an existing
+# run from an earlier project that already lands on GPIO26. GPIO27 is the
+# adjacent pad on the header, so only one conductor had to move.
+#
+# GPIO34 WAS THE OTHER END OF THAT RUN AND CANNOT BE USED HERE.
+# On classic ESP32, GPIO34-39 are INPUT ONLY: no output driver and no
+# internal pull-up. I2C is open-drain -- both SDA and SCL have to be able
+# to pull the line to ground -- so a bus line on GPIO34 can never work.
+# It does not half-work or work intermittently; the bus simply never
+# acks. GPIO27 is the neighbouring pad and is output-capable, which is
+# why the run moved there rather than to GPIO33.
+#
+# Pins deliberately avoided on this silicon:
+#   GPIO6-11            SPI flash. Using these bricks the boot.
+#   GPIO0, 2, 5, 12, 15 strapping -- must not be held at a level at boot
+#   GPIO34-39           input only, no pull-ups (see above)
+#   GPIO1, 3            UART0, the USB console
+#
+# SDA/SCL are interchangeable as far as this file cares -- if the existing
+# pair is easier the other way round, swap the two substitutions rather
+# than re-landing the wires.
+#
+# PULL-UPS: ESPHome enables the ESP32's internal pull-ups, but they are
+# weak (~45k). Most AS7341 breakouts (Adafruit 4698 among them) carry
+# their own 10k pull-ups, which is enough on short leads. If the bus
+# scans empty on a breakout without them, add 4.7k from each line to 3V3.
+#
+# WHAT THIS FILE OWES THE SHARED PACKAGES -- the board contract:
+#   nothing. packages/base.yaml supplies wifi, MQTT, OTA, the web server
+#   and the clock; this file supplies one I2C bus and one sensor. It must
+#   NOT be paired with control.yaml, sensors.yaml or ph.yaml -- there is
+#   no probe, no heater and no relay on this board for them to find.
+
+substitutions:
+  # ---- I2C pads. Swap these two if SDA/SCL went on the wrong way ----
+  # NOT GPIO34-39 -- those are input only on this chip and cannot drive
+  # an open-drain bus low. See the pin map above.
+  i2c_sda: "26"
+  i2c_scl: "27"
+
+  # 10 kHz, the same decision as the large tank's bus. The AS7341 sits on
+  # short leads here so it does not need it, but a slow bus costs nothing
+  # on a board reading one sensor a minute and leaves headroom if this
+  # ever ends up on a metre of twisted pair.
+  i2c_freq: "10kHz"
+
+  # ---- Exposure. These three decide what a "count" means ----
+  # Raw counts scale with gain and integration time, so week-over-week
+  # comparison is only valid while all three stay put. Changing any of
+  # them rebases every historical reading -- treat it like recalibrating
+  # a probe, and write down when you did it.
+  #
+  # Full scale = (atime + 1) * (astep + 1), capped at 65535.
+  #   29, 599 -> 18000 counts.
+  #
+  # Gain X2 is deliberately conservative: this sensor sits directly under
+  # a 138 W fixture, which is a far brighter scene than the X8 default
+  # assumes. If the Saturated flag below ever goes on, drop the gain. If
+  # every band reads in the low hundreds at full output, raise it.
+  as7341_gain: "X2"
+  as7341_atime: "29"
+  as7341_astep: "599"
+
+  # One reading a minute. Spectral output does not move fast, and ten
+  # channels at a faster rate is InfluxDB bloat for no extra information
+  # -- the same reasoning that keeps the TDS mean at a minute.
+  spectral_update: "60s"
+
+esp32:
+  # Classic ESP32, same as boards/esp32-wroom32.yaml. NOT an S3 -- the
+  # two are told apart by the pin numbers broken out: a header carrying
+  # GPIO22 and GPIO34/35 as usable pins is a WROOM-32. On an S3 those
+  # numbers are either absent or wired to PSRAM.
+  #
+  # Flashing S3 firmware at a WROOM-32 fails in a way the ESPHome
+  # dashboard reports misleadingly, because it caches the chip type from
+  # the previous attempt -- if a wrong-chip flash has already been tried,
+  # delete the device entry in the dashboard before retrying.
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+i2c:
+  sda: ${i2c_sda}
+  scl: ${i2c_scl}
+  frequency: ${i2c_freq}
+  # Named so a second bus could be added later without renaming this one.
+  id: bus_a
+  # A failed scan must not take the board down. With one sensor on the
+  # bus, a hard failure here would otherwise cost the whole device --
+  # including the web server that tells you it failed.
+  scan: true
+
+sensor:
+  # -------------------------------------------------------------
+  # AS7341 -- eight visible bands, plus clear and near-infrared.
+  # Default address 0x39. No address pin on the common breakouts,
+  # which is why only one of these can share a bus.
+  # -------------------------------------------------------------
+  - platform: as7341
+    address: 0x39
+    update_interval: ${spectral_update}
+    gain: ${as7341_gain}
+    atime: ${as7341_atime}
+    astep: ${as7341_astep}
+    f1:
+      name: "Spectral 415nm"
+      id: sp_f1
+      accuracy_decimals: 0
+    f2:
+      name: "Spectral 445nm"
+      id: sp_f2
+      accuracy_decimals: 0
+    f3:
+      name: "Spectral 480nm"
+      id: sp_f3
+      accuracy_decimals: 0
+    f4:
+      name: "Spectral 515nm"
+      id: sp_f4
+      accuracy_decimals: 0
+    f5:
+      name: "Spectral 555nm"
+      id: sp_f5
+      accuracy_decimals: 0
+    f6:
+      name: "Spectral 590nm"
+      id: sp_f6
+      accuracy_decimals: 0
+    f7:
+      name: "Spectral 630nm"
+      id: sp_f7
+      accuracy_decimals: 0
+    f8:
+      name: "Spectral 680nm"
+      id: sp_f8
+      accuracy_decimals: 0
+    clear:
+      name: "Spectral Clear"
+      id: sp_clear
+      accuracy_decimals: 0
+    nir:
+      name: "Spectral NIR"
+      id: sp_nir
+      accuracy_decimals: 0
+
+  # -------------------------------------------------------------
+  # Derived on the board, not in Home Assistant.
+  #
+  # Calibration and derived values compute here so that every consumer
+  # -- Home Assistant, the web page, anything added later -- sees the
+  # same number. A ratio that only exists in HA is a ratio the device
+  # does not have.
+  #
+  # The three shares are the useful output. They are computed from the
+  # band sums as a fraction of all eight visible bands, so they are
+  # INDEPENDENT OF GAIN AND EXPOSURE: doubling the light or the
+  # integration time moves every band together and leaves the shares
+  # where they were. That is what makes them comparable across weeks,
+  # and what makes them respond to a channel change rather than to a
+  # cloud going past the window.
+  #
+  # Band grouping -- all eight assigned, so the three sum to 100%:
+  #   blue   415 + 445 + 480    the royal-blue channel lives at 450
+  #   green  515 + 555 + 590    white phosphor peaks broad through here
+  #   red    630 + 680          the deep-red channel lives at 660
+  # -------------------------------------------------------------
+  - platform: template
+    name: "Blue Share"
+    id: sp_share_blue
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f1 + f2 + f3) / total;
+
+  - platform: template
+    name: "Green Share"
+    id: sp_share_green
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f4 + f5 + f6) / total;
+
+  - platform: template
+    name: "Red Share"
+    id: sp_share_red
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f7 + f8) / total;
+
+  # Sum of the eight visible bands. Unlike the shares, this DOES scale
+  # with gain and exposure, so it is only comparable while those three
+  # substitutions are untouched. Relative intensity index -- explicitly
+  # not lux, explicitly not PAR, and given no unit so nothing downstream
+  # can mistake it for either.
+  - platform: template
+    name: "Spectral Visible Total"
+    id: sp_visible_total
+    accuracy_decimals: 0
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      return f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+
+binary_sensor:
+  # A saturated channel reads a ceiling, not a measurement, and the shares
+  # computed from it are wrong in a way that looks entirely plausible --
+  # a pinned red band simply reports as "lots of red". This is the check
+  # that makes the numbers above trustworthy rather than merely present.
+  #
+  # Full scale is (atime + 1) * (astep + 1), hardware-capped at 65535.
+  # 95% of that is called saturated, leaving margin for the ADC's own
+  # nonlinearity near the top of its range.
+  - platform: template
+    name: "Spectral Saturated"
+    id: sp_saturated
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      float full = (${as7341_atime} + 1.0f) * (${as7341_astep} + 1.0f);
+      if (full > 65535.0f) full = 65535.0f;   // hardware ceiling
+      const float limit = 0.95f * full;
+      const float ch[8] = {id(sp_f1).state, id(sp_f2).state, id(sp_f3).state,
+                           id(sp_f4).state, id(sp_f5).state, id(sp_f6).state,
+                           id(sp_f7).state, id(sp_f8).state};
+      bool any = false;
+      for (int i = 0; i < 8; i++) {
+        if (isnan(ch[i])) return {};
+        if (ch[i] >= limit) any = true;
+      }
+      return any;

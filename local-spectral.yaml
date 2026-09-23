@@ -1,0 +1,20 @@
+# LOCAL validation wrapper for boards/esp32-wroom32-as7341.yaml.
+#
+# Sister to local-lg-dual.yaml and local-cyd.yaml: every package is
+# !include'd from the working tree instead of fetched from GitHub, so
+# `esphome config local-spectral.yaml` and `esphome compile local-spectral.yaml`
+# test what you just edited rather than what is on main.
+#
+# This is a TEST harness, not the deploy wrapper. The real one goes in the
+# ESPHome dashboard and pulls from git -- see tank-monitor-spectral-remote.yaml.
+#
+# device_name carries a -test suffix so it is distinct from EVERY deploy
+# wrapper, including this board's own. A stray flash of a half-edited test
+# build must not be able to impersonate the real device on MQTT.
+substitutions:
+  device_name: tank-monitor-spectral-test
+  friendly_name: Tank Monitor Spectral TEST
+
+packages:
+  base: !include packages/base.yaml
+  board: !include boards/esp32-wroom32-as7341.yaml

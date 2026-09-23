@@ -1,0 +1,105 @@
+# SPECTRAL ADD-ON -- ESP32-WROOM-32 + one AS7341, over the 75 gal.
+# Put THIS file in the ESPHome dashboard. Nothing else lives locally except
+# secrets.yaml, so a push to main is all the next build needs.
+#
+# ---------------------------------------------------------------------
+# This board is an INSTRUMENT, not part of the control system
+# ---------------------------------------------------------------------
+# It reads the light and publishes it. Nothing depends on it:
+#
+#   * The 75 gal controller is UNCHANGED by this device. It does not
+#     subscribe to these topics and never should -- see the note on
+#     tank_lux below.
+#   * The 4.3" panel does not read it.
+#   * No automation gates on it. If this board is unplugged for a month,
+#     the tank is regulated exactly as it is today.
+#
+# That isolation is deliberate. The last lux attempt put two BH1750s on
+# 4-5 ft Cat6 runs sharing the controller's own I2C bus and 3V3 rail, and
+# when those runs shorted, the casualty was the board driving two heaters
+# and both temperature probes. A sensor that can brown out the thermostat
+# is not worth the reading. This one has its own regulator, its own bus
+# and its own power supply, and the worst it can do when it fails is stop
+# publishing.
+#
+# ---------------------------------------------------------------------
+# It does NOT restore lux, and must not be wired to tank_lux
+# ---------------------------------------------------------------------
+# The controller still has no light sensor. `tank_lux` remains the
+# never-publishing placeholder set in tank-monitor-lg-remote.yaml, the
+# thermal model's light-gain term stays dead, and the panel still shows
+# "--" for light. Nothing here changes that.
+#
+# The temptation will be to feed the AS7341's `clear` channel into
+# `tank_lux` and call the gap closed. Do not. Those are uncalibrated ADC
+# counts; `full_scale_lux: 3000` and `light_on_lux: 18` are real lux, and
+# the substitution would invalidate both while appearing to work. If lux
+# is wanted back, it needs a lux sensor -- a BH1750 or VEML7700 on a
+# second add-on, published to its own topic.
+#
+# ---------------------------------------------------------------------
+# What it is actually for
+# ---------------------------------------------------------------------
+# Verifying that the Chihiros WRGB II Pro 120 does what Home Assistant
+# tells it. The phase presets command white, red, green and blue
+# independently; until now the only evidence a push landed was the lamp's
+# own say-so. Watch "Red Share" across a phase change: if the commanded
+# red moved and the share did not, the push did not take.
+#
+# Read the three shares, not the raw bands. They are ratios, so they are
+# independent of gain and exposure, and they respond to a channel change
+# rather than to a cloud going past the window.
+#
+# ---------------------------------------------------------------------
+# device_name
+# ---------------------------------------------------------------------
+# Must not collide with tank-monitor-s3, -s3mini, -round, -v2, -w32,
+# -75-gallon, -75g (the panel) or aquarium-light-bridge. Deliberately NOT
+# "tank-monitor-75g-spectral": that string has the panel's name as a
+# prefix, and a wildcard MQTT subscription one day would pick up both.
+#
+# The name sets the MQTT topic prefix, discovery object ids, mDNS hostname
+# and fallback AP name all at once.
+#
+# ---------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------
+# No new ones. This uses the same keys every other board here does:
+# wifi_ssid, wifi_password, timezone, tank_monitor_ap_password,
+# tank_monitor_ota_password, mqtt_broker, tank_monitor_mqtt_username and
+# tank_monitor_mqtt_password. The dashboard keeps its own copy of
+# secrets.yaml -- if a key is missing there, add it by hand.
+substitutions:
+  device_name: tank-monitor-spectral
+  friendly_name: Tank Monitor Spectral
+
+  # ---- I2C pads. Only touch these if SDA/SCL went on the wrong way ----
+  # Default is SDA on GPIO26, SCL on GPIO27 -- adjacent pads, picked to
+  # reuse an existing run that already lands on GPIO26. If the boot log
+  # shows nothing found at 0x39, swap the two values here and reflash
+  # before reaching for the iron.
+  # i2c_sda: "27"
+  # i2c_scl: "26"
+  #
+  # NOT GPIO34-39. Those are input-only on this chip: no output driver and
+  # no internal pull-up, so they can never pull an open-drain bus low. The
+  # bus just never acks, which looks exactly like a dead sensor.
+
+  # ---- Exposure. Changing any of these rebases every past reading ----
+  # Treat it like recalibrating a probe: do it deliberately, and write
+  # down the date. If "Spectral Saturated" turns on, drop the gain one
+  # step. If every band sits in the low hundreds at full light, raise it.
+  # as7341_gain: "X1"
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      # base only. NOT control.yaml, sensors.yaml or ph.yaml -- there is
+      # no probe, heater or relay on this board for them to bind to, and
+      # they would fail the build looking for ids it does not define.
+      - packages/base.yaml
+      - boards/esp32-wroom32-as7341.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s

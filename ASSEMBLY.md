@@ -915,3 +915,139 @@ README; do them before believing any chemistry number this board reports.
 
 Then set `side_a_name` / `side_b_name` in the wrapper to match how you
 actually mounted things, and label the outside of the tank to match.
+
+
+# ESP32-WROOM-32 spectral add-on (`tank-monitor-spectral`)
+
+One board, one sensor, one job: verify that the Chihiros WRGB II Pro 120
+actually does what Home Assistant tells it. `boards/esp32-wroom32-as7341.yaml`,
+deployed by `tank-monitor-spectral-remote.yaml`.
+
+This is the easiest build in this file. There is no probe, no relay, no
+pull-up, no calibration against a reference solution, and nothing goes near
+the water. Four wires and a bracket.
+
+## What you need
+
+| Part | Notes |
+|---|---|
+| ESP32-WROOM-32 devkit | Classic ESP32, **not** an S3. Same silicon as `tank-monitor-w32` |
+| AS7341 breakout | Adafruit 4698 or equivalent. Address is fixed at 0x39 |
+| 4 × short jumper leads | Short is the point. This sensor sits inches from its own MCU |
+| A rigid bracket | See mounting, below. This matters more than the wiring |
+
+## Pin map
+
+| Board pin | Goes to |
+|---|---|
+| GPIO26 | AS7341 `SDA` |
+| GPIO27 | AS7341 `SCL` |
+| 3V3 | AS7341 `VIN` |
+| GND | AS7341 `GND` |
+
+Most AS7341 breakouts have an onboard regulator and level shifting, so `VIN`
+takes 3V3 or 5V. Use 3V3 — there is no reason to introduce a 5 V net on a
+board that has nothing else on it.
+
+SDA and SCL are interchangeable here. If an existing run makes the other way
+round easier, swap `i2c_sda` / `i2c_scl` in the wrapper rather than re-landing
+the wires.
+
+## GPIO34 cannot be an I²C line
+
+Worth stating on its own, because it is the one mistake this build invites —
+GPIO26/34 is a natural-looking pair on the header and may already be wired
+from an earlier project.
+
+**On classic ESP32, GPIO34–39 are input only.** No output driver, no internal
+pull-up. I²C is open-drain: both SDA and SCL have to be able to pull the line
+to ground. A bus line on GPIO34 cannot do that, ever.
+
+It does not half-work or work intermittently. The bus simply never acks, and
+the boot log shows an empty scan — indistinguishable from a dead sensor or a
+missing solder joint, which is what makes it expensive to diagnose.
+
+**GPIO27 is the fix**: it is the pad directly beside GPIO26 on the header and
+is fully output-capable, so only the one conductor moves.
+
+## Other pins to avoid on this chip
+
+| Avoid | Why |
+|---|---|
+| GPIO6–11 | SPI flash. Using these bricks the boot |
+| GPIO0, 2, 5, 12, 15 | strapping — must not be held at a level during boot |
+| GPIO34–39 | input only, no pull-ups (above) |
+| GPIO1, 3 | UART0, the USB console |
+
+## Pull-ups
+
+ESPHome enables the ESP32's internal pull-ups, but they are weak (~45 kΩ).
+Most AS7341 breakouts — Adafruit 4698 among them — carry their own 10 kΩ
+pull-ups, which is plenty on short leads. If the bus scans empty on a breakout
+without them, add 4.7 kΩ from each line to 3V3 before suspecting the sensor.
+
+## Mounting — this is the calibration
+
+Every number this board produces is **relative**. There is no absolute
+reference anywhere in it, so the geometry is the only thing making one week's
+reading comparable to the next.
+
+1. **Fix it permanently.** Screw or epoxy the bracket. A sensor that shifts
+   between readings turns week-over-week comparison into noise, and nothing in
+   the data will tell you it moved.
+2. **Close under the fixture, facing up.** The lamp should dominate the scene.
+3. **Shield the window side.** Daylight is broadband — it carries red and blue
+   too — and the photoperiod runs 09:00–16:00, straight through the brightest
+   part of the day. Ambient light contaminates exactly the per-channel
+   comparison this board exists for.
+4. **Out of the splash zone.** There is no conformal coating here.
+
+## Power up
+
+No staged power-up, because nothing here can cook a tank. Flash it, then check
+the boot log for the I²C scan:
+
+```
+Found i2c device at address 0x39
+```
+
+Nothing at 0x39 means SDA and SCL are swapped, or a bus line landed on an
+input-only pin — change `i2c_sda` / `i2c_scl` in the wrapper and reflash
+before reaching for the iron.
+
+If a wrong-chip flash was already attempted, delete the device entry in the
+ESPHome dashboard first. It caches the chip type from the previous attempt and
+will reject the correct firmware with a misleading error.
+
+## Set the exposure once, then leave it
+
+`as7341_gain`, `as7341_atime` and `as7341_astep` decide what a "count" means.
+Raw band values scale with all three, so **changing any of them rebases every
+historical reading.** Treat it like recalibrating a probe: do it deliberately,
+and write down the date.
+
+Gain ships at `X2`, deliberately below the `X8` default, because this sensor
+sits directly under a 138 W fixture. Check `Spectral Saturated` after the first
+full-brightness photoperiod:
+
+- **Saturated on** → drop gain one step. A pinned channel reads a ceiling, not
+  a measurement, and reports as "lots of red" entirely plausibly.
+- **Every band in the low hundreds at full output** → raise it one step.
+
+## Reading it
+
+Use the three shares — **Blue**, **Green**, **Red** — not the raw bands. They
+are ratios over all eight visible channels, so they are independent of gain and
+exposure and they sum to 100 %. A commanded channel change moves them; a cloud
+going past the window does not.
+
+To verify a phase push: note `Red Share` before, change phase, and check it
+moved. If the commanded red went up and the share did not, the push did not
+land on the lamp.
+
+**What this cannot tell you:** PAR. The counts are uncalibrated ADC values, not
+micromoles, and `Spectral Visible Total` is a relative index with no unit for
+exactly that reason. It is deliberately not wired to `tank_lux` — the control
+loop normalises against `full_scale_lux: 3000` and tests `light_on_lux: 18`,
+both real lux, and feeding AS7341 counts into that id would invalidate both
+while appearing to work.
