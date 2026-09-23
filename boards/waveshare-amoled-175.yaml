@@ -45,6 +45,28 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
+    sdkconfig_options:
+      # Let Wi-Fi and LWIP allocate from PSRAM instead of internal RAM.
+      #
+      # Measured on this board 2026-09-23, one minute after boot: 43 KB of
+      # internal heap free at startup, and 26 KB once BLE, MQTT and the web
+      # server had connected -- with a largest contiguous block of 13.5 KB.
+      # Meanwhile 8.37 MB of the 8 MB PSRAM sat unused, because only the
+      # framebuffer lives there.
+      #
+      # 13.5 KB of contiguous internal RAM is not enough headroom for this
+      # board's workload. The ESP-IDF Wi-Fi stack allocates DMA-capable
+      # internal RAM for its RX/TX buffers, and it does so at exactly the
+      # wrong moments -- a reassociation, a roam, a burst of traffic. An
+      # allocation failure there does not politely retry; it aborts or
+      # wedges the Wi-Fi task, which is the "offline until physically
+      # unplugged" signature this panel started showing.
+      #
+      # This moves the Wi-Fi and LWIP buffers into PSRAM, where there are
+      # megabytes to spare. PSRAM is slower than internal SRAM, but these
+      # are network buffers on a display-only panel -- there is nothing
+      # here that needs the latency, and the framebuffer DMA is unaffected.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
 
 # ESPHome's default MQTT unique_id generator is "legacy": "ESP" + component
 # type + object_id, with NO device name and no MAC in it. So this board's
