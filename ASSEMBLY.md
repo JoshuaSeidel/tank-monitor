@@ -474,12 +474,19 @@ out on GPIO43/44 where nothing is listening — an open port and no output.
 If the dashboard does not offer the port on first flash, hold BOOT while
 plugging it in.
 
-**Recalibrate pH and TDS.** `ph_v_neutral` and `ph_v_acid` are volts
+**Recalibrate pH and TDS.** `ph_v_high` and `ph_v_low` are volts
 measured through *this board's* ADC, and the S3's converter is not the
 C6's. Copying the numbers from another wrapper gives a wrong reading that
 looks right — which is the exact failure that made the old monitor
-useless. Redo the two-point calibration against pH 7.00 and 4.00 buffer,
-and recheck the TDS `k_factor` the same way.
+useless. Each voltage travels with the pH it was measured at
+(`ph_cal_high` / `ph_cal_low`); a voltage on its own is meaningless.
+
+Pick the two buffers that **bracket the tank** and keep a third back as an
+independent check — a glass electrode is linear from 4 to 10, so a third
+calibration point buys nothing, but a tank at 7.4 calibrated on 6.86 and
+4.00 is extrapolated above its highest cal point. With the NIST set
+(4.00/6.86/9.18) that means calibrating on 9.18 and 6.86 and verifying
+against 4.00. Recheck the TDS `k_factor` the same way.
 
 **No display, no backlight.** Home Assistant, the web UI at its own IP, and
 the remote panel are the interfaces.

@@ -207,10 +207,10 @@ sensor:
   # not GPIO0 -- the BOOT button sits on it.
   #
   # The S3's ADC is a different part from the classic ESP32's, with its
-  # own offset and curve. ph_v_neutral and ph_v_acid in packages/ph.yaml
-  # are volts measured through THIS board's converter, so they do not
-  # carry over from a C6 or WROOM build. Recalibrate against pH 7.00 and
-  # 4.00 buffer after moving boards, and recheck the TDS k_factor the
+  # own offset and curve. ph_v_high and ph_v_low in packages/ph.yaml are
+  # volts measured through THIS board's converter, so they do not carry
+  # over from a C6 or WROOM build. Recalibrate against two buffers that
+  # bracket the tank after moving boards, and recheck the TDS k_factor the
   # same way. A copied calibration is a wrong reading that looks right.
   - platform: adc
     pin: GPIO2

@@ -45,11 +45,16 @@ packages:
     # config. 0s re-fetches on every build.
     refresh: 0s
 
-# pH calibration is per-board: ph_v_neutral and ph_v_acid are volts read
+# pH calibration is per-board: ph_v_high and ph_v_low are volts read
 # through this board's ADC, and the S3's converter is not the C6's. Do not
 # copy them from another wrapper -- measure them here, against buffer.
 # See packages/ph.yaml for the procedure.
 #
+# Each voltage travels with the pH it was measured at. Pick buffers that
+# BRACKET this tank and keep the third back as an independent check.
+#
 # substitutions:
-#   ph_v_neutral: "1.500"
-#   ph_v_acid: "2.032"
+#   ph_cal_high: "9.18"
+#   ph_v_high: "1.1480"
+#   ph_cal_low: "6.86"
+#   ph_v_low: "1.5480"

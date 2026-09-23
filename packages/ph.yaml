@@ -50,12 +50,25 @@
 # probe did before its probe arrived.
 
 substitutions:
-  # Volts measured at the high and low calibration points. DFRobot
-  # defaults, taken at 7.00 and 4.00 -- replace with your own after
-  # calibrating, or the numbers below are fiction. The pH VALUES of the
-  # two points are set at runtime (Cal pH High/Low Value), not here.
-  ph_v_neutral: "1.500"
-  ph_v_acid: "2.032"
+  # FIRST-BOOT DEFAULTS ONLY. A calibrated board keeps its real numbers in
+  # NVS and ignores every line below; these decide what a BRAND NEW board
+  # reads before anyone has stood a probe in buffer.
+  #
+  # All four move together or none of them do. Volts are meaningless
+  # without the pH they were measured at, which is exactly the trap the
+  # old hardcoded 7.00/4.00 set: the volts were editable and the pH values
+  # were not, so recording a 9.18 reading left the board claiming it was
+  # 7.00. Record a pair, not a voltage.
+  #
+  # These are the 75 gal's electrode, calibrated 2026-09-23 against the
+  # NIST set (slope -0.1724 V/pH, 97% of theoretical, verified at 4.00
+  # reading 3.97). Real numbers off a real probe rather than DFRobot's
+  # catalogue figures -- but still SOMEBODY ELSE'S PROBE as far as any new
+  # board is concerned. Calibrate before trusting a reading.
+  ph_cal_high: "9.18"
+  ph_v_high: "1.1480"
+  ph_cal_low: "6.86"
+  ph_v_low: "1.5480"
 
 sensor:
   - platform: template
@@ -164,22 +177,21 @@ globals:
   - id: cal_ph_v7
     type: float
     restore_value: true
-    initial_value: '${ph_v_neutral}'
+    initial_value: '${ph_v_high}'
   - id: cal_ph_v4
     type: float
     restore_value: true
-    initial_value: '${ph_v_acid}'
+    initial_value: '${ph_v_low}'
   # What the two buffers actually say, not what the button used to assume.
-  # Defaults are the old hardcoded pair, so a board that is already
-  # calibrated against 7.00/4.00 behaves identically across this upgrade.
+  # Paired with the voltages above: ph_cal_high goes with ph_v_high.
   - id: cal_ph_hi
     type: float
     restore_value: true
-    initial_value: '7.0'
+    initial_value: '${ph_cal_high}'
   - id: cal_ph_lo
     type: float
     restore_value: true
-    initial_value: '4.0'
+    initial_value: '${ph_cal_low}'
 
 button:
   # Capture rather than type. Reading a voltage off a dashboard and
