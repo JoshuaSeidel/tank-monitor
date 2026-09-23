@@ -105,7 +105,28 @@ globals:
     type: std::string
     restore_value: false
 
+  # Last lux heard from the light pod, and when. NOT restored across a
+  # reboot: a light reading that survived a power cut describes a room that
+  # may since have gone dark, and the staleness check below only works if
+  # the timestamp starts at zero.
+  - id: rx_lux
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: rx_lux_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+# Two simultaneous BLE clients: the 4.3" panel, and the light pod pushing
+# lux. ESPHome's server resumes advertising after a connection precisely so
+# a second client can still find it -- but max_clients defaults to 1, which
+# silently means the second one can never attach.
+esp32_ble:
+  max_connections: 3
+
 esp32_ble_server:
+  max_clients: 2
   manufacturer: "tank-monitor"
   model: "${device_name}"
   services:
@@ -140,6 +161,30 @@ esp32_ble_server:
                 } else if (s.rfind("AL", 0) == 0) {
                   id(controller).set_learning_enabled(s.size() > 2 && s[2] == '1');
                 }
+
+        # Sensor ingress, light pod -> controller. A SEPARATE characteristic
+        # from cmd_char on purpose: writing a lux reading and moving the
+        # tank's target temperature do not belong on one channel, and the
+        # pod has no business being able to reach the setpoint at all.
+        #
+        #   L<sp><degrees>  ->  "L,412.0"
+        #
+        # Validated before it is believed: right prefix, parses, and inside
+        # a range a real room can produce. A malformed frame becomes NO
+        # reading, never a wrong one -- the staleness guard in the wrapper
+        # then times it out exactly as if the pod had gone quiet.
+        - id: sens_char
+          uuid: "6e400004-b5a3-f393-e0a9-e50e24dcca9e"
+          write: true
+          value: ""
+          on_write:
+            - lambda: |-
+                std::string s(x.begin(), x.end());
+                if (s.rfind("L,", 0) != 0) return;
+                const float v = atof(s.c_str() + 2);
+                if (std::isnan(v) || v < 0.0f || v > 100000.0f) return;
+                id(rx_lux) = v;
+                id(rx_lux_ms) = millis();
 
 interval:
   - interval: 5s

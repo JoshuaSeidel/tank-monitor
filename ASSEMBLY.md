@@ -917,107 +917,109 @@ Then set `side_a_name` / `side_b_name` in the wrapper to match how you
 actually mounted things, and label the outside of the tank to match.
 
 
-# ESP32-WROOM-32 spectral add-on (`tank-monitor-spectral`)
+# XIAO ESP32-S3 light pod (`tank-monitor-light-pod`)
 
-One board, one sensor, one job: verify that the Chihiros WRGB II Pro 120
-actually does what Home Assistant tells it. `boards/esp32-wroom32-as7341.yaml`,
-deployed by `tank-monitor-spectral-remote.yaml`.
+Two sensors, no actuators. `boards/xiao-esp32s3-light-pod.yaml`, deployed by
+`tank-monitor-light-pod-remote.yaml`.
 
-This is the easiest build in this file. There is no probe, no relay, no
-pull-up, no calibration against a reference solution, and nothing goes near
-the water. Four wires and a bracket.
+It answers two different questions with two different parts, and the answers
+travel by two different paths:
+
+| Part | Answers | Goes to | How |
+|---|---|---|---|
+| BH1750 (0x23) | *how much* light, in lux | the 75 gal controller | BLE, peer to peer |
+| AS7341 (0x39) | *which channels* are on | Home Assistant | MQTT |
+
+Lux is a control input — it feeds the thermal model's light-gain term — so it
+must not depend on the broker, Home Assistant or the router, and it doesn't.
+The spectral data has no consumer on the controller and is never sent there.
+Both publish to MQTT for history; the BLE path is additive.
 
 ## What you need
 
 | Part | Notes |
 |---|---|
-| ESP32-WROOM-32 devkit | Classic ESP32, **not** an S3. Same silicon as `tank-monitor-w32` |
-| AS7341 breakout | Adafruit 4698 or equivalent. Address is fixed at 0x39 |
-| 4 × short jumper leads | Short is the point. This sensor sits inches from its own MCU |
-| A rigid bracket | See mounting, below. This matters more than the wiring |
+| Seeed XIAO ESP32-S3 | Same board as both controllers. Pads are D0–D10 and those are **not** GPIO numbers |
+| BH1750 / GY-302 | You already own two. Leave `ADDR` floating for 0x23 |
+| AS7341 breakout | Adafruit 4698 or equivalent. Address fixed at 0x39 |
+| 6 short jumper leads | Short is the point — both sensors sit inches from their own MCU |
+| A rigid bracket | See mounting. This matters more than the wiring |
 
 ## Pin map
 
-| Board pin | Goes to |
-|---|---|
-| GPIO26 | AS7341 `SDA` |
-| GPIO27 | AS7341 `SCL` |
-| 3V3 | AS7341 `VIN` |
-| GND | AS7341 `GND` |
+| Pad | GPIO | Goes to |
+|---|---|---|
+| D6 | 43 | `SDA` on **both** sensors |
+| D7 | 44 | `SCL` on **both** sensors |
+| 3V3 | — | `VCC` / `VIN` on both |
+| GND | — | `GND` on both |
 
-Most AS7341 breakouts have an onboard regulator and level shifting, so `VIN`
-takes 3V3 or 5V. Use 3V3 — there is no reason to introduce a 5 V net on a
-board that has nothing else on it.
+Same two pads every other XIAO in this project uses for I²C — one wiring habit
+across the whole fleet. Both sensors share the bus with no address conflict.
 
-SDA and SCL are interchangeable here. If an existing run makes the other way
-round easier, swap `i2c_sda` / `i2c_scl` in the wrapper rather than re-landing
-the wires.
+**Leave the BH1750's `ADDR` pin alone.** The 0x5C jumper is only needed when
+two of them share a bus, and that hand-soldered ADDR-to-VCC splice is exactly
+what shorted the 3V3 rail on the previous attempt. One sensor, no splice.
 
-## GPIO34 cannot be an I²C line
+## The controller must be flashed too
 
-Worth stating on its own, because it is the one mistake this build invites —
-GPIO26/34 is a natural-looking pair on the header and may already be wired
-from an earlier project.
+The pod pushes lux into a characteristic on the controller's existing BLE
+server. That needs a controller build carrying `max_clients: 2`
+(`packages/ble_link_v3.yaml`) — **ESPHome's BLE server allows one client by
+default, and the 4.3" panel is already holding it.** Without it the pod will
+advertise, connect-attempt, and never attach.
 
-**On classic ESP32, GPIO34–39 are input only.** No output driver, no internal
-pull-up. I²C is open-drain: both SDA and SCL have to be able to pull the line
-to ground. A bus line on GPIO34 cannot do that, ever.
+Order doesn't matter. Flash the pod first and it simply fails to connect until
+the controller catches up; flash the controller first and `tank_lux` stays NaN
+until the pod arrives, which is how the tank has run since the BH1750s came
+out. Neither state is harmful.
 
-It does not half-work or work intermittently. The bus simply never acks, and
-the boot log shows an empty scan — indistinguishable from a dead sensor or a
-missing solder joint, which is what makes it expensive to diagnose.
-
-**GPIO27 is the fix**: it is the pad directly beside GPIO26 on the header and
-is fully output-capable, so only the one conductor moves.
-
-## Other pins to avoid on this chip
-
-| Avoid | Why |
-|---|---|
-| GPIO6–11 | SPI flash. Using these bricks the boot |
-| GPIO0, 2, 5, 12, 15 | strapping — must not be held at a level during boot |
-| GPIO34–39 | input only, no pull-ups (above) |
-| GPIO1, 3 | UART0, the USB console |
-
-## Pull-ups
-
-ESPHome enables the ESP32's internal pull-ups, but they are weak (~45 kΩ).
-Most AS7341 breakouts — Adafruit 4698 among them — carry their own 10 kΩ
-pull-ups, which is plenty on short leads. If the bus scans empty on a breakout
-without them, add 4.7 kΩ from each line to 3V3 before suspecting the sensor.
+Set `controller_mac` in the pod wrapper from
+`sensor.tank_monitor_75_gallon_controller_ble_mac`, or from the controller's
+boot log. **Do not compute it.** On an ESP32-S3 the BLE MAC is the WiFi MAC + 2
+in the last octet, but that is an observation, not a promise.
 
 ## Mounting — this is the calibration
 
-Every number this board produces is **relative**. There is no absolute
-reference anywhere in it, so the geometry is the only thing making one week's
-reading comparable to the next.
+Everything the AS7341 produces is relative, so the geometry is the only thing
+making one week's reading comparable to the next.
 
-1. **Fix it permanently.** Screw or epoxy the bracket. A sensor that shifts
-   between readings turns week-over-week comparison into noise, and nothing in
-   the data will tell you it moved.
-2. **Close under the fixture, facing up.** The lamp should dominate the scene.
-3. **Shield the window side.** Daylight is broadband — it carries red and blue
-   too — and the photoperiod runs 09:00–16:00, straight through the brightest
-   part of the day. Ambient light contaminates exactly the per-channel
-   comparison this board exists for.
-4. **Out of the splash zone.** There is no conformal coating here.
+1. **Fix it permanently.** A sensor that shifts turns week-over-week comparison
+   into noise, and nothing in the data will say it moved.
+2. **Face it up at the fixture.** Never down at the water — that measures
+   reflections off a moving surface, which vary with agitation, clarity and
+   substrate, three things independent of the lamp.
+3. **No glass in the light path.** A lid *beneath* the sensor is a splash
+   shield and an asset. A lid *above* it is condensation and mineral film — a
+   slowly varying attenuation indistinguishable from the lamp dimming, with
+   step recoveries every time you clean it.
+4. **Shield the window side.** Daylight is broadband and the photoperiod runs
+   09:00–16:00, straight through the brightest part of the day.
+5. **Out of the aerosol plume.** Bubbler mist deposits mineral film on the
+   optical window, which on a relative sensor reads as the lamp fading.
+
+The centre brace, on top of any lid, facing up, is a good spot: rigid, centred
+under the bar where the emitters are well mixed, and away from the back-corner
+returns.
 
 ## Power up
 
-No staged power-up, because nothing here can cook a tank. Flash it, then check
-the boot log for the I²C scan:
+No staged power-up — nothing here can cook a tank. Flash it and check the boot
+log for both addresses:
 
 ```
+Found i2c device at address 0x23
 Found i2c device at address 0x39
 ```
 
-Nothing at 0x39 means SDA and SCL are swapped, or a bus line landed on an
-input-only pin — change `i2c_sda` / `i2c_scl` in the wrapper and reflash
-before reaching for the iron.
+Neither found means SDA and SCL are swapped: change `i2c_sda` / `i2c_scl` in
+the wrapper and reflash before reaching for the iron. One found means that
+sensor's wiring is fine and the other's is not.
 
-If a wrong-chip flash was already attempted, delete the device entry in the
-ESPHome dashboard first. It caches the chip type from the previous attempt and
-will reject the correct firmware with a misleading error.
+Then watch `sensor.tank_monitor_75_gallon_light_link_age` on the controller. It
+should sit under 60 s. If it climbs without bound, the pod is reading light but
+not reaching the controller — check `controller_mac` and that the controller is
+running a `max_clients: 2` build.
 
 ## Set the exposure once, then leave it
 
@@ -1026,9 +1028,9 @@ Raw band values scale with all three, so **changing any of them rebases every
 historical reading.** Treat it like recalibrating a probe: do it deliberately,
 and write down the date.
 
-Gain ships at `X2`, deliberately below the `X8` default, because this sensor
-sits directly under a 138 W fixture. Check `Spectral Saturated` after the first
-full-brightness photoperiod:
+Gain ships at `X2`, below the `X8` default, because this sits under a 138 W
+fixture. Check `Spectral Saturated` after the first full-brightness
+photoperiod:
 
 - **Saturated on** → drop gain one step. A pinned channel reads a ceiling, not
   a measurement, and reports as "lots of red" entirely plausibly.
@@ -1038,16 +1040,13 @@ full-brightness photoperiod:
 
 Use the three shares — **Blue**, **Green**, **Red** — not the raw bands. They
 are ratios over all eight visible channels, so they are independent of gain and
-exposure and they sum to 100 %. A commanded channel change moves them; a cloud
-going past the window does not.
+exposure and sum to 100 %. A commanded channel change moves them; a cloud past
+the window does not.
 
-To verify a phase push: note `Red Share` before, change phase, and check it
-moved. If the commanded red went up and the share did not, the push did not
-land on the lamp.
+To verify a phase push: note `Red Share`, change phase, check it moved. If
+commanded red went up and the share did not, the push did not land.
 
 **What this cannot tell you:** PAR. The counts are uncalibrated ADC values, not
-micromoles, and `Spectral Visible Total` is a relative index with no unit for
-exactly that reason. It is deliberately not wired to `tank_lux` — the control
-loop normalises against `full_scale_lux: 3000` and tests `light_on_lux: 18`,
-both real lux, and feeding AS7341 counts into that id would invalidate both
-while appearing to work.
+micromoles, and `Spectral Visible Total` carries no unit for exactly that
+reason. The BH1750 beside it is what reports in a real unit, and it is the only
+one wired to `tank_lux`.

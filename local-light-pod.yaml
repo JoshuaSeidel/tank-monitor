@@ -1,0 +1,30 @@
+# LOCAL validation wrapper for boards/xiao-esp32s3-light-pod.yaml.
+#
+# Sister to local-lg-dual.yaml and local-cyd.yaml: every package is
+# !include'd from the working tree instead of fetched from GitHub, so
+# `esphome config local-light-pod.yaml` and `esphome compile local-light-pod.yaml`
+# test what you just edited rather than what is on main.
+#
+# This is a TEST harness, not the deploy wrapper. The real one goes in the
+# ESPHome dashboard and pulls from git -- see tank-monitor-light-pod-remote.yaml.
+#
+# device_name carries a -test suffix so it is distinct from EVERY deploy
+# wrapper, including this board's own. A stray flash of a half-edited test
+# build must not be able to impersonate the real device on MQTT.
+#
+# Shortened to -pod-test rather than -light-pod-test because base.yaml
+# builds the fallback AP SSID as "${device_name} setup", and ESPHome caps
+# an SSID at 32 characters. The deploy name is 22 and clears it easily;
+# the test name plus the suffix did not.
+substitutions:
+  device_name: tank-monitor-pod-test
+  friendly_name: Tank Monitor Light Pod TEST
+
+  # A syntactically valid dummy. The real controller MAC belongs in the
+  # deploy wrapper; this harness only has to validate and compile, and it
+  # must never actually connect to the live controller.
+  controller_mac: "00:00:00:00:00:01"
+
+packages:
+  base: !include packages/base.yaml
+  board: !include boards/xiao-esp32s3-light-pod.yaml

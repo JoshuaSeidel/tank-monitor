@@ -128,15 +128,55 @@ packages:
 #   ph_cal_low: "6.86"
 #   ph_v_low: "1.5480"
 
-# ---- NO LUX SENSORS, for now -- the other half of i2c_expect above ----
-# Drop both BH1750s from the build so they are not two failed components
-# at every boot, and leave a placeholder that never publishes under the id
-# the controller and the BLE payload reference. The panel shows "--" for
-# light, which is the truth.
+# ---- LUX COMES FROM THE LIGHT POD, OVER BLE ----
+# There is still no lux sensor on THIS board's I2C bus -- that is what
+# i2c_expect: "0x48 ADS1115" above is saying, and it stays true. Both
+# BH1750s are dropped from the build so they are not two failed components
+# at every boot.
+#
+# Instead tank-monitor-light-pod (boards/xiao-esp32s3-light-pod.yaml) reads
+# a BH1750 a few inches from its own MCU and pushes the value here over BLE,
+# connecting once a minute to write it and disconnecting again. Peer to
+# peer: no broker, no Home Assistant, no router. The light-gain term is a
+# control input, so it must not depend on anything that can be down.
+#
+# The id is unchanged, so every consumer downstream is untouched --
+# control.yaml's `illuminance: tank_lux`, slot 5 of the v3 BLE payload to
+# the panel, and the web page all just read this id.
 sensor:
   - id: !remove tank_lux
   - id: !remove tank_lux_b
+
+  # Believed only while it is FRESH. The pod pushes every 60 s; three
+  # missed pushes and this goes NaN, which the controller already treats
+  # as "light = 0" -- the behaviour this board has had all along with no
+  # sensor at all. Without the timeout, a pod that died at noon would feed
+  # the thermal model one frozen sunny number through every night that
+  # followed, and the model would learn from it.
   - platform: template
+    name: "Tank Light Level"
     id: tank_lux
-    internal: true
-    update_interval: never
+    unit_of_measurement: lx
+    device_class: illuminance
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      if (id(rx_lux_ms) == 0) return {};                      // nothing ever heard
+      if (millis() - id(rx_lux_ms) > 180000) return {};       // 3 missed pushes
+      return id(rx_lux);
+
+  # So a silently dead link is visible rather than inferred from a blank
+  # tile -- the same reason the panel carries a link age.
+  - platform: template
+    name: "Light Link Age"
+    id: lux_link_age
+    unit_of_measurement: s
+    device_class: duration
+    state_class: measurement
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      if (id(rx_lux_ms) == 0) return {};
+      return (millis() - id(rx_lux_ms)) / 1000.0f;
