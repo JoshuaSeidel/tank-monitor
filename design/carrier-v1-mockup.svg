@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="860" viewBox="0 0 920 860" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <pattern id="hatch" width="8" height="8" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="#7a1f1f"/>
+      <line x1="0" y1="0" x2="0" y2="8" stroke="#c0392b" stroke-width="3"/>
+    </pattern>
+  </defs>
+  <rect width="920" height="860" fill="#1b1e24"/>
+  <text x="460" y="36" fill="#e8e8e8" font-size="24" text-anchor="middle" font-weight="bold">tank-monitor carrier v1 — 55 × 60 mm, dense placement (10 px/mm)</text>
+  <text x="460" y="60" fill="#9aa0a8" font-size="14" text-anchor="middle">front face shown; all small ICs on BACK face · illustrative — flux.ai does the real layout · spec: FLUX-PCB-SPEC.md</text>
+
+  <g transform="translate(220,110)">
+    <!-- PCB 550 x 600 -->
+    <rect x="0" y="0" width="550" height="600" rx="10" fill="#1e5c33" stroke="#0f3a1f" stroke-width="4"/>
+    <!-- 2 mounting holes, opposite corners -->
+    <g fill="#1b1e24" stroke="#c9a227" stroke-width="4">
+      <circle cx="18" cy="18" r="11"/><circle cx="532" cy="582" r="11"/>
+    </g>
+
+    <!-- LED row, top edge -->
+    <g stroke="#0b0d10" stroke-width="2">
+      <circle cx="16" cy="-2" r="8" fill="#5cd65c"/><circle cx="38" cy="-2" r="8" fill="#e8a33d"/>
+      <circle cx="60" cy="-2" r="8" fill="#4da3ff"/><circle cx="82" cy="-2" r="8" fill="#4da3ff"/>
+      <circle cx="104" cy="-2" r="8" fill="#4da3ff"/><circle cx="126" cy="-2" r="8" fill="#5cd65c"/>
+      <circle cx="148" cy="-2" r="8" fill="#5cd65c"/><circle cx="170" cy="-2" r="8" fill="#5cd65c"/>
+      <circle cx="192" cy="-2" r="8" fill="#e8d44d"/><circle cx="214" cy="-2" r="8" fill="#ff5c5c"/>
+    </g>
+    <text x="115" y="-24" fill="#9aa0a8" font-size="12" text-anchor="middle">LEDs + light pipes: PWR BATT WIFI ESPNOW BLE TA TB CHEM 485 FAULT</text>
+
+    <!-- S3 module, antenna overhang top -->
+    <rect x="238" y="-30" width="180" height="44" fill="#c9a227" opacity="0.25"/>
+    <text x="328" y="-38" fill="#c9a227" font-size="12" text-anchor="middle">S3 antenna overhang</text>
+    <rect x="238" y="6" width="180" height="250" fill="#2b2f36" stroke="#555" stroke-width="2"/>
+    <rect x="248" y="6" width="160" height="38" fill="#444"/>
+    <text x="328" y="118" fill="#eee" font-size="17" text-anchor="middle" font-weight="bold">ESP32-S3</text>
+    <text x="328" y="140" fill="#aaa" font-size="13" text-anchor="middle">WROOM-1 N16R8</text>
+    <text x="328" y="162" fill="#7fb3ff" font-size="12" text-anchor="middle">Wi-Fi + ESP-NOW</text>
+
+    <!-- battery vertical, left of S3 -->
+    <rect x="98" y="10" width="134" height="486" rx="10" fill="#2b2f36" stroke="#666" stroke-width="3"/>
+    <rect x="112" y="26" width="106" height="454" rx="30" fill="#3d4450"/>
+    <circle cx="165" cy="58" r="20" fill="#c9a227"/>
+    <text x="165" y="270" fill="#eee" font-size="15" text-anchor="middle" font-weight="bold" transform="rotate(90 165 270)">10440 LiFePO₄ (48 mm) · ~1.5 h</text>
+
+    <!-- BATT-EXT JST below battery -->
+    <rect x="120" y="506" width="90" height="52" fill="#e8d44d" stroke="#123" stroke-width="2"/>
+    <text x="165" y="540" fill="#123" font-size="12" text-anchor="middle" font-weight="bold">BATT-EXT</text>
+    <text x="165" y="578" fill="#e8d44d" font-size="11" text-anchor="middle">case pack → 12 h+</text>
+
+    <!-- mains fenced zone, right column -->
+    <rect x="428" y="-6" width="128" height="472" fill="none" stroke="url(#hatch)" stroke-width="10"/>
+    <rect x="432" y="0" width="118" height="460" fill="#243018"/>
+    <text x="491" y="24" fill="#ff6b5e" font-size="14" text-anchor="middle" font-weight="bold">⚡120 VAC</text>
+    <rect x="440" y="34" width="102" height="120" fill="#3a3f47" stroke="#777" stroke-width="2"/>
+    <text x="491" y="82" fill="#eee" font-size="12" text-anchor="middle">HF115F 10A</text><text x="491" y="100" fill="#9aa" font-size="11" text-anchor="middle">HEATER A</text>
+    <rect x="440" y="160" width="102" height="120" fill="#3a3f47" stroke="#777" stroke-width="2"/>
+    <text x="491" y="208" fill="#eee" font-size="12" text-anchor="middle">HF115F 10A</text><text x="491" y="226" fill="#9aa" font-size="11" text-anchor="middle">HEATER B</text>
+    <rect x="440" y="286" width="102" height="80" fill="#3a3f47" stroke="#777" stroke-width="2"/>
+    <text x="491" y="320" fill="#eee" font-size="12" text-anchor="middle">HF32F 5A</text><text x="491" y="338" fill="#9aa" font-size="11" text-anchor="middle">FAN</text>
+    <rect x="440" y="372" width="102" height="80" fill="#3a3f47" stroke="#777" stroke-width="2"/>
+    <text x="491" y="406" fill="#eee" font-size="12" text-anchor="middle">HF32F 5A</text><text x="491" y="424" fill="#9aa" font-size="11" text-anchor="middle">SPARE</text>
+    <!-- mains terminals on right edge -->
+    <g fill="#2e8b57" stroke="#0f3a1f" stroke-width="2">
+      <rect x="544" y="40" width="30" height="104"/><rect x="544" y="166" width="30" height="104"/>
+      <rect x="544" y="292" width="30" height="68"/><rect x="544" y="378" width="30" height="68"/>
+    </g>
+    <text x="586" y="96" fill="#ddd" font-size="12">HTR A</text><text x="586" y="222" fill="#ddd" font-size="12">HTR B</text>
+    <text x="586" y="330" fill="#ddd" font-size="12">FAN</text><text x="586" y="416" fill="#ddd" font-size="12">SPARE</text>
+    <text x="586" y="66" fill="#889" font-size="11">5.08 mm</text>
+
+    <!-- isolated pH zone, bottom-right -->
+    <rect x="240" y="470" width="310" height="130" fill="#173d54" stroke="#2c7fb8" stroke-width="2"/>
+    <line x1="240" y1="470" x2="550" y2="470" stroke="#0b0d10" stroke-width="8" stroke-dasharray="14 8"/>
+    <text x="258" y="492" fill="#7fd4ff" font-size="12" font-weight="bold">ISOLATED pH (slot above)</text>
+    <circle cx="290" cy="546" r="24" fill="#2b2f36" stroke="#bbb" stroke-width="4"/><circle cx="290" cy="546" r="9" fill="#c9a227"/>
+    <text x="290" y="592" fill="#dfe" font-size="11" text-anchor="middle">BNC</text>
+    <rect x="330" y="510" width="98" height="26" fill="#2b2f36" stroke="#555"/><text x="379" y="528" fill="#ccc" font-size="11" text-anchor="middle">LMP7721</text>
+    <rect x="330" y="542" width="98" height="26" fill="#2b2f36" stroke="#555"/><text x="379" y="560" fill="#ccc" font-size="11" text-anchor="middle">ADS1115 #2</text>
+    <rect x="436" y="510" width="106" height="26" fill="#2b2f36" stroke="#555"/><text x="489" y="528" fill="#ccc" font-size="11" text-anchor="middle">ADuM1250</text>
+    <rect x="436" y="542" width="106" height="26" fill="#2b2f36" stroke="#555"/><text x="489" y="560" fill="#ccc" font-size="11" text-anchor="middle">B0303S iso</text>
+
+    <!-- C3 module bottom edge, antenna overhang bottom -->
+    <rect x="240" y="286" width="166" height="132" fill="#2b2f36" stroke="#555" stroke-width="2"/>
+    <text x="323" y="340" fill="#eee" font-size="15" text-anchor="middle" font-weight="bold">ESP32-C3</text>
+    <text x="323" y="360" fill="#7fb3ff" font-size="11" text-anchor="middle">BLE only · UART↔S3</text>
+    <rect x="240" y="418" width="166" height="40" fill="#c9a227" opacity="0.25"/>
+    <text x="323" y="446" fill="#c9a227" font-size="11" text-anchor="middle">C3 antenna keep-out</text>
+
+    <!-- controls squeezed between S3 and mains -->
+    <rect x="10" y="510" width="96" height="34" fill="#a33" stroke="#511"/><text x="58" y="532" fill="#fff" font-size="11" text-anchor="middle">ADDR DIP</text>
+    <circle cx="30" cy="574" r="12" fill="#555" stroke="#888"/><text x="30" y="598" fill="#aaa" font-size="10" text-anchor="middle">BOOT</text>
+    <circle cx="66" cy="574" r="12" fill="#555" stroke="#888"/><text x="66" y="598" fill="#aaa" font-size="10" text-anchor="middle">RST</text>
+    <rect x="86" y="562" width="26" height="24" fill="#555" stroke="#888"/><text x="99" y="598" fill="#aaa" font-size="10" text-anchor="middle">S3/C3</text>
+
+    <!-- back-face note -->
+    <rect x="10" y="42" width="80" height="450" fill="#22262d" stroke="#3a3f47" stroke-dasharray="6 4"/>
+    <text x="50" y="270" fill="#8a93a0" font-size="12" text-anchor="middle" transform="rotate(90 50 270)">BACK FACE: ADS1115 · BQ25171 · TPS63020 · THVD1450 · 74HC595 · AO3400×4</text>
+
+    <!-- left edge connectors, packed -->
+    <g fill="#7ec4e8" stroke="#123" stroke-width="2">
+      <rect x="-12" y="34" width="24" height="46"/><rect x="-12" y="88" width="24" height="46"/>
+      <rect x="-12" y="142" width="24" height="40"/><rect x="-12" y="190" width="24" height="40"/>
+    </g>
+    <text x="-22" y="62" fill="#7ec4e8" font-size="11" text-anchor="end">TEMP-A</text>
+    <text x="-22" y="116" fill="#7ec4e8" font-size="11" text-anchor="end">TEMP-B</text>
+    <text x="-22" y="166" fill="#7ec4e8" font-size="11" text-anchor="end">TDS</text>
+    <text x="-22" y="214" fill="#7ec4e8" font-size="11" text-anchor="end">SPARE</text>
+    <g fill="#e8d44d" stroke="#123" stroke-width="2">
+      <rect x="-12" y="240" width="24" height="38"/><rect x="-12" y="286" width="24" height="38"/>
+    </g>
+    <text x="-22" y="263" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC</text>
+    <text x="-22" y="309" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC</text>
+    <g fill="#cfd6dd" stroke="#123" stroke-width="2">
+      <rect x="-14" y="336" width="26" height="52" rx="9"/>
+      <rect x="-14" y="398" width="26" height="52" rx="9"/>
+      <rect x="-14" y="460" width="26" height="52" rx="9"/>
+    </g>
+    <text x="-24" y="366" fill="#cfd6dd" font-size="11" text-anchor="end">USB-C PWR/FLASH</text>
+    <text x="-24" y="428" fill="#cfd6dd" font-size="11" text-anchor="end">LINK-IN</text>
+    <text x="-24" y="490" fill="#cfd6dd" font-size="11" text-anchor="end">LINK-OUT</text>
+    <text x="-160" y="530" fill="#889" font-size="11">LINK = RS-485 on D+/D−</text>
+  </g>
+</svg>

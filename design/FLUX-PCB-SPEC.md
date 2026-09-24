@@ -6,10 +6,15 @@ all sensor front-end circuitry onboard, and screw-terminal connectors so bare
 off-the-shelf probes (DS18B20, pH, TDS, BH1750, AS7341) plug straight in.
 Multiple boards chain over an RS-485 expansion bus for multi-tank setups.
 
-Target size: **55 × 60 mm (~2.2 × 2.4 in)** — well inside the 4 × 4 in limit.
-The floor is set by the 18650 holder, the mains creepage fence, and the two
-antenna keep-outs, not by the electronics; sensor terminals are 2.54 mm
-push-in (§5), which is what gets the edge budget down. 4-layer board
+Target size: **55 × 60 mm (~2.2 × 2.4 in)**. Three things make this size
+work: slim 12.7 mm-wide power relays instead of the classic G5LE cube, a
+10440 (AAA-size) onboard backup cell with a BATT-EXT jack for a larger
+case-mounted pack (§4b), and **double-sided assembly** — every small IC
+(ADCs, charger, isolator, MOSFETs, shift register) lives on the back face;
+the front face carries the two radio modules, relays, battery holder, and
+all connectors. Sensor terminals are 2.54 mm push-in (§5). A placement
+mockup lives at `design/carrier-v1-mockup.svg` (illustrative only —
+flux.ai does the layout). 4-layer board
 (SIG / GND / 3V3 / SIG) — flux.ai handles 4-layer fine and it makes the analog
 isolation section much easier to route cleanly.
 
@@ -56,19 +61,19 @@ exactly the coexistence limit that forced the two-board setup today.
 | U10 | **BQ25171-Q1** LiFePO₄ charger + power-path, 3.65 V | Battery backup charge/switchover (§4b). |
 | U11 | **TPS63020** buck-boost 3V3 | Battery-backed system rail (§4b). |
 | U12 | **74HC595** shift register | Sensor-status LEDs (§4c). |
-| BT1 | 18650 LiFePO₄ cell + Keystone 1042 holder + NTC | 8–12 h backup runtime. |
-| K1–K4 | **Omron G5LE-1 DC3** 10 A mechanical relays, 3 V coil | Heater A, Heater B, Fan, Spare. Coils on the 3V3 rail — matches the current setup, which drives relays at 3.3 V. AO3400 low-side MOSFET + flyback diode per coil, GPIO gate. |
+| BT1 | 10440 LiFePO₄ cell (AAA-size, ~200 mAh) + holder + NTC | ~1–1.5 h onboard backup — rides out blips, always gets the mains-loss alert out. |
+| J-BATT | JST-XH 3-pos (B+, TS, GND) | External case-mounted LiFePO₄ pack in parallel (e.g. 2× 18650 holder in the lid → 12 h+). |
+| K1–K2 | **HF115F/005-1ZS3 slim power relays** (12.7 mm wide, 10 A) | Heater A / Heater B. 5 V coil fed from USB VBUS; AO3400 low-side MOSFET + flyback diode per coil, gated by the same 3.3 V GPIOs as today — the drive interface the firmware sees is unchanged. |
+| K3–K4 | **HF32F/005-HSL3** slim 5 A relays | Fan, Spare (light loads). Same 5 V-coil MOSFET drive. |
 
 **Relay notes:** the two 300 W heaters draw ~2.5 A each at 120 VAC; the
-G5LE-1's 10 A contacts cover that with margin, and its 3 V coil (~33 mA)
-runs from the existing 3V3 drive scheme — no new rail, no 5 V-coil parts.
-Firmware uses `slow_pwm` with 20–60 s periods, so mechanical relay wear is
-acceptable and zero-cross isn't needed. Because 3V3 is battery-backed
-(§4b), coils remain energizable during an outage even though the mains
-side is dead — firmware must force all four relay GPIOs off when
-AC-present (GPIO2) drops, both to shed coil load (~130 mA if all four
-were held) and so relays re-close deliberately, not instantly, when
-power returns.
+HF115F's 10 A contacts cover that with margin in a package half the G5LE's
+width — that swap is what lets the board hit 55 × 60. Coils run from the
+USB-C 5 V rail (VBUS), *not* the battery-backed 3V3: on mains loss the
+coils lose power and every relay drops out by physics, no firmware needed
+— the fail-safe is back in hardware. The GPIO→MOSFET drive is still 3.3 V
+logic, so nothing changes for the firmware. `slow_pwm` at 20–60 s periods
+keeps mechanical wear a non-issue; zero-cross isn't needed.
 
 ## 3. Pin map (mirror the existing firmware so YAML changes are minimal)
 
@@ -116,8 +121,8 @@ place them at opposite corners of the board.
    fenced corner of the board: ≥ 6.4 mm creepage to everything low-voltage,
    milled slots between contact pads, no ground pour underneath, and a
    silkscreen box marked "⚡ 120 VAC". The relay coil itself is the
-   isolation barrier (G5LE creepage 8 mm coil-to-contact); AO3400 MOSFET +
-   flyback diode on the coil side.
+   isolation barrier (both relay families are rated 4 kV coil-to-contact);
+   AO3400 MOSFET + flyback diode on the coil side.
 4. **1-Wire probes** are submerged: add per-bus 100 Ω series resistor + TVS
    (SMAJ5.0A) + 470 pF to GND at the terminal — ESD/surge clamp for wet leads.
    (We've had probe water-ingress drag a bus low; series R keeps a shorted
@@ -130,12 +135,22 @@ Goal: sensors, both radios, and alerting survive a wall-power outage; heaters
 and fan do **not** run from battery (they're mains-side anyway — the relay
 contacts just open when mains dies, which is the safe state).
 
-- **Chemistry: LiFePO₄ 18650 (3.2 V nominal), single cell, in a THM-style
-  PCB holder.** Chosen over Li-ion deliberately: this lives in a warm, humid
-  cabinet next to an aquarium 24/7 at float charge — LiFePO₄ tolerates
-  continuous float, doesn't balloon, and its 2000+ cycle life means you never
-  think about it. One cell runs both ESP32s + sensors (~150 mA average with
-  Wi-Fi) for **8–12 h**.
+- **Chemistry: LiFePO₄, 3.2 V nominal, single parallel group.** Chosen over
+  Li-ion deliberately: this lives in a warm, humid cabinet 24/7 at float
+  charge — LiFePO₄ tolerates continuous float, doesn't balloon, and its
+  2000+ cycle life means you never think about it.
+- **Onboard cell: 10440 (AAA-size, ~200 mAh)** in a board-mount holder —
+  the size that lets the board hit 55 × 60 mm. Runs both ESP32s + sensors
+  (~150 mA average with Wi-Fi) for **~1–1.5 h**: rides out typical blips
+  and always gets the mains-loss alert sent. Anything longer is the
+  external pack's job.
+- **BATT-EXT (JST-XH 3-pos: B+, TS, GND):** an optional larger case-mounted
+  LiFePO₄ pack wired in parallel with the onboard cell. Same chemistry and
+  voltage, so the group self-balances and the one BQ25171 charges both —
+  no second charger, no switching. A 2× 18650 holder velcroed in the case
+  (cells in parallel, ~3000 mAh) takes total runtime past **12 h**. The
+  external pack's NTC lands on TS alongside the onboard one (use the colder
+  reading: two NTCs in parallel skews safe).
 - **Charger/power-path: TI BQ25798 or simpler BQ25171-Q1 (LiFePO₄-aware,
   set to 3.65 V charge voltage)** fed from the 5 V buck. True power-path:
   the load is carried by the input while mains is present, battery is only
@@ -199,7 +214,7 @@ label strip in `case/`.
 - LEDs + light pipes on a third (front) edge, DIP switch and BOOT/RESET
   buttons reachable through case cutouts.
 - Component height limit 12 mm everywhere except the relay/battery zone
-  (18650 holder ≈ 21 mm) — put the battery holder and G5LE relays in one
+  (10440 holder ≈ 13 mm; HF115F ≈ 16 mm) — put the battery holder and relays in one
   "tall" corner so the case lid steps over a single region.
 - Conformal-coat keep-out silkscreen around connectors; the case gets a
   drip loop note: probe cables must enter from below.
@@ -223,7 +238,8 @@ Only mains (5.08 mm — that pitch is the creepage) and the BNC stay large.
 | 1 | USB-C (power + flash) + S3/C3 slide switch | Sole power input (5 V/3 A CC advertise) and shared flashing/log port; slide switch routes D+/D− to either module. VBUS → polyfuse → charger power-path, so flashing and powering are the same cable. |
 | 1 | 4-pos 2.54 mm push-in | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
 | 10 | 0603 LEDs + Bivar PLP2 light pipes, one edge row, 5 mm pitch | Status panel (§4c) |
-| 1 | Keystone 1042 18650 holder (board-mount) | LiFePO₄ backup cell (§4b) |
+| 1 | Keystone 82 AAA/10440 holder (board-mount) | Onboard LiFePO₄ backup cell (§4b) |
+| 1 | JST-XH 3-pos | BATT-EXT: external case-mounted LiFePO₄ pack (§4b) |
 
 Every terminal gets silkscreen labels **with the signal name and the firmware
 GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
@@ -241,12 +257,12 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 
 ## 7. What to type into flux.ai (step-by-step)
 
-1. **New project** → "tank-monitor-carrier", 4-layer, 60 × 60 mm outline
-   (trim to ~55 × 60 mm once placement settles).
+1. **New project** → "tank-monitor-carrier", 4-layer, 55 × 60 mm outline,
+   double-sided assembly (small ICs on the back face).
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
-   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×3 (PWR + 2 LINK), `LM66100DCKR` ×2, `G5LE-1 DC3` ×4,
+   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×3 (PWR + 2 LINK), `LM66100DCKR` ×2, `HF115F/005-1ZS3` ×2, `HF32F/005-HSL3` ×2,
    `AO3400A` ×4, `BQ25171-Q1`, `TPS63020DSJR`,
-   `74HC595` (`SN74HC595DR`), Keystone `1042` holder, screw terminals and
+   `74HC595` (`SN74HC595DR`), Keystone `82` AAA holder, JST `B3B-XH-A`, screw terminals and
    Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
 3. Use flux's **AI auto-connect prompts** per functional block, in this order,
    verifying each block's nets before the next: power tree (USB-C VBUS → charger
