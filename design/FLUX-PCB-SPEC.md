@@ -61,6 +61,7 @@ exactly the coexistence limit that forced the two-board setup today.
 | U10 | **BQ25171-Q1** LiFePO₄ charger + power-path, 3.65 V | Battery backup charge/switchover (§4b). |
 | U11 | **TPS63020** buck-boost 3V3 | Battery-backed system rail (§4b). |
 | U12 | **74HC595** shift register | Sensor-status LEDs (§4c). |
+| U13 | **LTC4311** I²C bus accelerator | Sits behind the Qwiic jacks so the BH1750/AS7341 breakouts work over 2–3 m of cable up at the light fixture. This is what makes the board all-in-one: light sensors are wired peripherals like the temp probes — no BLE light pod needed. |
 | BT1 | 10440 LiFePO₄ cell (AAA-size, ~200 mAh) + holder + NTC | ~1–1.5 h onboard backup — rides out blips, always gets the mains-loss alert out. |
 | J-BATT | JST-XH 3-pos (B+, TS, GND) | External case-mounted LiFePO₄ pack in parallel (e.g. 2× 18650 holder in the lid → 12 h+). |
 | K1–K2 | **HF115F/005-1ZS3 slim power relays** (12.7 mm wide, 10 A) | Heater A / Heater B. 5 V coil fed from USB VBUS; AO3400 low-side MOSFET + flyback diode per coil, gated by the same 3.3 V GPIOs as today — the drive interface the firmware sees is unchanged. |
@@ -232,7 +233,7 @@ Only mains (5.08 mm — that pitch is the creepage) and the BNC stay large.
 | 1 | Panel BNC (isolated section) | pH electrode |
 | 1 | 3-pos 2.54 mm push-in (isolated GND ref) | pH temp-comp / spare isolated analog |
 | 1 | 2-pos 2.54 mm push-in | TDS probe |
-| 2 | JST-SH 4-pin **Qwiic** | I²C pods: BH1750 (0x23/0x5C), AS7341 — buy Adafruit/SparkFun breakouts, no soldering |
+| 2 | JST-SH 4-pin **Qwiic** | BH1750 lux (0x23/0x5C — two fit one bus) and AS7341 spectral breakouts on cables up to the light fixture (2–3 m OK via the LTC4311 buffer). Buy Adafruit/SparkFun breakouts, no soldering. |
 | 4 | 2-pos 5.08 mm screw terminal (rated 10 A / 300 V) | Relay outputs (dry contacts / SSR outputs) |
 | 2 | USB-C **LINK** ports (paralleled, labeled LINK-IN / LINK-OUT) | RS-485 A/B on D+/D−, GND, +5 V pass-through on VBUS behind an ideal-diode OR (LM66100) so chained powered boards never back-feed each other. Daisy-chain tanks with ordinary USB-C 2.0 cables. Plugging a charger into a LINK port harmlessly powers the board. No CC logic — these are not USB ports, silkscreen them "LINK — NOT USB DATA". |
 | 1 | USB-C (power + flash) + S3/C3 slide switch | Sole power input (5 V/3 A CC advertise) and shared flashing/log port; slide switch routes D+/D− to either module. VBUS → polyfuse → charger power-path, so flashing and powering are the same cable. |
@@ -262,7 +263,7 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
    `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×3 (PWR + 2 LINK), `LM66100DCKR` ×2, `HF115F/005-1ZS3` ×2, `HF32F/005-HSL3` ×2,
    `AO3400A` ×4, `BQ25171-Q1`, `TPS63020DSJR`,
-   `74HC595` (`SN74HC595DR`), Keystone `82` AAA holder, JST `B3B-XH-A`, screw terminals and
+   `74HC595` (`SN74HC595DR`), `LTC4311CSC6`, Keystone `82` AAA holder, JST `B3B-XH-A`, screw terminals and
    Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
 3. Use flux's **AI auto-connect prompts** per functional block, in this order,
    verifying each block's nets before the next: power tree (USB-C VBUS → charger
