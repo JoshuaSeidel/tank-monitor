@@ -108,8 +108,8 @@
     <g fill="#e8d44d" stroke="#123" stroke-width="2">
       <rect x="-12" y="240" width="24" height="38"/><rect x="-12" y="286" width="24" height="38"/>
     </g>
-    <text x="-22" y="263" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC</text>
-    <text x="-22" y="309" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC</text>
+    <text x="-22" y="263" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC · BH1750 lux</text>
+    <text x="-22" y="309" fill="#e8d44d" font-size="11" text-anchor="end">QWIIC · AS7341</text>
     <g fill="#cfd6dd" stroke="#123" stroke-width="2">
       <rect x="-14" y="336" width="26" height="52" rx="9"/>
       <rect x="-14" y="398" width="26" height="52" rx="9"/>
