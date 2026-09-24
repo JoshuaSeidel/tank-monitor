@@ -920,12 +920,12 @@ actually mounted things, and label the outside of the tank to match.
 
 # Light pod (`tank-monitor-light-pod`)
 
-Two light sensors and the pH board, no actuators. Runs on a **SparkFun Qwiic Pocket ESP32-C6**
-(`boards/sparkfun-esp32c6-pocket-light-pod.yaml`), deployed by
-`tank-monitor-light-pod-remote.yaml`. The original **Seeed XIAO ESP32-S3**
-build (`boards/xiao-esp32s3-light-pod.yaml`) still works; both board files
-pull in the same `packages/light_pod.yaml`, which holds all the sensor and BLE
-logic, so the two cannot drift apart.
+Two light sensors and the pH board, no actuators. Runs on a **Seeed XIAO
+ESP32-S3** (`boards/xiao-esp32s3-light-pod.yaml`), deployed by
+`tank-monitor-light-pod-remote.yaml`. A **SparkFun Qwiic Pocket ESP32-C6**
+build (`boards/sparkfun-esp32c6-pocket-light-pod.yaml`) also exists but is
+not deployed. Both board files pull in the same `packages/light_pod.yaml`,
+which holds all the sensor and BLE logic, so the two cannot drift apart.
 
 It answers two different questions with two different parts, and the answers
 travel by two different paths:
@@ -972,42 +972,54 @@ than the BH1750, and lux must not wait on it.
 
 | Part | Notes |
 |---|---|
-| SparkFun Qwiic Pocket ESP32-C6 | 1" × 1", Qwiic connector on board, USB-C for power and flashing |
-| BH1750 / GY-302 | You already own two. Leave `ADDR` floating for 0x23 |
-| AS7341 breakout | Adafruit 4698 or equivalent. Address fixed at 0x39 |
-| 2 Qwiic / STEMMA QT cables | Board → first breakout → second breakout. No soldering |
+| Seeed XIAO ESP32-S3 | Same board as both controllers. Pads are D0–D10 and those are **not** GPIO numbers |
+| BH1750 / GY-302 | Leave `ADDR` unconnected for 0x23 |
+| AS7341 breakout | Address fixed at 0x39 |
+| DFRobot Gravity pH board SEN0169-V2 + probe | Moved here from the controller |
+| Header pins, hookup wire, heat shrink | Headers on the XIAO and both sensors; power is spliced off-board |
 | A rigid bracket | See mounting. This matters more than the wiring |
 
-## Wiring (Qwiic Pocket ESP32-C6)
+## Wiring (XIAO ESP32-S3)
 
-Plug a Qwiic cable from the board's Qwiic connector to one breakout, and a
-second from that breakout's other Qwiic port to the next. That is the whole
-bus: SDA is GPIO6 and SCL is GPIO7 (from SparkFun's own board definition), with
-3V3 and GND on the same cable. The board already has 2.2k pull-ups on those
-lines; leave its jumpers as shipped. If your GY-302 has no Qwiic port, a Qwiic
-cable with female jumper sockets on one end connects it to its pins.
+Hold the XIAO **USB-C up, components facing you**. Left column top to bottom
+is `D0`–`D6`; right column top to bottom is `5V`, `GND`, `3V3`, `D10`, `D9`,
+`D8`, `D7`.
 
-**Keep the board out of the sensors' view.** Its red PWR LED is always on and
-sits in exactly the red bands `Red Share` is computed from. Put the board
-behind or below the breakouts, not next to them facing the fixture.
-
-### pH board on the pod
-
-The DFRobot Gravity pH board (SEN0169-V2) moved here from the controller.
-It needs three of the header holes along one edge; solder a straight header
-strip there once and the Gravity cable plugs straight on.
-
-| Gravity pH cable | Pocket ESP32-C6 hole | XIAO ESP32-S3 pad |
+| XIAO pin | GPIO | Goes to |
 |---|---|---|
-| red (+) | `3.3V` | `3V3` |
-| black (−) | `GND` | `GND` |
-| blue (analog out) | `2` (GPIO2) | `D3` (GPIO4) |
+| `3V3` (right, 3rd) | — | BH1750 `VCC`, AS7341 `VIN`/`VCC`, pH board red (+) |
+| `GND` (right, 2nd) | — | BH1750 `GND`, AS7341 `GND`, pH board black (−) |
+| `D6` (left, bottom) | 43 | BH1750 `SDA`, AS7341 `SDA` |
+| `D7` (right, bottom) | 44 | BH1750 `SCL`, AS7341 `SCL` |
+| `D3` (left, 4th) | 4 | pH board blue (analog out) |
 
-**3.3 V, not 5 V** — the V2 board runs on 3.3 V and its output then stays
-inside the ADC's range. **GPIO2, not 4 or 5**: those are strapping pins on
-the C6, and the pH board idles near 1.5 V.
+Leave empty: `5V`, `D2` (GPIO3, a strapping pin), the BH1750's `ADDR`, and
+the AS7341's `INT`/`GPIO`/`LDR` pins.
 
-The pod does **not** compute pH. It sends the board's voltage to the
+`3V3` and `GND` each feed three boards and `D6`/`D7` each feed two, but each
+XIAO pin takes one wire. **Join them off the board**, same as the
+controller: twist the wires going to the same signal together with one
+pigtail, solder, heat-shrink, and put only the pigtail on the XIAO pin.
+
+```
+BH1750 VCC ─┐
+AS7341 VIN ─┼─[ solder + heat shrink ]── pigtail ──► XIAO 3V3
+pH red (+) ─┘
+```
+
+Same for `GND` (three wires), `SDA` (two) and `SCL` (two).
+
+**Before the first power-up**, meter continuity between the `3V3` and `GND`
+pigtails. It must not beep. A short there is what browned out the rail on
+the first BH1750 attempt.
+
+**Leave the BH1750's `ADDR` pin alone.** The 0x5C jumper is only needed when
+two of them share a bus, and that hand-soldered ADDR-to-VCC splice is exactly
+what shorted the 3V3 rail on the previous attempt. One sensor, no splice.
+
+### How pH gets from the pod to Home Assistant
+
+The pod does **not** compute pH. It sends the pH board's voltage to the
 controller every minute (`P,<volts × 10000>` on the same BLE characteristic
 as lux), and the controller's `packages/ph.yaml` applies the calibration and
 temperature compensation and publishes `Water pH` as it always has. The pod
@@ -1020,25 +1032,12 @@ calibration was measured through the controller's ADS1115; the pod's ADC
 reads the same board differently. The pod pushes once a minute, so leave
 the probe in each buffer at least two minutes before pressing capture.
 
+**3.3 V, not 5 V**, for the pH board: the V2 runs on 3.3 V and its output
+then stays inside the ADC's range.
+
 Give the pod its **own USB charger**, not a second port on the controller's.
 Separate supplies are what take the electrode off the ground it used to
 share with the TDS probe and the heater relays.
-
-## Pin map (XIAO ESP32-S3 build)
-
-| Pad | GPIO | Goes to |
-|---|---|---|
-| D6 | 43 | `SDA` on **both** sensors |
-| D7 | 44 | `SCL` on **both** sensors |
-| 3V3 | — | `VCC` / `VIN` on both |
-| GND | — | `GND` on both |
-
-Same two pads every other XIAO in this project uses for I²C. Both sensors share
-the bus with no address conflict on either board.
-
-**Leave the BH1750's `ADDR` pin alone.** The 0x5C jumper is only needed when
-two of them share a bus, and that hand-soldered ADDR-to-VCC splice is exactly
-what shorted the 3V3 rail on the previous attempt. One sensor, no splice.
 
 ## The controller must be flashed too
 
