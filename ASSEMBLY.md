@@ -989,14 +989,14 @@ is `D0`–`D6`; right column top to bottom is `5V`, `GND`, `3V3`, `D10`, `D9`,
 |---|---|---|
 | `3V3` (right, 3rd) | — | BH1750 `VCC`, AS7341 `VIN`/`VCC`, pH board red (+) |
 | `GND` (right, 2nd) | — | BH1750 `GND`, AS7341 `GND`, pH board black (−) |
-| `D6` (left, bottom) | 43 | BH1750 `SDA`, AS7341 `SDA` |
-| `D7` (right, bottom) | 44 | BH1750 `SCL`, AS7341 `SCL` |
+| `D4` (left, 5th) | 5 | BH1750 `SDA`, AS7341 `SDA` |
+| `D5` (left, 6th) | 6 | BH1750 `SCL`, AS7341 `SCL` |
 | `D3` (left, 4th) | 4 | pH board blue (analog out) |
 
 Leave empty: `5V`, `D2` (GPIO3, a strapping pin), the BH1750's `ADDR`, and
 the AS7341's `INT`/`GPIO`/`LDR` pins.
 
-`3V3` and `GND` each feed three boards and `D6`/`D7` each feed two, but each
+`3V3` and `GND` each feed three boards and `D4`/`D5` each feed two, but each
 XIAO pin takes one wire. **Join them off the board**, same as the
 controller: twist the wires going to the same signal together with one
 pigtail, solder, heat-shrink, and put only the pigtail on the XIAO pin.

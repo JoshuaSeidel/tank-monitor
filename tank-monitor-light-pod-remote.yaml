@@ -86,11 +86,11 @@ substitutions:
   controller_mac: "SET-ME-FROM-THE-CONTROLLER"
 
   # ---- I2C pads. Only touch these if SDA/SCL went on the wrong way ----
-  # Default is SDA on D6 (GPIO43), SCL on D7 (GPIO44) -- the same two pads
-  # every other XIAO in this project uses. If the boot log finds neither
-  # 0x23 nor 0x39, swap these and reflash before reaching for the iron.
-  # i2c_sda: "44"
-  # i2c_scl: "43"
+  # Default is SDA on D4 (GPIO5), SCL on D5 (GPIO6) -- NOT the D6/D7 the
+  # controllers use (see the board file). If "I2C Devices" finds neither
+  # sensor, swap these and reflash before reaching for the iron.
+  # i2c_sda: "6"
+  # i2c_scl: "5"
 
   # ---- Exposure. Changing any of these rebases every past reading ----
   # Treat it like recalibrating a probe: do it deliberately, and write
