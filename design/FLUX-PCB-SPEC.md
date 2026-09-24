@@ -30,7 +30,7 @@ isolation section much easier to route cleanly.
                     │        ├── qwiic ×2 (BH1750 / AS7341 pods)          │
                     │   1-Wire ×2 (DS18B20 screw terminals)               │
                     │   Relay/SSR ×4 (heater A, heater B, fan, spare)     │
-                    │   RS-485 expansion bus (RJ45, daisy-chain)          │
+                    │   RS-485 expansion bus (2× USB-C LINK, daisy-chain) │
                     └────────────────────────────────────────────┘
 ```
 
@@ -193,7 +193,7 @@ label strip in `case/`.
   positioned on a 5 mm grid so the case (FDM-printable, files to live in
   `case/carrier-v1/`) is trivial to model.
 - All connectors on **two opposite edges only**: low-voltage screw
-  terminals + Qwiic + BNC + RJ45 + USB on the "wet side" edge; mains relay
+  terminals + Qwiic + BNC + all three USB-C (PWR, LINK ×2) on the "wet side" edge; mains relay
   terminals alone on the other edge, so mains and probe wiring
   never cross inside the case.
 - LEDs + light pipes on a third (front) edge, DIP switch and BOOT/RESET
@@ -219,7 +219,7 @@ Only mains (5.08 mm — that pitch is the creepage) and the BNC stay large.
 | 1 | 2-pos 2.54 mm push-in | TDS probe |
 | 2 | JST-SH 4-pin **Qwiic** | I²C pods: BH1750 (0x23/0x5C), AS7341 — buy Adafruit/SparkFun breakouts, no soldering |
 | 4 | 2-pos 5.08 mm screw terminal (rated 10 A / 300 V) | Relay outputs (dry contacts / SSR outputs) |
-| 1 | RJ45 | RS-485 expansion: A, B, GND, +5 V pass-through (short runs, ≤ 3 m; remote pods farther away get their own USB supply) |
+| 2 | USB-C **LINK** ports (paralleled, labeled LINK-IN / LINK-OUT) | RS-485 A/B on D+/D−, GND, +5 V pass-through on VBUS behind an ideal-diode OR (LM66100) so chained powered boards never back-feed each other. Daisy-chain tanks with ordinary USB-C 2.0 cables. Plugging a charger into a LINK port harmlessly powers the board. No CC logic — these are not USB ports, silkscreen them "LINK — NOT USB DATA". |
 | 1 | USB-C (power + flash) + S3/C3 slide switch | Sole power input (5 V/3 A CC advertise) and shared flashing/log port; slide switch routes D+/D− to either module. VBUS → polyfuse → charger power-path, so flashing and powering are the same cable. |
 | 1 | 4-pos 2.54 mm push-in | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
 | 10 | 0603 LEDs + Bivar PLP2 light pipes, one edge row, 5 mm pitch | Status panel (§4c) |
@@ -236,7 +236,7 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 - The RS-485 bus is the *optional* tie: extra sensor-only boards (a board
   populated without relays/second ESP32 — make U2, K1–K4 DNP variants in flux)
   can report to a head unit where Wi-Fi is weak, and +5 V pass-through on the
-  RJ45 pairs powers a remote pod up to ~10 m.
+  LINK ports' VBUS powers a remote pod over a few meters of USB-C cable.
 - DIP switch (4-pos) read on boot → node address 0–15, exposed to ESPHome.
 
 ## 7. What to type into flux.ai (step-by-step)
@@ -244,7 +244,7 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 1. **New project** → "tank-monitor-carrier", 4-layer, 60 × 60 mm outline
    (trim to ~55 × 60 mm once placement settles).
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
-   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A`, `G5LE-1 DC3` ×4,
+   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×3 (PWR + 2 LINK), `LM66100DCKR` ×2, `G5LE-1 DC3` ×4,
    `AO3400A` ×4, `BQ25171-Q1`, `TPS63020DSJR`,
    `74HC595` (`SN74HC595DR`), Keystone `1042` holder, screw terminals and
    Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
