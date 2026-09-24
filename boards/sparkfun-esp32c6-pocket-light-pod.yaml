@@ -1,0 +1,61 @@
+# SparkFun Qwiic Pocket Development Board, ESP32-C6 (ESP32-C6-MINI-1, 4 MB
+# flash, no PSRAM) -- LIGHT POD, the board half. Everything the pod measures
+# and sends lives in packages/light_pod.yaml; this file is only the chip and
+# the pins, and pulls that package in. Sister: boards/xiao-esp32s3-light-pod.yaml.
+#
+# Chosen over the XIAO because the sensors plug straight in. The BH1750 and
+# AS7341 breakouts are Qwiic / STEMMA QT, and so is this board: one cable to
+# the first breakout, one from it to the second. No shield, no adapter, no
+# hand-soldered bus -- the thing that shorted the 3V3 rail last time.
+#
+# ---------------------------------------------------------------------
+# PIN MAP -- SparkFun Qwiic Pocket ESP32-C6
+# ---------------------------------------------------------------------
+#   signal              WHERE                GPIO
+#   I2C SDA             Qwiic connector      6
+#   I2C SCL             Qwiic connector      7
+#   STAT LED (blue)     on board             23   (unused -- see below)
+#
+# From SparkFun's own board definition (arduino-esp32
+# variants/sparkfun_esp32c6_qwiic_pocket: SDA = 6, SCL = 7), not from the
+# hookup guide, which only says "6 and 7". Nothing is wired to the header
+# holes; the Qwiic connector is the whole interface.
+#
+# The Qwiic lines already carry 2.2k pull-ups to 3V3 on this board (the I2C
+# jumper, closed by default). The Adafruit breakouts add their own; the
+# parallel combination is well inside I2C's range, so leave every jumper as
+# shipped.
+#
+# ---------------------------------------------------------------------
+# Mounting: keep the BOARD out of the sensors' view
+# ---------------------------------------------------------------------
+# This board has a red PWR LED that is always lit and a yellow CHG LED. The
+# AS7341 would count both as light, and the red one lands squarely in the
+# 630/680 nm bands that Red Share is built from. The sensors hang off Qwiic
+# cable precisely so the board can sit behind or below them: point the
+# breakouts at the fixture and put this board where they cannot see it. The
+# STAT LED on GPIO23 is left undriven for the same reason.
+#
+# ---------------------------------------------------------------------
+# Radio
+# ---------------------------------------------------------------------
+# WiFi + BLE client, exactly as on the XIAO; ESP-NOW absent. The C6 is
+# single core, so both radios and the loop share one CPU -- fine for two
+# sensors and a push a minute, and the Heap and Loop Time diagnostics from
+# base.yaml will say so if it ever is not.
+
+substitutions:
+  i2c_sda: "6"
+  i2c_scl: "7"
+
+esp32:
+  variant: esp32c6
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+# The pod itself. Included from HERE, not listed in the wrapper, so this
+# board file alone is a complete pod: a wrapper naming base + this file
+# cannot build a board that boots with no sensors on it.
+packages:
+  light_pod: !include ../packages/light_pod.yaml
