@@ -516,18 +516,32 @@ gone: pH, TDS and leak read on the chip's own ADC, one pin each.
 
 The Freenove board is labelled with GPIO numbers directly (DevKitC-1 layout).
 
-| Device | Wire | GPIO |
-|---|---|---|
-| pH board | blue (signal) | **1** |
-| TDS board | `A` (signal) | **4** |
-| Leak sensor | black; 2.2 MΩ + 100 nF from the pin to GND | **5** |
-| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **6** |
-| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **7** |
-| Heater A relay | control | **8** |
-| Heater B relay | control | **9** |
-| Fan relay | control | **10** |
-| BH1750 | SDA / SCL | **15 / 16** |
-| AS7341 | SDA / SCL | **17 / 18** |
+| Device | Signal | GPIO | Harness wire (as built) |
+|---|---|---|---|
+| pH board | analog out | **1** | **blue** (single) |
+| TDS board | `A` (analog out) | **4** | **purple** (single) |
+| Leak sensor | sensor output; 2.2 MΩ + 100 nF from the pin to GND | **5** | **green** (single) |
+| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **6** | **gray** |
+| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **7** | **white** |
+| Heater A relay | control | **8** | **yellow** (single) |
+| Heater B relay | control | **9** | **orange** |
+| Fan relay | control | **10** | **brown** |
+| BH1750 | SDA / SCL | **15 / 16** | **yellow / green** pair |
+| AS7341 | SDA / SCL | **17 / 18** | **purple / blue** pair |
+
+**Watch the repeated colors.** Yellow, green, purple and blue each appear
+twice: once as a single wire and once in a sensor pair. The single yellow is
+heater A, the yellow in the pair is the BH1750's SDA. The single green is the
+leak sensor, the green in the pair is the BH1750's SCL. The single purple is
+TDS, the purple in the pair is the AS7341's SDA. The single blue is pH, the
+blue in the pair is the AS7341's SCL. Keep each pair twisted or taped
+together and label the singles before they come off the board.
+
+**On an ESP32-S3 DevKitC-1 instead:** same pin numbers, same header layout,
+same firmware -- `boards/allinone-freenove.yaml` already builds for
+`esp32-s3-devkitc-1`, and any flash size of 8 MB or more works. Wire it by
+the GPIO column exactly as above. The only DevKitC difference is its RGB
+LED, on GPIO38 or 48 depending on the board revision; neither is used here.
 
 Everything except GPIO 1 is on the same header row. Leave these alone:
 `0`, `3`, `45`, `46` (strapping), `35`–`37` (PSRAM), `19`/`20` (USB),
