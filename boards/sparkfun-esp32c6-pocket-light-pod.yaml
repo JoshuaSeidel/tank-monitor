@@ -14,12 +14,23 @@
 #   signal              WHERE                GPIO
 #   I2C SDA             Qwiic connector      6
 #   I2C SCL             Qwiic connector      7
+#   pH board signal     header hole "2"      2    ADC1 channel 2
+#   pH board power      header hole "3.3V"   --
+#   pH board ground     header hole "GND"    --
 #   STAT LED (blue)     on board             23   (unused -- see below)
 #
 # From SparkFun's own board definition (arduino-esp32
 # variants/sparkfun_esp32c6_qwiic_pocket: SDA = 6, SCL = 7), not from the
-# hookup guide, which only says "6 and 7". Nothing is wired to the header
-# holes; the Qwiic connector is the whole interface.
+# hookup guide, which only says "6 and 7".
+#
+# pH goes on GPIO2 because the C6's ADC is GPIO0-6 and this board only
+# breaks out 2, 3, 4 and 5 of those. 4 and 5 are MTMS/MTDI, strapping pins,
+# and the Gravity board idles near 1.5 V -- an undefined level on a
+# strapping pin at reset is the kind of fault that shows up as "sometimes it
+# does not boot". 2 and 3 are clean; 2 it is. The three header holes it
+# needs (3.3V, GND, 2) sit on the same edge, so one straight header strip
+# soldered once takes the Gravity board's jumper cable with no further
+# soldering.
 #
 # The Qwiic lines already carry 2.2k pull-ups to 3V3 on this board (the I2C
 # jumper, closed by default). The Adafruit breakouts add their own; the
@@ -47,6 +58,7 @@
 substitutions:
   i2c_sda: "6"
   i2c_scl: "7"
+  ph_adc_pin: GPIO2
 
 esp32:
   variant: esp32c6

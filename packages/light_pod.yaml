@@ -1,15 +1,17 @@
-# LIGHT POD -- the chip-independent half. Two sensors, no actuators.
+# LIGHT POD -- the chip-independent half. Light sensors plus the pH
+# board's voltage; no actuators.
 #
 # Loaded BY a board file, never on its own: the board file owns the chip,
-# the esp32: block and the two I2C pins (substitutions i2c_sda / i2c_scl),
+# the esp32: block, the two I2C pins (i2c_sda / i2c_scl) and the pH ADC pin
+# (ph_adc_pin),
 # and includes this. One copy of the sensor and BLE logic, however many
 # boards it has lived on:
 #   boards/xiao-esp32s3-light-pod.yaml             Seeed XIAO ESP32-S3
 #   boards/sparkfun-esp32c6-pocket-light-pod.yaml  SparkFun Qwiic Pocket ESP32-C6
 #
-# It measures the light over the 75 gal and does nothing else: no probe, no
-# relay, no heater, no control loop. It answers two separate questions with
-# two separate parts:
+# It measures the light over the 75 gal and reads the pH board's voltage.
+# No relay, no heater, no control loop. The light side answers two separate
+# questions with two separate parts:
 #
 #   BH1750  -> lux. How much light, in a real unit. This is the one the
 #              controller wants: it feeds the thermal model's light-gain
@@ -27,10 +29,35 @@
 #   lux      -> BLE, straight to the controller, peer to peer. No broker,
 #               no Home Assistant, no router. It is a control input, so it
 #               must not depend on anything that can be down.
-#   spectral -> MQTT, to Home Assistant only. The controller has no use for
-#               it, so it is never sent there.
+#   spectral -> MQTT to Home Assistant (all ten channels), plus the compact
+#               blue/red/NIR subset in the same BLE frame as lux.
+#   pH volts -> BLE, its own frame, to the controller -- see PH below.
 #
 # Both also publish to MQTT for history. The BLE path is additive.
+#
+# ---------------------------------------------------------------------
+# PH -- the pod reads it, the controller owns it
+# ---------------------------------------------------------------------
+# The DFRobot Gravity pH board (SEN0169-V2) sits here, on the pod's own
+# supply, instead of on the controller's ADS1115. Two reasons, both about
+# the controller's analog side, where the pH channel died on 2026-09-24:
+#   - no more millivolt-level wiring through the controller's enclosure;
+#   - the electrode no longer shares a ground with the TDS probe and the
+#     heater relays, which is a known way to get a wandering pH.
+#
+# The pod sends the board's VOLTAGE, not a pH. The controller keeps
+# packages/ph.yaml unchanged: the two-point calibration and its capture
+# buttons, the temperature compensation (the pod has no water temperature;
+# the controller does), and the "Water pH" entity everything else reads.
+# A calibration is still per-converter, though: volts read through this
+# board's ADC are not the volts the controller's ADS1115 read, so
+# RECALIBRATE after the move.
+#
+# The Gravity board buffers the electrode, so the ADC sees a low-impedance
+# op-amp output between about 1 and 2 V across pH 4-10 -- the ESP32 ADC's
+# most linear stretch. Two-point calibration through this same ADC cancels
+# its offset and gain error; what is left is a few mV, roughly 0.02-0.05
+# pH, inside what the probe itself can tell apart.
 #
 # ---------------------------------------------------------------------
 # WHAT THE SPECTRAL SIDE IS NOT
@@ -60,7 +87,10 @@
 # ---------------------------------------------------------------------
 # WHAT THIS PACKAGE OWES AND IS OWED
 # ---------------------------------------------------------------------
-# Owed by the board file: i2c_sda, i2c_scl, and the esp32: block.
+# Owed by the board file: i2c_sda, i2c_scl, ph_adc_pin and the esp32:
+# block. ph_adc_pin must be an ADC1 pin that is NOT a strapping pin: the pH
+# board idles near 1.5 V, which would hold a strapping pin at an undefined
+# level during boot.
 # Owed to nobody: packages/base.yaml supplies wifi, MQTT, OTA, the web
 # server and the clock. Never pair this with control.yaml, sensors.yaml
 # or ph.yaml: there is no probe, heater or relay here for them to bind to.
@@ -90,7 +120,7 @@ substitutions:
   link_service:   "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
   link_sens_char: "6e400004-b5a3-f393-e0a9-e50e24dcca9e"
 
-  # How often lux is pushed to the controller. The thermal model works on
+  # How often lux (and the pH voltage) is pushed to the controller. The thermal model works on
   # 15-minute actuator windows, so a minute is already far finer than it can
   # act on. Each push is a connect / write / disconnect, so this also sets
   # how often the controller briefly holds a second BLE connection.
@@ -154,42 +184,73 @@ ble_client:
         # Let the GATT discovery settle before writing. Same shape as the
         # Chihiros bridge: connect, do one thing, disconnect.
         - delay: 500ms
-        - ble_client.ble_write:
-            id: ctrl_link
-            service_uuid: ${link_service}
-            characteristic_uuid: ${link_sens_char}
-            # FRAME: L,<lux>,<blue%>,<red%>,<nir/1000>  -- 5 fields, <= 19 bytes.
-            #
-            # The size is not an accident. A BLE write carries 20 bytes of
-            # payload until an MTU negotiation succeeds, and while ESPHome
-            # does request a larger one on connect, the granted size is
-            # whatever both ends agree -- not a promise. A frame that fits
-            # in the default works no matter how that negotiation lands.
-            #
-            # Which is why green is NOT sent: the three shares are computed
-            # over all eight bands and sum to 100, so the controller
-            # reconstructs it as 100 - blue - red. Blue and red are the ends
-            # of the spectrum and the channels actually being tuned; green
-            # is the one that can be inferred.
-            #
-            # -1 means "spectral not ready yet" -- the AS7341 has a slower
-            # update than the BH1750, and lux must not wait on it.
-            value: !lambda |-
-              const float lux = id(pod_lux).state;
-              const float b   = id(sp_share_blue).state;
-              const float r   = id(sp_share_red).state;
-              const float n   = id(sp_nir_ratio).state;
-              int L = isnan(lux) ? 0 : (int) lroundf(lux);
-              if (L < 0) L = 0;
-              if (L > 65535) L = 65535;
-              const int B = isnan(b) ? -1 : (int) lroundf(b);
-              const int R = isnan(r) ? -1 : (int) lroundf(r);
-              int N = isnan(n) ? -1 : (int) lroundf(n * 1000.0f);
-              if (N > 999) N = 999;
-              char buf[24];
-              const int len = snprintf(buf, sizeof(buf), "L,%d,%d,%d,%d", L, B, R, N);
-              return std::vector<uint8_t>(buf, buf + len);
+        # The pod connects when EITHER reading is valid, so each frame is
+        # guarded on its own: a missing BH1750 must not send "L,0" (a lux
+        # of zero is a reading, not silence), and a missing pH board must
+        # not send anything at all.
+        - if:
+            condition:
+              lambda: 'return !isnan(id(pod_lux).state);'
+            then:
+              - ble_client.ble_write:
+                  id: ctrl_link
+                  service_uuid: ${link_service}
+                  characteristic_uuid: ${link_sens_char}
+                  # FRAME: L,<lux>,<blue%>,<red%>,<nir/1000>  -- 5 fields, <= 19 bytes.
+                  #
+                  # The size is not an accident. A BLE write carries 20 bytes of
+                  # payload until an MTU negotiation succeeds, and while ESPHome
+                  # does request a larger one on connect, the granted size is
+                  # whatever both ends agree -- not a promise. A frame that fits
+                  # in the default works no matter how that negotiation lands.
+                  #
+                  # Which is why green is NOT sent: the three shares are computed
+                  # over all eight bands and sum to 100, so the controller
+                  # reconstructs it as 100 - blue - red. Blue and red are the ends
+                  # of the spectrum and the channels actually being tuned; green
+                  # is the one that can be inferred.
+                  #
+                  # -1 means "spectral not ready yet" -- the AS7341 has a slower
+                  # update than the BH1750, and lux must not wait on it.
+                  value: !lambda |-
+                    const float lux = id(pod_lux).state;
+                    const float b   = id(sp_share_blue).state;
+                    const float r   = id(sp_share_red).state;
+                    const float n   = id(sp_nir_ratio).state;
+                    int L = isnan(lux) ? 0 : (int) lroundf(lux);
+                    if (L < 0) L = 0;
+                    if (L > 65535) L = 65535;
+                    const int B = isnan(b) ? -1 : (int) lroundf(b);
+                    const int R = isnan(r) ? -1 : (int) lroundf(r);
+                    int N = isnan(n) ? -1 : (int) lroundf(n * 1000.0f);
+                    if (N > 999) N = 999;
+                    char buf[24];
+                    const int len = snprintf(buf, sizeof(buf), "L,%d,%d,%d,%d", L, B, R, N);
+                    return std::vector<uint8_t>(buf, buf + len);
         - delay: 200ms
+        - if:
+            condition:
+              lambda: 'return !isnan(id(pod_ph_v).state);'
+            then:
+              - ble_client.ble_write:
+                  id: ctrl_link
+                  service_uuid: ${link_service}
+                  characteristic_uuid: ${link_sens_char}
+                  # FRAME: P,<volts x 10000>   e.g. "P,14803" = 1.4803 V
+                  #
+                  # Its own frame rather than a sixth field on L: L already
+                  # runs to 19 bytes against a 20-byte write. An integer in
+                  # tenths of a millivolt keeps the ADC's resolution (the
+                  # electrode moves ~170 mV per pH unit, so 0.1 mV is
+                  # 0.0006 pH) without a float parser on the far end.
+                  value: !lambda |-
+                    int P = (int) lroundf(id(pod_ph_v).state * 10000.0f);
+                    if (P < 0) P = 0;
+                    if (P > 33000) P = 33000;
+                    char buf[12];
+                    const int len = snprintf(buf, sizeof(buf), "P,%d", P);
+                    return std::vector<uint8_t>(buf, buf + len);
+              - delay: 200ms
         # Non-persistent by design. Holding the link open would keep the
         # controller at two BLE connections permanently and give the panel
         # a radio to share all day; this way the overlap is a second a
@@ -198,7 +259,7 @@ ble_client:
     on_disconnect:
       then:
         - logger.log:
-            format: "lux link: disconnected"
+            format: "controller link: disconnected"
             level: DEBUG
 
 switch:
@@ -213,14 +274,42 @@ interval:
     then:
       # Never push a NaN. A missing reading must reach the controller as
       # silence, so its staleness guard can time out and drop the light term
-      # -- not as a number that happens to parse.
+      # (or blank the pH) -- not as a number that happens to parse. Connect
+      # if there is anything worth sending; on_connect sends only what is.
       - if:
           condition:
-            lambda: 'return !isnan(id(pod_lux).state);'
+            lambda: 'return !isnan(id(pod_lux).state) || !isnan(id(pod_ph_v).state);'
           then:
             - switch.turn_on: ctrl_conn
 
 sensor:
+  # -------------------------------------------------------------
+  # pH board voltage -- the DFRobot Gravity SEN0169-V2 output.
+  # Sent to the controller, which does the pH maths; see PH above.
+  # Published here as well so a dead BLE link and a dead probe look
+  # different from Home Assistant: this moves and "Water pH" does not
+  # means the link, both flat means the probe.
+  # -------------------------------------------------------------
+  - platform: adc
+    pin: ${ph_adc_pin}
+    name: "pH Board Voltage"
+    id: pod_ph_v
+    unit_of_measurement: "V"
+    accuracy_decimals: 4
+    entity_category: diagnostic
+    attenuation: 12db
+    # 16 conversions averaged per reading, then the median of the last
+    # 30 s: the radio's transmit bursts land on the supply as short spikes,
+    # and between the two they cost nothing on a value that moves over
+    # hours. One published value every 30 s, two per BLE push.
+    samples: 16
+    update_interval: 1s
+    filters:
+      - median:
+          window_size: 30
+          send_every: 30
+          send_first_at: 5
+
   # -------------------------------------------------------------
   # BH1750 (GY-302) -- real lux, ADDR floating gives 0x23.
   # This is the one the controller consumes.

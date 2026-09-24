@@ -1,7 +1,9 @@
 # pH, from a DFRobot Gravity industrial probe (SEN0169-V2, wide-voltage).
 #
 # The board file supplies `ph_voltage` (an adc sensor on whatever pin that
-# board has free); everything here is board-agnostic. Same split as TDS.
+# board has free -- or, on the 75 gal, a template carrying the voltage the
+# light pod reads and sends over BLE); everything here is board-agnostic.
+# Same split as TDS.
 #
 # ---------------------------------------------------------------
 # CALIBRATION IS NOT OPTIONAL

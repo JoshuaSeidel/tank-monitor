@@ -107,10 +107,14 @@ packages:
 # ---------------------------------------------------------------------
 # CALIBRATION IS PER-BOARD AND DOES NOT TRANSFER
 # ---------------------------------------------------------------------
-# ph_v_high and ph_v_low are volts read through THIS board's converter, and
-# this board reads pH on an ADS1115 rather than the internal ADC. Do not
-# copy them from tank-monitor-xiao-remote.yaml -- measure them here, against
-# buffer. See packages/ph.yaml for the procedure.
+# ph_v_high and ph_v_low are volts read through whichever converter reads
+# the pH board. Since 2026-09-24 that is the LIGHT POD's ADC, not this
+# board's ADS1115: the pod sends the volts here over BLE and the maths,
+# capture buttons and stored calibration stay on this board. So the
+# numbers below were measured through a converter that no longer reads the
+# probe -- recalibrate with the capture buttons after the move. Do not copy
+# them from tank-monitor-xiao-remote.yaml either. See packages/ph.yaml for
+# the procedure.
 #
 # Each voltage travels with the pH it was measured at: ph_cal_high with
 # ph_v_high, ph_cal_low with ph_v_low. Record the pair or the volts mean
