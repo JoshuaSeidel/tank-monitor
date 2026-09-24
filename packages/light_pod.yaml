@@ -126,6 +126,9 @@ substitutions:
   # how often the controller briefly holds a second BLE connection.
   lux_push_interval: "60s"
 
+  # What "I2C Devices" expects to answer on the bus: "addr label, ...".
+  i2c_expect: "0x23 BH1750, 0x39 AS7341"
+
   # ---- AS7341 exposure. These three decide what a "count" means ----
   # Raw counts scale with gain and integration time, so week-over-week
   # comparison is only valid while all three stay put. Changing any of them
@@ -156,6 +159,116 @@ substitutions:
 # wrapper has silently failed four times in this project.
 mqtt:
   discovery_unique_id_generator: mac
+
+# I2C bus autopsy, run BEFORE the driver claims the pins (bus priority is
+# 1000; this is 1001) -- the same check the 75 gal controller runs. The scan
+# cannot tell a wire that reaches a powered sensor from one that reaches
+# nothing, because it turns on the chip's own pull-ups first. This asks each
+# line two questions with those pull-ups OFF:
+#
+#   ext-pullup  With only the chip's ~45k pull-DOWN on, a line reads 0
+#               unless a sensor's own pull-up (to its powered VCC) lifts
+#               it. "yes" = the wire reaches a sensor that has power.
+#               "NO" = open wire, wrong pin, or no power at the sensor.
+#   drives-low  Driven low and read back. Anything but 0 is a line tied
+#               hard to 3V3 -- a wire on the wrong pin.
+#
+# Reported through "I2C Devices" below, so it reaches Home Assistant with no
+# serial cable. List form on purpose: a mapping-form on_boot in a package
+# can be dropped silently when packages merge.
+esphome:
+  on_boot:
+    - priority: 1001
+      then:
+        - lambda: |-
+            const gpio_num_t pins[2] = {(gpio_num_t) ${i2c_sda}, (gpio_num_t) ${i2c_scl}};
+            const char *names[2] = {"SDA", "SCL"};
+            std::string r;
+            for (int i = 0; i < 2; i++) {
+              gpio_config_t c{};
+              c.pin_bit_mask = 1ULL << pins[i];
+              c.mode = GPIO_MODE_INPUT;
+              c.pull_up_en = GPIO_PULLUP_DISABLE;
+              c.pull_down_en = GPIO_PULLDOWN_ENABLE;
+              c.intr_type = GPIO_INTR_DISABLE;
+              gpio_config(&c);
+              delayMicroseconds(200);
+              const int ext = gpio_get_level(pins[i]);
+              c.mode = GPIO_MODE_INPUT_OUTPUT_OD;
+              c.pull_up_en = GPIO_PULLUP_ENABLE;
+              c.pull_down_en = GPIO_PULLDOWN_DISABLE;
+              gpio_config(&c);
+              gpio_set_level(pins[i], 0);
+              delayMicroseconds(200);
+              const int low = gpio_get_level(pins[i]);
+              gpio_set_level(pins[i], 1);
+              delayMicroseconds(200);
+              const int high = gpio_get_level(pins[i]);
+              char b[64];
+              snprintf(b, sizeof(b), "%s%s ext-pullup %s, drives-low %s, releases %s",
+                       i ? "; " : "", names[i], ext ? "yes" : "NO",
+                       low == 0 ? "yes" : "NO", high ? "yes" : "NO");
+              r += b;
+            }
+            id(i2c_autopsy) = r;
+            ESP_LOGI("i2c", "autopsy: %s", r.c_str());
+
+globals:
+  - id: i2c_autopsy
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+text_sensor:
+  # Which expected devices answer, once a minute. The sensor components only
+  # probe at boot and then go quiet, so without this a missing sensor is
+  # just "unknown" forever. When something is missing it also sweeps every
+  # address (a sensor at the WRONG address shows up by where it is) and
+  # appends the boot autopsy above. After fixing a wire this line goes
+  # right within a minute; the readings come back after a restart.
+  - platform: template
+    name: "I2C Devices"
+    id: i2c_devices
+    icon: "mdi:transit-connection-variant"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      static const char *spec = "${i2c_expect}";
+      std::string out;
+      bool all_ok = true;
+      const char *p = spec;
+      while (*p) {
+        while (*p == ' ' || *p == ',') p++;
+        if (!*p) break;
+        char *end = nullptr;
+        const uint8_t addr = (uint8_t) strtol(p, &end, 0);
+        p = end;
+        while (*p == ' ') p++;
+        std::string what;
+        while (*p && *p != ',') what += *p++;
+        while (!what.empty() && what.back() == ' ') what.pop_back();
+        const auto err = id(bus_a).write_readv(addr, nullptr, 0, nullptr, 0);
+        if (!out.empty()) out += ", ";
+        out += what;
+        switch (err) {
+          case i2c::ERROR_OK:               out += " ok"; break;
+          case i2c::ERROR_NOT_ACKNOWLEDGED: out += " no ack"; all_ok = false; break;
+          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; all_ok = false; break;
+          default:                          out += " error"; all_ok = false; break;
+        }
+      }
+      if (!all_ok) {
+        std::string found;
+        for (uint8_t a = 0x08; a < 0x78; a++) {
+          if (id(bus_a).write_readv(a, nullptr, 0, nullptr, 0) != i2c::ERROR_OK) continue;
+          char b[8];
+          snprintf(b, sizeof(b), "%s0x%02X", found.empty() ? "" : " ", a);
+          found += b;
+        }
+        out += found.empty() ? "; bus sweep: nothing" : "; bus sweep found: " + found;
+        if (!id(i2c_autopsy).empty()) out += "; at boot: " + id(i2c_autopsy);
+      }
+      return out;
 
 i2c:
   sda: ${i2c_sda}
