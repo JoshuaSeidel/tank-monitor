@@ -440,6 +440,15 @@ sensor:
   # AS7341 -- eight visible bands, plus clear and near-infrared.
   # Home Assistant only; never sent to the controller.
   # -------------------------------------------------------------
+  # Byte order: ESPHome's AS7341 driver (checked in 2026.8/2026.9) reads the
+  # channel registers with read_bytes_16, which assumes big-endian, but the
+  # AS7341 stores each count LOW byte first. Every raw count therefore
+  # arrives byte-swapped: a true 11 reads 2816, and anything under 256 reads
+  # 0 -- which is why dim room light showed ten zeros. The driver's own
+  # get_astep() swaps correctly; read_channels() does not. Swapping back is
+  # exact, so each channel carries this filter. If a future ESPHome fixes
+  # the driver, every band will suddenly read as a multiple of 256 again --
+  # that is the sign to delete it.
   - platform: as7341
     address: 0x39
     update_interval: ${spectral_update}
@@ -450,42 +459,55 @@ sensor:
       name: "Spectral 415nm"
       id: sp_f1
       accuracy_decimals: 0
+      filters: &as7341_byteswap
+        - lambda: |-
+            const uint16_t v = (uint16_t) x;
+            return (float) (uint16_t) ((v >> 8) | (v << 8));
     f2:
       name: "Spectral 445nm"
       id: sp_f2
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f3:
       name: "Spectral 480nm"
       id: sp_f3
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f4:
       name: "Spectral 515nm"
       id: sp_f4
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f5:
       name: "Spectral 555nm"
       id: sp_f5
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f6:
       name: "Spectral 590nm"
       id: sp_f6
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f7:
       name: "Spectral 630nm"
       id: sp_f7
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     f8:
       name: "Spectral 680nm"
       id: sp_f8
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     clear:
       name: "Spectral Clear"
       id: sp_clear
       accuracy_decimals: 0
+      filters: *as7341_byteswap
     nir:
       name: "Spectral NIR"
       id: sp_nir
       accuracy_decimals: 0
+      filters: *as7341_byteswap
 
   # -------------------------------------------------------------
   # Derived on the board, not in Home Assistant -- calibration and
