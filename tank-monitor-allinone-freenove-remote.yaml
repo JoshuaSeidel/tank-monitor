@@ -1,0 +1,60 @@
+# ALL-IN-ONE 75 GAL -- Freenove ESP32-S3-WROOM. Replaces the XIAO controller
+# (tank-monitor-lg-remote.yaml) AND the light pod (tank-monitor-light-pod-
+# remote.yaml) with one board. Put THIS file in the ESPHome dashboard.
+# Nothing else lives locally except secrets.yaml.
+#
+# ---------------------------------------------------------------------
+# device_name -- deliberately the SAME as the XIAO controller's
+# ---------------------------------------------------------------------
+# Home Assistant is wired to tank_monitor_75_gallon_*: the log-manual-test
+# script, both dashboards, the chemistry automation and the leak alarm.
+# Keeping the name keeps every entity id. Two consequences:
+#   - The XIAO controller and this board must NEVER run at the same time.
+#     Two devices on one name overwrite each other's entities.
+#   - Entity unique_ids are MAC-based, so this board's entities are NEW to
+#     Home Assistant even under the same name. Before this board's first
+#     boot, power the XIAO off and delete the "Tank Monitor 75 Gallon"
+#     device in the MQTT integration; otherwise every entity comes back
+#     with a _2 suffix and the automations point at the dead ones. Delete
+#     the light pod's device too -- nothing publishes it any more.
+#
+# The display panel pairs with the controller by BLE MAC. This is a new
+# chip, so read "Controller BLE MAC" from this board once it is up and put
+# it in the panel's wrapper.
+#
+# ---------------------------------------------------------------------
+# After the swap: RECALIBRATE
+# ---------------------------------------------------------------------
+# pH, TDS and the leak sensor now read on this chip's own ADC, not the
+# ADS1115 or the pod. The stored calibrations do not transfer:
+#   pH     Capture High Point / Capture Low Point (packages/ph.yaml)
+#   TDS    Calibrate TDS against the standard (packages/sensors.yaml)
+#   leak   check "Leak Sensor Voltage" dry and wet against leak_on_v /
+#          leak_off_v in the board file
+# The two temperature offsets live in NVS on the OLD board and do not come
+# across either -- cross-calibrate the probes in one cup again.
+substitutions:
+  device_name: tank-monitor-75-gallon
+  friendly_name: Tank Monitor 75 Gallon
+
+  # Heater A + probe A are inboard on the back wall, left of the centre
+  # feed. Heater B + probe B are the mirror.
+  side_a_name: "Left"
+  side_b_name: "Right"
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - packages/ph.yaml
+      # BLE v3 to the panel, and NEVER espnow_link.yaml alongside it.
+      - packages/ble_link_v3.yaml
+      # Pulls in packages/spectral.yaml itself -- do not list it here too.
+      - boards/allinone-freenove.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s

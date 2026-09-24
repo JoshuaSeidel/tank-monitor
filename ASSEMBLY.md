@@ -501,6 +501,63 @@ To let a remote panel read this board instead of the C6, uncomment
 `source_device` substitution at this device's name.
 
 
+# Freenove ESP32-S3 all-in-one, large tank (`tank-monitor-75-gallon`)
+
+One board for the whole 75 gal: both heaters, the fan, both temperature
+probes, TDS, pH, the floor leak sensor, lux and spectral. It replaces the
+XIAO controller **and** the light pod. `boards/allinone-freenove.yaml`,
+deployed by `tank-monitor-allinone-freenove-remote.yaml`.
+
+Every device has its own GPIOs. The ESP32-S3 has exactly two I²C
+controllers, so the two light sensors get one bus each and the ADS1115 is
+gone: pH, TDS and leak read on the chip's own ADC, one pin each.
+
+## Pin map
+
+The Freenove board is labelled with GPIO numbers directly (DevKitC-1 layout).
+
+| Device | Wire | GPIO |
+|---|---|---|
+| pH board | blue (signal) | **1** |
+| TDS board | `A` (signal) | **4** |
+| Leak sensor | black; 2.2 MΩ + 100 nF from the pin to GND | **5** |
+| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **6** |
+| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **7** |
+| Heater A relay | control | **8** |
+| Heater B relay | control | **9** |
+| Fan relay | control | **10** |
+| BH1750 | SDA / SCL | **15 / 16** |
+| AS7341 | SDA / SCL | **17 / 18** |
+
+Everything except GPIO 1 is on the same header row. Leave these alone:
+`0`, `3`, `45`, `46` (strapping), `35`–`37` (PSRAM), `19`/`20` (USB),
+`43`/`44` (console), `38`–`40` (microSD), `2` and `48` (LEDs). GPIO 4–18 also
+run to the camera connector; with no camera fitted they are ordinary pins.
+
+## Power
+
+Two `3V3` pins and several `GND` pins feed seven devices, so power is still
+spliced off the board (see the XIAO section's rails). **Give the two light
+sensors their own 3.3 V**: a small 3.3 V regulator fed from the `5V` pin, or
+a resettable fuse on their power lead. Their leads run up to the fixture,
+and a short on one of them (it happened on 2026-09-17) must not brown out
+the board that switches the heaters.
+
+## Swapping it in
+
+1. Flash it on the bench. Leave the XIAO controller running until then.
+2. **Power the XIAO controller and the light pod off.** This board uses the
+   same device name, and two devices on one name overwrite each other.
+3. In Home Assistant, delete the **Tank Monitor 75 Gallon** and **Tank
+   Monitor Light Pod** devices from the MQTT integration. Entity IDs are
+   tied to the chip, so without this every entity comes back with `_2` and
+   the automations keep pointing at the dead ones.
+4. Power the new board. Check `I2C Devices` reads `BH1750 ok, AS7341 ok`.
+5. Read `Controller BLE MAC` and put it in the display panel's wrapper.
+6. **Recalibrate:** pH (Capture High/Low Point), TDS (Calibrate TDS),
+   cross-calibrate the two temperature probes in one cup, and check
+   `Leak Sensor Voltage` dry and wet against the leak thresholds.
+
 # XIAO ESP32-S3, large tank (`tank-monitor-75-gallon`)
 
 The second tank's controller. Same silicon as the 12-gal XIAO, a different
