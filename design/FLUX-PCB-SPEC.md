@@ -1,10 +1,15 @@
 # Tank-Monitor Carrier Board — flux.ai Build Instructions
 
-A single custom PCB that replaces the XIAO-ESP32-S3 controller + separate BLE-bridge
-ESP32 with one board carrying **two radios** (Wi-Fi/ESP-NOW chip + dedicated BLE chip),
-all sensor front-end circuitry onboard, and screw-terminal connectors so bare
-off-the-shelf probes (DS18B20, pH, TDS, BH1750, AS7341) plug straight in.
-Multiple boards chain over an RS-485 expansion bus for multi-tank setups.
+One board, one tank, everything: this PCB is simultaneously the **tank
+monitor** (ESP32-S3: temp/pH/TDS/lux/spectral sensing, heater/fan control,
+Wi-Fi to HA, ESP-NOW to the panel) and the **BLE bridge for the tank light**
+(ESP32-C3 running the existing chihiros-esphome bridge firmware for the
+WRGB II Pro). It replaces the XIAO controller + separate BLE-bridge ESP32
+outright. Both firmwares live in this repo and flash through the shared
+USB-C. All sensor front-end circuitry is onboard with plug-in connectors so
+bare off-the-shelf probes (DS18B20, pH, TDS, BH1750, AS7341) attach with no
+soldering. Multiple boards chain over the USB-C LINK bus for multi-tank
+setups.
 
 Target size: **55 × 60 mm (~2.2 × 2.4 in)**. Three things make this size
 work: slim 12.7 mm-wide power relays instead of the classic G5LE cube, a
