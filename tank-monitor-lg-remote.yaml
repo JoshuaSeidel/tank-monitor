@@ -135,7 +135,7 @@ packages:
 # BH1750s are dropped from the build so they are not two failed components
 # at every boot.
 #
-# Instead tank-monitor-light-pod (boards/xiao-esp32s3-light-pod.yaml) reads
+# Instead tank-monitor-light-pod (packages/light_pod.yaml) reads
 # a BH1750 a few inches from its own MCU and pushes the value here over BLE,
 # connecting once a minute to write it and disconnecting again. Peer to
 # peer: no broker, no Home Assistant, no router. The light-gain term is a

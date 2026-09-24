@@ -1,4 +1,7 @@
-# LOCAL validation wrapper for boards/xiao-esp32s3-light-pod.yaml.
+# LOCAL validation wrapper for the light pod -- currently
+# boards/sparkfun-esp32c6-pocket-light-pod.yaml. To check the XIAO build
+# instead, swap the board line at the bottom; both pull in
+# packages/light_pod.yaml, so either one exercises the shared pod logic.
 #
 # Sister to local-lg-dual.yaml and local-cyd.yaml: every package is
 # !include'd from the working tree instead of fetched from GitHub, so
@@ -27,4 +30,4 @@ substitutions:
 
 packages:
   base: !include packages/base.yaml
-  board: !include boards/xiao-esp32s3-light-pod.yaml
+  board: !include boards/sparkfun-esp32c6-pocket-light-pod.yaml

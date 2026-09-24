@@ -1,4 +1,6 @@
-# LIGHT POD -- XIAO ESP32-S3, a BH1750 and an AS7341, over the 75 gal.
+# LIGHT POD -- SparkFun Qwiic Pocket ESP32-C6, a BH1750 and an AS7341, over
+# the 75 gal. (The original XIAO ESP32-S3 build is still in the repo as
+# boards/xiao-esp32s3-light-pod.yaml; swap the board line below to use it.)
 # Put THIS file in the ESPHome dashboard. Nothing else lives locally except
 # secrets.yaml, so a push to main is all the next build needs.
 #
@@ -103,6 +105,8 @@ packages:
       # no probe, heater or relay on this board for them to bind to, and
       # they would fail the build looking for ids it does not define.
       - packages/base.yaml
-      - boards/xiao-esp32s3-light-pod.yaml
+      # The board file pulls in packages/light_pod.yaml itself -- do not
+      # list it here as well.
+      - boards/sparkfun-esp32c6-pocket-light-pod.yaml
     # refresh defaults to 1d, which would silently build yesterday's config.
     refresh: 0s

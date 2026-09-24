@@ -917,10 +917,14 @@ Then set `side_a_name` / `side_b_name` in the wrapper to match how you
 actually mounted things, and label the outside of the tank to match.
 
 
-# XIAO ESP32-S3 light pod (`tank-monitor-light-pod`)
+# Light pod (`tank-monitor-light-pod`)
 
-Two sensors, no actuators. `boards/xiao-esp32s3-light-pod.yaml`, deployed by
-`tank-monitor-light-pod-remote.yaml`.
+Two sensors, no actuators. Runs on a **SparkFun Qwiic Pocket ESP32-C6**
+(`boards/sparkfun-esp32c6-pocket-light-pod.yaml`), deployed by
+`tank-monitor-light-pod-remote.yaml`. The original **Seeed XIAO ESP32-S3**
+build (`boards/xiao-esp32s3-light-pod.yaml`) still works; both board files
+pull in the same `packages/light_pod.yaml`, which holds all the sensor and BLE
+logic, so the two cannot drift apart.
 
 It answers two different questions with two different parts, and the answers
 travel by two different paths:
@@ -963,13 +967,26 @@ than the BH1750, and lux must not wait on it.
 
 | Part | Notes |
 |---|---|
-| Seeed XIAO ESP32-S3 | Same board as both controllers. Pads are D0–D10 and those are **not** GPIO numbers |
+| SparkFun Qwiic Pocket ESP32-C6 | 1" × 1", Qwiic connector on board, USB-C for power and flashing |
 | BH1750 / GY-302 | You already own two. Leave `ADDR` floating for 0x23 |
 | AS7341 breakout | Adafruit 4698 or equivalent. Address fixed at 0x39 |
-| 6 short jumper leads | Short is the point — both sensors sit inches from their own MCU |
+| 2 Qwiic / STEMMA QT cables | Board → first breakout → second breakout. No soldering |
 | A rigid bracket | See mounting. This matters more than the wiring |
 
-## Pin map
+## Wiring (Qwiic Pocket ESP32-C6)
+
+Plug a Qwiic cable from the board's Qwiic connector to one breakout, and a
+second from that breakout's other Qwiic port to the next. That is the whole
+bus: SDA is GPIO6 and SCL is GPIO7 (from SparkFun's own board definition), with
+3V3 and GND on the same cable. The board already has 2.2k pull-ups on those
+lines; leave its jumpers as shipped. If your GY-302 has no Qwiic port, a Qwiic
+cable with female jumper sockets on one end connects it to its pins.
+
+**Keep the board out of the sensors' view.** Its red PWR LED is always on and
+sits in exactly the red bands `Red Share` is computed from. Put the board
+behind or below the breakouts, not next to them facing the fixture.
+
+## Pin map (XIAO ESP32-S3 build)
 
 | Pad | GPIO | Goes to |
 |---|---|---|
@@ -978,8 +995,8 @@ than the BH1750, and lux must not wait on it.
 | 3V3 | — | `VCC` / `VIN` on both |
 | GND | — | `GND` on both |
 
-Same two pads every other XIAO in this project uses for I²C — one wiring habit
-across the whole fleet. Both sensors share the bus with no address conflict.
+Same two pads every other XIAO in this project uses for I²C. Both sensors share
+the bus with no address conflict on either board.
 
 **Leave the BH1750's `ADDR` pin alone.** The 0x5C jumper is only needed when
 two of them share a bus, and that hand-soldered ADDR-to-VCC splice is exactly
