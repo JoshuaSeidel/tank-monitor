@@ -31,6 +31,8 @@
 #   Heater B control          D4           5
 #   Fan control               D9           8
 #   Leak sensor (floor)       ADS1115 A2   -- no XIAO pad; see below
+#   TDS probe                 ADS1115 A0
+#   pH probe                  ADS1115 A3   -- A1 died 2026-09-24; see below
 #
 # Spare: D1 (GPIO2), D3 (GPIO4), D10 (GPIO9) -- all ADC1, all free because
 # pH and TDS now live on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3
@@ -270,8 +272,24 @@ sensor:
           send_first_at: 20
 
   # pH electrode buffer output -> packages/ph.yaml.
+  #
+  # A3, NOT A1. On 2026-09-24 the pH channel died mid-run: 13.5 hours into
+  # an uninterrupted session, with nobody near the tank, A1 stopped being
+  # driven and drifted to the rail -- -0.32 V, then 0.78, 2.46, 2.91, 2.99
+  # over about forty seconds. That slow charge toward VDD is a floating ADC
+  # input, not an amplifier output, which snaps. A0 and A2 kept reading
+  # correctly throughout on the same chip, same bus, same config, and the
+  # board never rebooted, so neither the ADS1115 nor this file was the
+  # cause. That leaves the A1 pin itself: absolute max input here is
+  # VDD+0.3V ~= 3.6 V and the Gravity pH board swings to ~3 V, so the
+  # headroom an ESD hit or a relay transient has to eat through is 600 mV.
+  #
+  # A3 was the only unused channel. If pH reads correctly here, A1 is dead
+  # and stays unused; if it drifts to the rail on A3 too, the fault is
+  # upstream in the signal wire or the Gravity board and the ADS1115 is
+  # cleared. Either answer is worth one line.
   - platform: ads1115
-    multiplexer: 'A1_GND'
+    multiplexer: 'A3_GND'
     gain: 4.096
     id: ph_voltage
     update_interval: 1s
