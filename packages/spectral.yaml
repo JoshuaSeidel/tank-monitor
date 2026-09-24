@@ -1,0 +1,239 @@
+# AS7341 spectral sensor and everything derived from it -- no pins, no bus.
+#
+# Included by the board that carries the sensor, which owes one substitution:
+#   spectral_i2c   id of the i2c bus the AS7341 is wired to
+# Used by packages/light_pod.yaml (the pod's single bus) and by
+# boards/allinone-freenove.yaml (the AS7341's own bus on the all-in-one).
+#
+# Publishes the ten raw channels, the three colour shares, the NIR ratio,
+# the visible total and "Spectral Saturated". The shares and NIR ratio are
+# computed here, on the device, so every consumer sees the same number.
+
+substitutions:
+  # ---- AS7341 exposure. These three decide what a "count" means ----
+  # Raw counts scale with gain and integration time, so week-over-week
+  # comparison is only valid while all three stay put. Changing any of them
+  # rebases every historical reading -- treat it like recalibrating a probe
+  # and write down the date.
+  #
+  # Full scale = (atime + 1) * (astep + 1), capped at 65535. 29, 599 -> 18000.
+  #
+  # Gain X2 is deliberately below the X8 default: this sits under a 138 W
+  # fixture, a far brighter scene than X8 assumes. If Spectral Saturated
+  # ever turns on, drop it. If every band reads in the low hundreds at full
+  # output, raise it.
+  as7341_gain: "X2"
+  as7341_atime: "29"
+  as7341_astep: "599"
+
+  spectral_update: "60s"
+
+sensor:
+  # -------------------------------------------------------------
+  # AS7341 -- eight visible bands, plus clear and near-infrared.
+  # -------------------------------------------------------------
+  # Byte order: ESPHome's AS7341 driver (checked in 2026.8/2026.9) reads the
+  # channel registers with read_bytes_16, which assumes big-endian, but the
+  # AS7341 stores each count LOW byte first. Every raw count therefore
+  # arrives byte-swapped: a true 11 reads 2816, and anything under 256 reads
+  # 0 -- which is why dim room light showed ten zeros. The driver's own
+  # get_astep() swaps correctly; read_channels() does not. Swapping back is
+  # exact, so each channel carries this filter. If a future ESPHome fixes
+  # the driver, every band will suddenly read as a multiple of 256 again --
+  # that is the sign to delete it.
+  - platform: as7341
+    i2c_id: ${spectral_i2c}
+    address: 0x39
+    update_interval: ${spectral_update}
+    gain: ${as7341_gain}
+    atime: ${as7341_atime}
+    astep: ${as7341_astep}
+    f1:
+      name: "Spectral 415nm"
+      id: sp_f1
+      accuracy_decimals: 0
+      filters: &as7341_byteswap
+        - lambda: |-
+            const uint16_t v = (uint16_t) x;
+            return (float) (uint16_t) ((v >> 8) | (v << 8));
+    f2:
+      name: "Spectral 445nm"
+      id: sp_f2
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f3:
+      name: "Spectral 480nm"
+      id: sp_f3
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f4:
+      name: "Spectral 515nm"
+      id: sp_f4
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f5:
+      name: "Spectral 555nm"
+      id: sp_f5
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f6:
+      name: "Spectral 590nm"
+      id: sp_f6
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f7:
+      name: "Spectral 630nm"
+      id: sp_f7
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    f8:
+      name: "Spectral 680nm"
+      id: sp_f8
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    clear:
+      name: "Spectral Clear"
+      id: sp_clear
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+    nir:
+      name: "Spectral NIR"
+      id: sp_nir
+      accuracy_decimals: 0
+      filters: *as7341_byteswap
+
+  # -------------------------------------------------------------
+  # Derived on the board, not in Home Assistant -- calibration and
+  # derived values compute here so every consumer sees the same
+  # number. A ratio that only exists in HA is a ratio the device
+  # does not have.
+  #
+  # The shares are the useful output: each band group as a fraction
+  # of all eight, so they are INDEPENDENT OF GAIN AND EXPOSURE.
+  # Doubling the light or the integration time moves every band
+  # together and leaves the shares where they were. That is what
+  # makes them comparable across weeks, and what makes them respond
+  # to a channel change rather than to a cloud past the window.
+  #
+  # All eight assigned, so the three sum to 100%:
+  #   blue   415 + 445 + 480    royal blue channel lives at 450
+  #   green  515 + 555 + 590    white phosphor peaks broad through here
+  #   red    630 + 680          deep red channel lives at 660
+  # -------------------------------------------------------------
+  - platform: template
+    name: "Blue Share"
+    id: sp_share_blue
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f1 + f2 + f3) / total;
+
+  - platform: template
+    name: "Green Share"
+    id: sp_share_green
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f4 + f5 + f6) / total;
+
+  - platform: template
+    name: "Red Share"
+    id: sp_share_red
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      const float total = f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+      if (total <= 0.0f) return {};
+      return 100.0f * (f7 + f8) / total;
+
+  # NIR divided by the clear channel -- the daylight discriminator, and the
+  # one spectral number the CONTROLLER has a real use for.
+  #
+  # LEDs emit essentially no near-infrared. Sunlight is full of it, and
+  # ordinary window glass passes most of the near band. So this ratio
+  # separates "the fixture is lighting the tank" (near 0) from "the sun is
+  # up" (substantially above 0) in a way lux cannot -- both look like light
+  # to a BH1750.
+  #
+  # That matters here specifically because the photoperiod moved to
+  # 09:00-16:00, straight through the brightest part of the day. Without
+  # this, daylight through the window is indistinguishable from the lamp,
+  # and the thermal model would learn to attribute room-warming sunshine to
+  # a fixture that was switched off.
+  - platform: template
+    name: "NIR Ratio"
+    id: sp_nir_ratio
+    accuracy_decimals: 3
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float nir = id(sp_nir).state, clear = id(sp_clear).state;
+      if (isnan(nir) || isnan(clear) || clear <= 0.0f) return {};
+      return nir / clear;
+
+  # Sum of the eight visible bands. Unlike the shares this DOES scale with
+  # gain and exposure, so it is only comparable while those stay untouched.
+  # Relative intensity index -- explicitly not lux, explicitly not PAR, and
+  # given no unit so nothing downstream can mistake it for either. The
+  # BH1750 above is what reports in a real unit.
+  - platform: template
+    name: "Spectral Visible Total"
+    id: sp_visible_total
+    accuracy_decimals: 0
+    update_interval: ${spectral_update}
+    lambda: |-
+      const float f1 = id(sp_f1).state, f2 = id(sp_f2).state, f3 = id(sp_f3).state;
+      const float f4 = id(sp_f4).state, f5 = id(sp_f5).state, f6 = id(sp_f6).state;
+      const float f7 = id(sp_f7).state, f8 = id(sp_f8).state;
+      if (isnan(f1) || isnan(f2) || isnan(f3) || isnan(f4) ||
+          isnan(f5) || isnan(f6) || isnan(f7) || isnan(f8)) return {};
+      return f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8;
+
+binary_sensor:
+  # A saturated channel reads a ceiling, not a measurement, and the shares
+  # computed from it are wrong in a way that looks entirely plausible -- a
+  # pinned red band simply reports as "lots of red". This is the check that
+  # makes the numbers above trustworthy rather than merely present.
+  #
+  # Full scale is (atime + 1) * (astep + 1), hardware-capped at 65535. 95%
+  # of that is called saturated, leaving margin for the ADC's nonlinearity
+  # near the top of its range.
+  - platform: template
+    name: "Spectral Saturated"
+    id: sp_saturated
+    device_class: problem
+    entity_category: diagnostic
+    lambda: |-
+      float full = (${as7341_atime} + 1.0f) * (${as7341_astep} + 1.0f);
+      if (full > 65535.0f) full = 65535.0f;   // hardware ceiling
+      const float limit = 0.95f * full;
+      const float ch[8] = {id(sp_f1).state, id(sp_f2).state, id(sp_f3).state,
+                           id(sp_f4).state, id(sp_f5).state, id(sp_f6).state,
+                           id(sp_f7).state, id(sp_f8).state};
+      bool any = false;
+      for (int i = 0; i < 8; i++) {
+        if (isnan(ch[i])) return {};
+        if (ch[i] >= limit) any = true;
+      }
+      return any;
