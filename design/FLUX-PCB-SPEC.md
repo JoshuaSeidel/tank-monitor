@@ -57,13 +57,18 @@ exactly the coexistence limit that forced the two-board setup today.
 | U11 | **TPS63020** buck-boost 3V3 | Battery-backed system rail (§4b). |
 | U12 | **74HC595** shift register | Sensor-status LEDs (§4c). |
 | BT1 | 18650 LiFePO₄ cell + Keystone 1042 holder + NTC | 8–12 h backup runtime. |
-| K1–K4 | **G3MB-202P** solid-state relays (or HF115F 10 A mechanical for heaters — see note) | Heater A, Heater B, Fan, Spare. Driven via NPN/MOSFET + opto already inside the SSR. |
+| K1–K4 | **Omron G5LE-1 DC3** 10 A mechanical relays, 3 V coil | Heater A, Heater B, Fan, Spare. Coils on the 3V3 rail — matches the current setup, which drives relays at 3.3 V. AO3400 low-side MOSFET + flyback diode per coil, GPIO gate. |
 
-**Heater relay note:** the two 300 W heaters draw ~2.5 A each at 120 VAC. G3MB-202P
-is rated 2 A — use **G3MC-202P (2 A)** only for the fan/spare and put **10 A
-HF115F/005 mechanical relays (5 V coil — the board has no 12 V rail)** (or panel-mount SSRs off-board) on the two heater
-channels, with proper creepage (§4). Firmware uses `slow_pwm` with 20–60 s
-periods, so mechanical relay wear is acceptable and zero-cross isn't needed.
+**Relay notes:** the two 300 W heaters draw ~2.5 A each at 120 VAC; the
+G5LE-1's 10 A contacts cover that with margin, and its 3 V coil (~33 mA)
+runs from the existing 3V3 drive scheme — no new rail, no 5 V-coil parts.
+Firmware uses `slow_pwm` with 20–60 s periods, so mechanical relay wear is
+acceptable and zero-cross isn't needed. Because 3V3 is battery-backed
+(§4b), coils remain energizable during an outage even though the mains
+side is dead — firmware must force all four relay GPIOs off when
+AC-present (GPIO2) drops, both to shed coil load (~130 mA if all four
+were held) and so relays re-close deliberately, not instantly, when
+power returns.
 
 ## 3. Pin map (mirror the existing firmware so YAML changes are minimal)
 
@@ -110,8 +115,9 @@ place them at opposite corners of the board.
 3. **Mains section:** heater/fan relay contacts and their screw terminals in a
    fenced corner of the board: ≥ 6.4 mm creepage to everything low-voltage,
    milled slots between contact pads, no ground pour underneath, and a
-   silkscreen box marked "⚡ 120 VAC". Optocoupled drive (built into SSRs;
-   for mechanical relays add PC817 + flyback diode + driver transistor).
+   silkscreen box marked "⚡ 120 VAC". The relay coil itself is the
+   isolation barrier (G5LE creepage 8 mm coil-to-contact); AO3400 MOSFET +
+   flyback diode on the coil side.
 4. **1-Wire probes** are submerged: add per-bus 100 Ω series resistor + TVS
    (SMAJ5.0A) + 470 pF to GND at the terminal — ESD/surge clamp for wet leads.
    (We've had probe water-ingress drag a bus low; series R keeps a shorted
@@ -193,7 +199,7 @@ label strip in `case/`.
 - LEDs + light pipes on a third (front) edge, DIP switch and BOOT/RESET
   buttons reachable through case cutouts.
 - Component height limit 12 mm everywhere except the relay/battery zone
-  (18650 holder ≈ 21 mm) — put the battery holder and HF115F relays in one
+  (18650 holder ≈ 21 mm) — put the battery holder and G5LE relays in one
   "tall" corner so the case lid steps over a single region.
 - Conformal-coat keep-out silkscreen around connectors; the case gets a
   drip loop note: probe cables must enter from below.
@@ -238,8 +244,8 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 1. **New project** → "tank-monitor-carrier", 4-layer, 60 × 60 mm outline
    (trim to ~55 × 60 mm once placement settles).
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
-   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×2, `G3MC-202P` ×2,
-   `HF115F/005-1ZS3` ×2, `PC817` ×2, `BQ25171-Q1`, `TPS63020DSJR`,
+   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A`, `G5LE-1 DC3` ×4,
+   `AO3400A` ×4, `BQ25171-Q1`, `TPS63020DSJR`,
    `74HC595` (`SN74HC595DR`), Keystone `1042` holder, screw terminals and
    Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
 3. Use flux's **AI auto-connect prompts** per functional block, in this order,
