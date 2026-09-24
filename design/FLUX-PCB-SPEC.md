@@ -6,7 +6,10 @@ all sensor front-end circuitry onboard, and screw-terminal connectors so bare
 off-the-shelf probes (DS18B20, pH, TDS, BH1750, AS7341) plug straight in.
 Multiple boards chain over an RS-485 expansion bus for multi-tank setups.
 
-Target size: **≤ 100 × 100 mm (4 × 4 in); aim for 80 × 80 mm.** 4-layer board
+Target size: **55 × 60 mm (~2.2 × 2.4 in)** — well inside the 4 × 4 in limit.
+The floor is set by the 18650 holder, the mains creepage fence, and the two
+antenna keep-outs, not by the electronics; sensor terminals are 2.54 mm
+push-in (§5), which is what gets the edge budget down. 4-layer board
 (SIG / GND / 3V3 / SIG) — flux.ai handles 4-layer fine and it makes the analog
 isolation section much easier to route cleanly.
 
@@ -197,18 +200,24 @@ label strip in `case/`.
 
 ## 5. Connectors
 
+Signal-level field wiring (22–28 AWG probe leads) uses **2.54 mm-pitch
+push-in spring terminals (Phoenix PTSM 0,5 series or Wago 2060)** — tool-free,
+and thin probe wire holds better in spring clamps than in screw barrels.
+Only mains (5.08 mm — that pitch is the creepage), the 12 V input (3.5 mm),
+and the BNC stay large.
+
 | Qty | Connector | Signal |
 |---|---|---|
-| 2 | 3-pos 3.5 mm screw terminal (Phoenix 1984617 style) | DS18B20 A / B: 3V3, DATA, GND |
+| 2 | 3-pos 2.54 mm push-in (PTSM) | DS18B20 A / B: 3V3, DATA, GND |
 | 1 | Panel BNC (isolated section) | pH electrode |
-| 1 | 3-pos screw terminal (isolated GND ref) | pH temp-comp / spare isolated analog |
-| 1 | 2-pos screw terminal | TDS probe |
+| 1 | 3-pos 2.54 mm push-in (isolated GND ref) | pH temp-comp / spare isolated analog |
+| 1 | 2-pos 2.54 mm push-in | TDS probe |
 | 2 | JST-SH 4-pin **Qwiic** | I²C pods: BH1750 (0x23/0x5C), AS7341 — buy Adafruit/SparkFun breakouts, no soldering |
 | 4 | 2-pos 5.08 mm screw terminal (rated 10 A / 300 V) | Relay outputs (dry contacts / SSR outputs) |
-| 2 | RJ45 (paralleled) | RS-485 expansion: A, B, GND, +12 V pass-through — daisy-chain boards tank-to-tank with ordinary Ethernet cable |
-| 1 | 2.1 mm barrel jack + 2-pos screw terminal alt | 12 V DC in, reverse-polarity MOSFET |
-| 2 | USB-C | S3 flashing/logs; C3 flashing/logs |
-| 1 | 4-pos screw terminal | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
+| 1 | RJ45 | RS-485 expansion: A, B, GND, +12 V pass-through — daisy-chain with an RJ45 T/splitter in the cable, not a second jack |
+| 1 | 2.1 mm barrel jack + 2-pos 3.5 mm terminal alt | 12 V DC in, reverse-polarity MOSFET |
+| 1 | USB-C + S3/C3 slide switch | Shared flashing/log port (switch routes D+/D− to either module) |
+| 1 | 4-pos 2.54 mm push-in | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
 | 10 | 0603 LEDs + Bivar PLP2 light pipes, one edge row, 5 mm pitch | Status panel (§4c) |
 | 1 | Keystone 1042 18650 holder (board-mount) | LiFePO₄ backup cell (§4b) |
 
@@ -228,7 +237,8 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 
 ## 7. What to type into flux.ai (step-by-step)
 
-1. **New project** → "tank-monitor-carrier", 4-layer, 90 × 90 mm outline.
+1. **New project** → "tank-monitor-carrier", 4-layer, 60 × 60 mm outline
+   (trim to ~55 × 60 mm once placement settles).
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
    `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `TPS54331DR`
    (+ its inductor/diode/caps — accept flux's suggested reference design),
