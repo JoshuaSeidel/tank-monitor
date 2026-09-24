@@ -49,7 +49,11 @@ exactly the coexistence limit that forced the two-board setup today.
 | U6 | **ADuM1250 / ISO1541** I²C isolator + **B0303S-1WR3** isolated DC-DC | Galvanically isolates the pH section (see §4). |
 | U7 | **THVD1450** RS-485 transceiver | Expansion/multi-tank bus. |
 | U8 | Buck: **TPS54331** or module **K7805-1000R3** (12 V→5 V, 1 A) | Main rail. |
-| U9 | LDO: **AMS1117-3.3** or better **AP2112K-3.3** ×2 | One per ESP32 (keeps C3 alive through S3 brownouts). |
+| U9 | LDO: **AP2112K-3.3** ×2 | One per ESP32 (keeps C3 alive through S3 brownouts). Fed from the battery-backed rail (§4b). |
+| U10 | **BQ25171-Q1** LiFePO₄ charger + power-path, 3.65 V | Battery backup charge/switchover (§4b). |
+| U11 | **TPS63020** buck-boost 3V3 | Battery-backed system rail (§4b). |
+| U12 | **74HC595** shift register | Sensor-status LEDs (§4c). |
+| BT1 | 18650 LiFePO₄ cell + Keystone 1042 holder + NTC | 8–12 h backup runtime. |
 | K1–K4 | **G3MB-202P** solid-state relays (or HF115F 10 A mechanical for heaters — see note) | Heater A, Heater B, Fan, Spare. Driven via NPN/MOSFET + opto already inside the SSR. |
 
 **Heater relay note:** the two 300 W heaters draw ~2.5 A each at 120 VAC. G3MB-202P
@@ -69,7 +73,10 @@ ESP32-S3 (U1):
 - GPIO8 → Fan relay drive
 - GPIO9 → Spare relay drive
 - GPIO17/18 → UART2 TX/RX ↔ C3 UART RX/TX (the S3↔C3 link)
-- GPIO2, GPIO4 → broken out to a spare screw terminal pair (ADC1-capable)
+- GPIO4 → battery voltage divider (ADC1); GPIO2 → charger PGOOD/AC-present (§4b)
+- GPIO38/39/40 → 74HC595 (data/clock/latch) for status LEDs 6–10 (§4c)
+- GPIO41, GPIO42 → spare screw terminal pair (float switch / leak sensor)
+- GPIO47, GPIO48 → WIFI and ESPNOW status LEDs (direct drive)
 - GPIO3 left unconnected (S3 strapping pin — firmware already treats it as forbidden)
 - GPIO0 + EN → push buttons (BOOT/RESET) and to the USB-C/UART auto-program circuit
 - RS-485: GPIO15 (TX), GPIO16 (RX), GPIO14 (DE/RE tied)
@@ -108,6 +115,86 @@ place them at opposite corners of the board.
    probe from latching the GPIO.)
 5. **RS-485:** TVS array (SM712) + 120 Ω termination behind a DIP switch.
 
+## 4b. Battery backup (onboard, power-path)
+
+Goal: sensors, both radios, and alerting survive a wall-power outage; heaters
+and fan do **not** run from battery (they're mains-side anyway — the relay
+contacts just open when mains dies, which is the safe state).
+
+- **Chemistry: LiFePO₄ 18650 (3.2 V nominal), single cell, in a THM-style
+  PCB holder.** Chosen over Li-ion deliberately: this lives in a warm, humid
+  cabinet next to an aquarium 24/7 at float charge — LiFePO₄ tolerates
+  continuous float, doesn't balloon, and its 2000+ cycle life means you never
+  think about it. One cell runs both ESP32s + sensors (~150 mA average with
+  Wi-Fi) for **8–12 h**.
+- **Charger/power-path: TI BQ25798 or simpler BQ25171-Q1 (LiFePO₄-aware,
+  set to 3.65 V charge voltage)** fed from the 5 V buck. True power-path:
+  the load is carried by the input while mains is present, battery is only
+  a standby — seamless switchover, no reboot, no brownout on the C3.
+- Battery rail → its own **TPS63020 buck-boost → 3V3** so the system rides
+  the cell from 3.65 V down to 2.5 V cutoff. The two AP2112K LDOs in §2
+  hang off this rail instead of directly off the 5 V buck.
+- **Fuel/status sensing to firmware:** battery voltage via 1 % divider into
+  S3 ADC (GPIO4 — it was spare), plus a `PGOOD`/`AC-present` digital signal
+  from the charger into GPIO2. ESPHome exposes "on battery" + voltage %, HA
+  alerts on mains loss — this is the actual payoff: **the tank texts you when
+  the power goes out**, even though the router/HA may be down (queue the
+  alert; also blink the PWR LED pattern, §4c).
+- Protection: cell holder → 2 A polyfuse → charger; reverse-cell MOSFET;
+  NTC pad on the holder wired to the charger's TS pin (charge inhibit
+  outside 0–45 °C).
+- Load shedding in firmware, not hardware: on battery, drop ESP-NOW
+  broadcast rate and display links; keep 1-Wire/I²C sampling and MQTT.
+
+## 4c. Status LEDs — case front panel
+
+All LEDs on **one edge of the board in a single row on 5 mm pitch**, so a
+straight strip of press-fit **light pipes (Bivar PLP2-500 series)** carries
+them through the case wall. Rear-mount 0603 LEDs + light pipes beat
+panel-mount wired LEDs: zero wiring, and the case drawing is just a row of
+3 mm holes.
+
+| # | Label | Color | Driven by | Meaning |
+|---|---|---|---|---|
+| 1 | PWR | Green | Hardware (3V3 rail) | Board powered |
+| 2 | BATT | Amber | Charger STAT pin | Solid = charging, off = charged; firmware blinks it on mains-loss via a shared GPIO-OR |
+| 3 | WIFI | Blue | S3 GPIO | Solid = connected, slow blink = connecting |
+| 4 | ESPNOW | Blue | S3 GPIO | Blip on each broadcast — the "heartbeat" you can see across the room |
+| 5 | BLE | Blue | C3 GPIO | Solid = Chihiros/pod connected, blink = scanning |
+| 6 | TEMP-A | Green/Red bicolor | S3 GPIO ×2 | Green = probe reading sane; red = bus fault / value guard tripped |
+| 7 | TEMP-B | Green/Red bicolor | S3 GPIO ×2 | Same, cross-check probe |
+| 8 | CHEM | Green/Red bicolor | S3 GPIO ×2 | ADS1115/pH/TDS: green = I²C alive + values in band, red = missing device or wild reading |
+| 9 | RS485 | Yellow | Transceiver activity (RX line via transistor) | Expansion bus traffic |
+| 10 | FAULT | Red | S3 GPIO | Any alarm state (mirrors the existing on-device guards: dry TDS chamber, 1-Wire held low, heater disagreement) |
+
+GPIO budget is tight on the S3 with bicolors — put LEDs 6–10 behind a
+**74HC595 shift register** (3 GPIOs: GPIO15 is freed by moving RS-485 DE to
+the '595 too, or just use GPIO38/39/40 which the WROOM module exposes and
+the XIAO never had). LEDs 3–4 stay on direct GPIOs for zero-latency blips.
+All firmware-driven: one ESPHome `status_led`-style interval block per LED,
+fed from the exact template sensors that already exist (probe fault flags,
+Wi-Fi/ESP-NOW state).
+
+Silkscreen the labels on the board edge AND provide a printable front-panel
+label strip in `case/`.
+
+## 4d. Case mounting
+
+- **M3 mounting holes at 4 corners**, 3.2 mm plated, 6 mm annular keep-out,
+  positioned on a 5 mm grid so the case (FDM-printable, files to live in
+  `case/carrier-v1/`) is trivial to model.
+- All connectors on **two opposite edges only**: low-voltage screw
+  terminals + Qwiic + BNC + RJ45 + USB on the "wet side" edge; mains relay
+  terminals + 12 V input alone on the other edge, so mains and probe wiring
+  never cross inside the case.
+- LEDs + light pipes on a third (front) edge, DIP switch and BOOT/RESET
+  buttons reachable through case cutouts.
+- Component height limit 12 mm everywhere except the relay/battery zone
+  (18650 holder ≈ 21 mm) — put the battery holder and HF115F relays in one
+  "tall" corner so the case lid steps over a single region.
+- Conformal-coat keep-out silkscreen around connectors; the case gets a
+  drip loop note: probe cables must enter from below.
+
 ## 5. Connectors
 
 | Qty | Connector | Signal |
@@ -121,7 +208,9 @@ place them at opposite corners of the board.
 | 2 | RJ45 (paralleled) | RS-485 expansion: A, B, GND, +12 V pass-through — daisy-chain boards tank-to-tank with ordinary Ethernet cable |
 | 1 | 2.1 mm barrel jack + 2-pos screw terminal alt | 12 V DC in, reverse-polarity MOSFET |
 | 2 | USB-C | S3 flashing/logs; C3 flashing/logs |
-| 1 | 4-pos screw terminal | Spare GPIO2/GPIO4 + 3V3 + GND (float switches, leak sensor, etc.) |
+| 1 | 4-pos screw terminal | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
+| 10 | 0603 LEDs + Bivar PLP2 light pipes, one edge row, 5 mm pitch | Status panel (§4c) |
+| 1 | Keystone 1042 18650 holder (board-mount) | LiFePO₄ backup cell (§4b) |
 
 Every terminal gets silkscreen labels **with the signal name and the firmware
 GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
@@ -144,13 +233,15 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
    `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `TPS54331DR`
    (+ its inductor/diode/caps — accept flux's suggested reference design),
    `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×2, `G3MC-202P` ×2,
-   `HF115F/012-1ZS3` ×2, `PC817` ×2, screw terminals and Qwiic (`PRT-14417`)
-   as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
+   `HF115F/012-1ZS3` ×2, `PC817` ×2, `BQ25171-Q1`, `TPS63020DSJR`,
+   `74HC595` (`SN74HC595DR`), Keystone `1042` holder, screw terminals and
+   Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
 3. Use flux's **AI auto-connect prompts** per functional block, in this order,
-   verifying each block's nets before the next: power tree → S3 core
+   verifying each block's nets before the next: power tree (buck → charger
+   power-path → buck-boost → LDOs) → S3 core
    (strapping resistors, 10 kΩ EN pull-up + 1 µF, boot/reset buttons, USB) →
    C3 core → UART cross-link → I²C bus + pull-ups (2× 4.7 kΩ) → ADS1115s →
-   pH AFE → relay drivers → RS-485 → terminals.
+   pH AFE → relay drivers → RS-485 → 74HC595 + LED row → terminals.
 4. **Design rules:** set net classes — `MAINS` (clearance 6.4 mm),
    `PH_ISO` (own ground `AGND_ISO`, stitched nowhere), `RF` (antenna keep-out).
 5. **Placement:** radios at top corners (antennas overhanging), power entry
