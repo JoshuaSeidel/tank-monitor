@@ -644,7 +644,7 @@ not a run.
 | `ADDR` | GND rail — **explicitly**, not floating. 0x48 |
 | `ALRT` | unconnected |
 | `A0` | TDS board signal (step 4) |
-| `A1` | pH board signal (step 4) |
+| `A1` | unconnected — was pH; the channel failed 2026-09-24, leave it unused |
 | `A2` | leak sensor (step 7b) |
 | `A3` | unconnected |
 
@@ -653,25 +653,25 @@ The BH1750s' `SDA`/`SCL` (step 5) need the same two lines. Land them on the
 one bus, so the breakout's header is electrically the same point as `D6`/
 `D7`, and it means the XIAO's pads are soldered once and never reopened.
 
-## 4. pH and TDS into the ADS1115
+## 4. TDS into the ADS1115 (pH is on the light pod)
 
-Both Gravity boards run from the **3V3 rail**. The TDS board (SEN0244)
-outputs 0–2.3 V; the pH board (SEN0169-V2) outputs 0–3.0 V. Both sit under
-the ADS1115's 3.6 V ceiling. Confirm you have the V2 before this step.
+The TDS board (SEN0244) runs from the **3V3 rail** and outputs 0–2.3 V,
+under the ADS1115's 3.6 V ceiling.
 
 | Board | Wire | Goes to |
 |---|---|---|
 | TDS | red / `+` | 3V3 rail |
 | TDS | black / `−` | GND rail |
 | TDS | `A` | ADS1115 `A0` |
-| pH | red | 3V3 rail |
-| pH | black | GND rail |
-| pH | blue (analog out) | ADS1115 `A1` |
 
-**Route both signal wires away from the relay module's mains cord**, and
-from each other's power leads where you can. The pH signal in particular is
-the one that will pick up 60 Hz hum and give you a wandering reading that
-is not a probe fault.
+**Route the signal wire away from the relay module's mains cord.**
+
+**The pH board is not wired here any more.** It moved to the light pod on
+2026-09-24 after its channel on this board failed (A1 drifted to the rail
+mid-run; on A3 it read an impossible 0.51 V, so the fault was upstream of
+the ADS1115). The pod reads it on its own ADC and sends the voltage to this
+controller over BLE, where `packages/ph.yaml` does the maths exactly as
+before. See the light pod section for its wiring.
 
 ## 5. The two BH1750s and their addresses
 
@@ -909,7 +909,8 @@ gradient reading on this tank is downstream of that number, and the
 `Probe Disagreement` alarm fires off it.
 
 **Recalibrate pH and TDS.** The stored calibration in NVS is in volts read by
-a *different* ADC, and it survives a flash. The C6 → S3 swap moved TDS by
+a *different* ADC, and it survives a flash. (pH is now read by the light
+pod's ADC, so moving it counts as a converter change too.) The C6 → S3 swap moved TDS by
 ~30 % for exactly this reason. Both calibration procedures are in the
 README; do them before believing any chemistry number this board reports.
 
@@ -919,7 +920,7 @@ actually mounted things, and label the outside of the tank to match.
 
 # Light pod (`tank-monitor-light-pod`)
 
-Two sensors, no actuators. Runs on a **SparkFun Qwiic Pocket ESP32-C6**
+Two light sensors and the pH board, no actuators. Runs on a **SparkFun Qwiic Pocket ESP32-C6**
 (`boards/sparkfun-esp32c6-pocket-light-pod.yaml`), deployed by
 `tank-monitor-light-pod-remote.yaml`. The original **Seeed XIAO ESP32-S3**
 build (`boards/xiao-esp32s3-light-pod.yaml`) still works; both board files
@@ -960,6 +961,10 @@ the controller reconstructs it as `100 − blue − red`. Blue and red are the e
 of the spectrum and the channels actually being tuned; green is the inferable
 one.
 
+pH travels in a second frame on the same characteristic, `P,<volts × 10000>`
+(e.g. `P,14803` = 1.4803 V), sent after `L` in the same connection. It is
+separate because `L` already fills a 20-byte write.
+
 `-1` in a spectral field means the AS7341 had nothing yet — it updates slower
 than the BH1750, and lux must not wait on it.
 
@@ -985,6 +990,39 @@ cable with female jumper sockets on one end connects it to its pins.
 **Keep the board out of the sensors' view.** Its red PWR LED is always on and
 sits in exactly the red bands `Red Share` is computed from. Put the board
 behind or below the breakouts, not next to them facing the fixture.
+
+### pH board on the pod
+
+The DFRobot Gravity pH board (SEN0169-V2) moved here from the controller.
+It needs three of the header holes along one edge; solder a straight header
+strip there once and the Gravity cable plugs straight on.
+
+| Gravity pH cable | Pocket ESP32-C6 hole | XIAO ESP32-S3 pad |
+|---|---|---|
+| red (+) | `3.3V` | `3V3` |
+| black (−) | `GND` | `GND` |
+| blue (analog out) | `2` (GPIO2) | `D3` (GPIO4) |
+
+**3.3 V, not 5 V** — the V2 board runs on 3.3 V and its output then stays
+inside the ADC's range. **GPIO2, not 4 or 5**: those are strapping pins on
+the C6, and the pH board idles near 1.5 V.
+
+The pod does **not** compute pH. It sends the board's voltage to the
+controller every minute (`P,<volts × 10000>` on the same BLE characteristic
+as lux), and the controller's `packages/ph.yaml` applies the calibration and
+temperature compensation and publishes `Water pH` as it always has. The pod
+also publishes its own `pH Board Voltage` diagnostic: if that moves while
+`Water pH` is blank, the link is down; if both are flat, it is the probe.
+
+**Recalibrate after the move** with the controller's `Capture High Point` /
+`Capture Low Point` buttons (procedure in `packages/ph.yaml`). The stored
+calibration was measured through the controller's ADS1115; the pod's ADC
+reads the same board differently. The pod pushes once a minute, so leave
+the probe in each buffer at least two minutes before pressing capture.
+
+Give the pod its **own USB charger**, not a second port on the controller's.
+Separate supplies are what take the electrode off the ground it used to
+share with the TDS probe and the heater relays.
 
 ## Pin map (XIAO ESP32-S3 build)
 

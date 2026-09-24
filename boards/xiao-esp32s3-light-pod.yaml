@@ -16,9 +16,10 @@
 #   signal              SILKSCREEN   GPIO
 #   I2C SDA             D6           43
 #   I2C SCL             D7           44
+#   pH board signal     D3           4      ADC1; same pad as the 12 gal's pH
 #
 # Same two pads as both controllers use for I2C, deliberately -- one wiring
-# habit across every XIAO in this project. Nothing else is connected.
+# habit across every XIAO in this project.
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin.
 #
 
@@ -26,6 +27,8 @@ substitutions:
   # ---- I2C pads. Swap these two if SDA/SCL went on the wrong way ----
   i2c_sda: "43"     # D6
   i2c_scl: "44"     # D7
+  # pH board signal. D3, NOT D2: D2 is GPIO3, an S3 strapping pin.
+  ph_adc_pin: GPIO4 # D3
 
 esp32:
   board: seeed_xiao_esp32s3

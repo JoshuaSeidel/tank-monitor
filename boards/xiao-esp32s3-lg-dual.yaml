@@ -32,17 +32,18 @@
 #   Fan control               D9           8
 #   Leak sensor (floor)       ADS1115 A2   -- no XIAO pad; see below
 #   TDS probe                 ADS1115 A0
-#   pH probe                  ADS1115 A3   -- A1 died 2026-09-24; see below
+#   pH probe                  NOT HERE -- on the light pod since 2026-09-24
 #
 # Spare: D1 (GPIO2), D3 (GPIO4), D10 (GPIO9) -- all ADC1, all free because
-# pH and TDS now live on the ADS1115. D2 = GPIO3 stays EMPTY: it is an S3
+# TDS lives on the ADS1115 and pH on the light pod. ADS1115 A1 and A3 are
+# free too; A1 is suspect (see ph_voltage below) and should stay unused. D2 = GPIO3 stays EMPTY: it is an S3
 # strapping pin and nothing may hold it at a level during boot.
 #
 # WHAT THIS FILE OWES THE SHARED PACKAGES -- the board contract:
 #   one_wire bus                 -> dallas_temp in packages/sensors.yaml
 #   i2c bus                      -> BH1750 + ADS1115
 #   sensor id: tds_voltage       -> packages/sensors.yaml
-#   sensor id: ph_voltage        -> packages/ph.yaml
+#   sensor id: ph_voltage        -> packages/ph.yaml (fed by the light pod)
 #   output id: heater_output     -> packages/control.yaml
 #   output id: fan_output        -> packages/control.yaml
 
@@ -215,7 +216,8 @@ tank_controller:
   max_temperature: 88.0
 
 # ---------------------------------------------------------------
-# ADS1115 -- pH and TDS off the internal ADC
+# ADS1115 -- TDS and the leak sensor off the internal ADC (pH was here
+# until it moved to the light pod; see ph_voltage below)
 # ---------------------------------------------------------------
 # 0x48 = ADDR tied to GND. No clash with the BH1750s at 0x23 and 0x5C.
 #
@@ -271,34 +273,36 @@ sensor:
           send_every: 20
           send_first_at: 20
 
-  # pH electrode buffer output -> packages/ph.yaml.
+  # pH electrode voltage -> packages/ph.yaml. It no longer comes from THIS
+  # board: the Gravity pH board moved to the light pod on 2026-09-24, which
+  # reads it on its own ADC and sends the volts here over BLE (the "P,"
+  # frame in packages/ble_link_v3.yaml). ph.yaml does not know or care --
+  # its calibration, capture buttons, temperature compensation and the
+  # "Water pH" entity are exactly as they were. Recalibrate after the move:
+  # the volts now come through a different converter.
   #
-  # A3, NOT A1. On 2026-09-24 the pH channel died mid-run: 13.5 hours into
-  # an uninterrupted session, with nobody near the tank, A1 stopped being
-  # driven and drifted to the rail -- -0.32 V, then 0.78, 2.46, 2.91, 2.99
-  # over about forty seconds. That slow charge toward VDD is a floating ADC
-  # input, not an amplifier output, which snaps. A0 and A2 kept reading
-  # correctly throughout on the same chip, same bus, same config, and the
-  # board never rebooted, so neither the ADS1115 nor this file was the
-  # cause. That leaves the A1 pin itself: absolute max input here is
-  # VDD+0.3V ~= 3.6 V and the Gravity pH board swings to ~3 V, so the
-  # headroom an ESD hit or a relay transient has to eat through is 600 mV.
+  # Why it left. The pH channel died mid-run on A1: 13.5 hours into an
+  # uninterrupted session A1 stopped being driven and drifted to the rail
+  # (-0.32 V, then 0.78, 2.46, 2.91, 2.99 over about forty seconds), while
+  # A0 and A2 kept reading on the same chip. Moved to A3, it read an
+  # impossible 0.51 V (pH 12.7) there too -- so the fault was upstream, in
+  # the wiring or the Gravity board, not the ADS1115. Rather than open the
+  # enclosure and chase a dozen wires, the probe moved to a board with its
+  # own supply, which also takes the electrode off the ground it shared
+  # with the TDS probe and the heater relays.
   #
-  # A3 was the only unused channel. If pH reads correctly here, A1 is dead
-  # and stays unused; if it drifts to the rail on A3 too, the fault is
-  # upstream in the signal wire or the Gravity board and the ADS1115 is
-  # cleared. Either answer is worth one line.
-  - platform: ads1115
-    multiplexer: 'A3_GND'
-    gain: 4.096
+  # Believed only while FRESH, like lux: the pod pushes every 60 s, and
+  # three missed pushes blank it. ph.yaml turns NaN into "unknown" rather
+  # than holding the last value, so a dead pod shows as a blank pH, never
+  # a frozen one.
+  - platform: template
     id: ph_voltage
-    update_interval: 1s
     internal: true
-    filters:
-      - median:
-          window_size: 10
-          send_every: 5
-          send_first_at: 5
+    update_interval: 10s
+    lambda: |-
+      if (id(rx_ph_ms) == 0) return NAN;                      // nothing ever heard
+      if (millis() - id(rx_ph_ms) > 180000) return NAN;       // 3 missed pushes
+      return id(rx_ph_v);
 
   # Floor leak sensor under the stand -- a Level Sense LS-2600. Not a bare
   # pair of tabs: there is a transistor behind them, and the datasheet
