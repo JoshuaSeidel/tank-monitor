@@ -236,6 +236,7 @@ text_sensor:
       static const char *spec = "${i2c_expect}";
       std::string out;
       bool all_ok = true;
+      bool stuck = false;
       const char *p = spec;
       while (*p) {
         while (*p == ' ' || *p == ',') p++;
@@ -247,20 +248,34 @@ text_sensor:
         std::string what;
         while (*p && *p != ',') what += *p++;
         while (!what.empty() && what.back() == ' ') what.pop_back();
+        App.feed_wdt();
         const auto err = id(bus_a).write_readv(addr, nullptr, 0, nullptr, 0);
         if (!out.empty()) out += ", ";
         out += what;
         switch (err) {
           case i2c::ERROR_OK:               out += " ok"; break;
           case i2c::ERROR_NOT_ACKNOWLEDGED: out += " no ack"; all_ok = false; break;
-          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; all_ok = false; break;
+          case i2c::ERROR_TIMEOUT:          out += " TIMEOUT"; all_ok = false; stuck = true; break;
           default:                          out += " error"; all_ok = false; break;
         }
+      }
+      // A TIMEOUT is not a missing device, it is a HUNG BUS: something is
+      // holding SDA or SCL. Every further transaction waits out the same
+      // ~100 ms timeout, so a full sweep would block the loop for >10 s and
+      // the task watchdog reboots the board -- a boot loop that takes the
+      // device off the network. Report it and stop.
+      if (stuck) {
+        out += "; BUS STUCK: a device or wire is holding SDA/SCL -- sweep skipped";
+        if (!id(i2c_autopsy).empty()) out += "; at boot: " + id(i2c_autopsy);
+        return out;
       }
       if (!all_ok) {
         std::string found;
         for (uint8_t a = 0x08; a < 0x78; a++) {
-          if (id(bus_a).write_readv(a, nullptr, 0, nullptr, 0) != i2c::ERROR_OK) continue;
+          App.feed_wdt();
+          const auto e = id(bus_a).write_readv(a, nullptr, 0, nullptr, 0);
+          if (e == i2c::ERROR_TIMEOUT) { found += found.empty() ? "(bus hung mid-sweep)" : " (bus hung mid-sweep)"; break; }
+          if (e != i2c::ERROR_OK) continue;
           char b[8];
           snprintf(b, sizeof(b), "%s0x%02X", found.empty() ? "" : " ", a);
           found += b;
