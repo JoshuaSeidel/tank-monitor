@@ -19,7 +19,7 @@ isolation section much easier to route cleanly.
 
 ```
                     ┌────────────────────────────────────────────┐
- 12 V DC barrel ──► │ Buck 12V→5V ──► LDO 5V→3V3 (digital)       │
+  USB-C 5V/3A ────► │ power-path/charger ──► 3V3 (digital)       │
                     │                └► isolated 3V3 (analog pH) │
                     │                                            │
                     │  ESP32-S3-WROOM-1-N16R8  ◄─UART2─►  ESP32-C3-MINI-1 │
@@ -30,7 +30,7 @@ isolation section much easier to route cleanly.
                     │        ├── qwiic ×2 (BH1750 / AS7341 pods)          │
                     │   1-Wire ×2 (DS18B20 screw terminals)               │
                     │   Relay/SSR ×4 (heater A, heater B, fan, spare)     │
-                    │   RS-485 expansion bus (2× RJ45, daisy-chain)       │
+                    │   RS-485 expansion bus (RJ45, daisy-chain)          │
                     └────────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ exactly the coexistence limit that forced the two-board setup today.
 | U5 | pH AFE: **TLC2262 or LMP7721** ultra-high-input-impedance op-amp unity buffer + bias network | pH glass electrodes are ~10⁹ Ω sources; never feed an ADS1115 directly. |
 | U6 | **ADuM1250 / ISO1541** I²C isolator + **B0303S-1WR3** isolated DC-DC | Galvanically isolates the pH section (see §4). |
 | U7 | **THVD1450** RS-485 transceiver | Expansion/multi-tank bus. |
-| U8 | Buck: **TPS54331** or module **K7805-1000R3** (12 V→5 V, 1 A) | Main rail. |
+| U8 | USB-C power input: 5.1 kΩ CC pull-downs (advertises 5 V/3 A), polyfuse, TVS | No buck converter — the whole board runs from USB-C 5 V (~1 A worst case). |
 | U9 | LDO: **AP2112K-3.3** ×2 | One per ESP32 (keeps C3 alive through S3 brownouts). Fed from the battery-backed rail (§4b). |
 | U10 | **BQ25171-Q1** LiFePO₄ charger + power-path, 3.65 V | Battery backup charge/switchover (§4b). |
 | U11 | **TPS63020** buck-boost 3V3 | Battery-backed system rail (§4b). |
@@ -61,7 +61,7 @@ exactly the coexistence limit that forced the two-board setup today.
 
 **Heater relay note:** the two 300 W heaters draw ~2.5 A each at 120 VAC. G3MB-202P
 is rated 2 A — use **G3MC-202P (2 A)** only for the fan/spare and put **10 A
-HF115F mechanical relays** (or panel-mount SSRs off-board) on the two heater
+HF115F/005 mechanical relays (5 V coil — the board has no 12 V rail)** (or panel-mount SSRs off-board) on the two heater
 channels, with proper creepage (§4). Firmware uses `slow_pwm` with 20–60 s
 periods, so mechanical relay wear is acceptable and zero-cross isn't needed.
 
@@ -85,7 +85,7 @@ ESP32-S3 (U1):
 - RS-485: GPIO15 (TX), GPIO16 (RX), GPIO14 (DE/RE tied)
 
 ESP32-C3 (U2):
-- GPIO20/21 → UART0 (native USB-serial-JTAG also broken out to its own USB-C for flashing)
+- GPIO18/19 → native USB-serial-JTAG, to the shared USB-C via the S3/C3 slide switch (flashing/logs)
 - GPIO6/7 → UART1 ↔ S3
 - GPIO8 → status LED
 - BOOT/RESET buttons
@@ -188,7 +188,7 @@ label strip in `case/`.
   `case/carrier-v1/`) is trivial to model.
 - All connectors on **two opposite edges only**: low-voltage screw
   terminals + Qwiic + BNC + RJ45 + USB on the "wet side" edge; mains relay
-  terminals + 12 V input alone on the other edge, so mains and probe wiring
+  terminals alone on the other edge, so mains and probe wiring
   never cross inside the case.
 - LEDs + light pipes on a third (front) edge, DIP switch and BOOT/RESET
   buttons reachable through case cutouts.
@@ -203,8 +203,7 @@ label strip in `case/`.
 Signal-level field wiring (22–28 AWG probe leads) uses **2.54 mm-pitch
 push-in spring terminals (Phoenix PTSM 0,5 series or Wago 2060)** — tool-free,
 and thin probe wire holds better in spring clamps than in screw barrels.
-Only mains (5.08 mm — that pitch is the creepage), the 12 V input (3.5 mm),
-and the BNC stay large.
+Only mains (5.08 mm — that pitch is the creepage) and the BNC stay large.
 
 | Qty | Connector | Signal |
 |---|---|---|
@@ -214,9 +213,8 @@ and the BNC stay large.
 | 1 | 2-pos 2.54 mm push-in | TDS probe |
 | 2 | JST-SH 4-pin **Qwiic** | I²C pods: BH1750 (0x23/0x5C), AS7341 — buy Adafruit/SparkFun breakouts, no soldering |
 | 4 | 2-pos 5.08 mm screw terminal (rated 10 A / 300 V) | Relay outputs (dry contacts / SSR outputs) |
-| 1 | RJ45 | RS-485 expansion: A, B, GND, +12 V pass-through — daisy-chain with an RJ45 T/splitter in the cable, not a second jack |
-| 1 | 2.1 mm barrel jack + 2-pos 3.5 mm terminal alt | 12 V DC in, reverse-polarity MOSFET |
-| 1 | USB-C + S3/C3 slide switch | Shared flashing/log port (switch routes D+/D− to either module) |
+| 1 | RJ45 | RS-485 expansion: A, B, GND, +5 V pass-through (short runs, ≤ 3 m; remote pods farther away get their own USB supply) |
+| 1 | USB-C (power + flash) + S3/C3 slide switch | Sole power input (5 V/3 A CC advertise) and shared flashing/log port; slide switch routes D+/D− to either module. VBUS → polyfuse → charger power-path, so flashing and powering are the same cable. |
 | 1 | 4-pos 2.54 mm push-in | Spare GPIO41/GPIO42 + 3V3 + GND (float switches, leak sensor, etc.) |
 | 10 | 0603 LEDs + Bivar PLP2 light pipes, one edge row, 5 mm pitch | Status panel (§4c) |
 | 1 | Keystone 1042 18650 holder (board-mount) | LiFePO₄ backup cell (§4b) |
@@ -231,7 +229,7 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
   new firmware).
 - The RS-485 bus is the *optional* tie: extra sensor-only boards (a board
   populated without relays/second ESP32 — make U2, K1–K4 DNP variants in flux)
-  can report to a head unit where Wi-Fi is weak, and +12 V pass-through on the
+  can report to a head unit where Wi-Fi is weak, and +5 V pass-through on the
   RJ45 pairs powers a remote pod up to ~10 m.
 - DIP switch (4-pos) read on boot → node address 0–15, exposed to ESPHome.
 
@@ -240,14 +238,12 @@ GPIO** (e.g. "TEMP-A GPIO6"), and polarity marks.
 1. **New project** → "tank-monitor-carrier", 4-layer, 60 × 60 mm outline
    (trim to ~55 × 60 mm once placement settles).
 2. Search flux's part library and drop in: `ESP32-S3-WROOM-1`, `ESP32-C3-MINI-1`,
-   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `TPS54331DR`
-   (+ its inductor/diode/caps — accept flux's suggested reference design),
-   `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×2, `G3MC-202P` ×2,
-   `HF115F/012-1ZS3` ×2, `PC817` ×2, `BQ25171-Q1`, `TPS63020DSJR`,
+   `ADS1115IDGSR` ×2, `ADuM1250ARZ`, `B0303S-1WR2`, `THVD1450DR`, `AP2112K-3.3TRG1` ×2, `LMP7721MA`, `USB4110-GF-A` ×2, `G3MC-202P` ×2,
+   `HF115F/005-1ZS3` ×2, `PC817` ×2, `BQ25171-Q1`, `TPS63020DSJR`,
    `74HC595` (`SN74HC595DR`), Keystone `1042` holder, screw terminals and
    Qwiic (`PRT-14417`) as above. Where flux lacks a part, import from SnapEDA/Ultra Librarian.
 3. Use flux's **AI auto-connect prompts** per functional block, in this order,
-   verifying each block's nets before the next: power tree (buck → charger
+   verifying each block's nets before the next: power tree (USB-C VBUS → charger
    power-path → buck-boost → LDOs) → S3 core
    (strapping resistors, 10 kΩ EN pull-up + 1 µF, boot/reset buttons, USB) →
    C3 core → UART cross-link → I²C bus + pull-ups (2× 4.7 kΩ) → ADS1115s →
