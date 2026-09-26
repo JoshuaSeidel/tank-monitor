@@ -121,12 +121,26 @@ same reasoning that keeps the CO2 failsafe on absolute times.
 
 ### Off is manual mode, not a zeroed schedule
 
-**An all-zero auto schedule does not darken this fixture.** Pushing
-`0 / 0 / 0 / 0` as an auto schedule leaves the lamp running whatever it was
-already doing — observed 2026-09-23, when switching phase 1 → phase 0 left the
-tank lit. It is *not* a mid-window re-evaluation problem: lit phases take effect
-immediately on push, so the lamp does re-evaluate. The all-zero schedule is
-simply ignored.
+Off switches the lamp to manual mode at 0, which darkens it at once. That
+choice predates the bridge fix below and was kept because it is proven.
+
+**The bridge fix (2026-09-26, chihiros-esphome `ca8fc35`).** Two symptoms
+looked like lamp firmware limits and were not:
+
+- 2026-09-23: an all-zero auto schedule left the tank lit.
+- 2026-09-26: Off → Phase 1 at 09:41, inside a 09:00–14:00 window, stored the
+  schedule but left the tank dark until the next on/off edge.
+
+The bridge's own btsnoop notes record the app's auto sequence as
+`MODE 0x12 → MODE 0x05 → SCHEDULE`, but `prepare()` sent
+`MODE 0x07 → SCHEDULE → MODE 0x12`. `0x07` is a CO2 command; `0x05` — clear
+the stored auto slots — was never sent, so schedules **accumulated** in the
+lamp instead of replacing each other. That is why the zeroed schedule
+"didn't darken" it: the Phase 1 slot was still stored beside it.
+
+With the app's sequence restored, a phase change applies within seconds,
+mid-window included. Confirmed on the lamp 2026-09-26: Off went dark, then
+Phase 1 came back on at once.
 
 So "Off (cycling)" takes the other path in `WRGB2Device::prepare()`:
 
