@@ -7,6 +7,12 @@
 # re-push the schedule every half hour. Everything here runs on the board:
 # Home Assistant only reports it, exactly as it does for the heaters.
 #
+# TUNING NEEDS NO FLASH. The phase table is stored in flash memory, not
+# compiled in: "Light White/Red/Green/Blue/Ramp/On Time/Off Time" edit the
+# selected phase, save it, and push it within a couple of seconds. The
+# numbers in light_seed_defaults are first-boot defaults and what "Reset
+# Light Phase to Defaults" restores -- nothing else.
+#
 # Needs from the including build:
 #   ${light_mac}      the lamp's BLE MAC (the board file sets it)
 #   sensor tank_lux   LAMP-ONLY lux -- daylight already unmixed out by NIR
@@ -202,6 +208,19 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  # THE PHASE TABLE, stored in flash so it is tuned from Home Assistant or the
+  # board's own page and survives reboots and reflashes -- changing a
+  # brightness never needs a build. Five phases x seven fields, in select
+  # order: [on_min, off_min, ramp, W, R, G, B]. Zero until first boot seeds
+  # it from light_seed_defaults, which is the ONLY place default values are
+  # written down.
+  - id: light_table
+    type: std::array<int, 35>
+    restore_value: true
+  - id: light_table_seeded
+    type: bool
+    restore_value: true
+    initial_value: 'false'
 
 # List form: a mapping on_boot in a package can be dropped when packages
 # merge. Late priority, so the select has already restored its option. This
@@ -210,6 +229,14 @@ esphome:
   on_boot:
     - priority: -100
       then:
+        - if:
+            condition:
+              lambda: return !id(light_table_seeded);
+            then:
+              - script.execute:
+                  id: light_seed_defaults
+                  only: -1
+              - script.wait: light_seed_defaults
         - script.execute: light_select_phase
 
 select:
@@ -238,41 +265,86 @@ select:
             id(light_mismatch_min) = 0;
             id(light_fix_attempts) = 0;
             id(light_not_responding) = false;
+        - script.execute: light_refresh_controls
         - script.execute: light_push
 
 script:
-  # THE PHASE TABLE -- the one place a schedule value changes. Times in
+  # DEFAULTS -- the one place default values are written down. Times in
   # minutes since midnight; W is the dimming lever, R/G/B track it at
-  # 0.8 / 0.45 / 0.3. "Off (cycling)" is manual mode at 0: the lamp stays
-  # dark whatever its clock says.
+  # 0.8 / 0.45 / 0.3. Writes every phase (only: -1) on first boot, or just
+  # one phase for "Reset Light Phase to Defaults". After that the stored
+  # table (light_table) is the truth and these numbers are never read.
+  - id: light_seed_defaults
+    parameters:
+      only: int
+    then:
+      - lambda: |-
+          static const int defaults[35] = {
+            540, 840, 30,  0,  0,  0,  0,   // Off (cycling)
+            540, 840, 30, 25, 20, 12,  8,   // Phase 1 - Plants in
+            540, 900, 30, 30, 25, 14,  9,   // Phase 2 - Shrimp
+            540, 900, 45, 35, 28, 16, 10,   // Phase 3 - Fish
+            540, 960, 45, 45, 36, 20, 14,   // Phase 4 - Mature
+          };
+          for (int ph = 0; ph < 5; ph++) {
+            if (only != -1 && ph != only) continue;
+            for (int f = 0; f < 7; f++) id(light_table)[ph * 7 + f] = defaults[ph * 7 + f];
+          }
+          id(light_table_seeded) = true;
+          ESP_LOGI("light", "phase defaults written (%s)", only < 0 ? "all" : "one phase");
+
+  # Resolve the selected phase from the stored table into lp_*. "Off
+  # (cycling)" is manual mode at 0 whatever its stored values say: the lamp
+  # stays dark regardless of its clock.
   - id: light_select_phase
     then:
       - lambda: |-
-          struct Phase { bool lit; int on, off, ramp, w, r, g, b; };
-          static const Phase table[] = {
-            {false, 540, 840, 30,  0,  0,  0,  0},   // Off (cycling)
-            {true,  540, 840, 30, 25, 20, 12,  8},   // Phase 1 - Plants in
-            {true,  540, 900, 30, 30, 25, 14,  9},   // Phase 2 - Shrimp
-            {true,  540, 900, 45, 35, 28, 16, 10},   // Phase 3 - Fish
-            {true,  540, 960, 45, 45, 36, 20, 14},   // Phase 4 - Mature
-          };
           auto idx = id(light_phase).active_index();
-          if (!idx.has_value() || *idx >= sizeof(table) / sizeof(table[0])) {
+          if (!idx.has_value() || *idx >= 5) {
             id(lp_valid) = false;
             ESP_LOGW("light", "no valid phase selected; nothing will be pushed");
             return;
           }
-          const Phase &p = table[*idx];
-          id(lp_auto) = p.lit;
-          id(lp_on_min) = p.on;
-          id(lp_off_min) = p.off;
-          id(lp_ramp) = p.ramp;
-          id(lp_w) = p.w; id(lp_r) = p.r; id(lp_g) = p.g; id(lp_b) = p.b;
+          const int ph = (int) *idx, b = ph * 7;
+          auto &t = id(light_table);
+          auto clampi = [](int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); };
+          id(lp_auto) = ph != 0;
+          id(lp_on_min) = clampi(t[b + 0], 0, 1439);
+          id(lp_off_min) = clampi(t[b + 1], 0, 1439);
+          id(lp_ramp) = clampi(t[b + 2], 0, 150);
+          id(lp_w) = ph ? clampi(t[b + 3], 0, 100) : 0;
+          id(lp_r) = ph ? clampi(t[b + 4], 0, 100) : 0;
+          id(lp_g) = ph ? clampi(t[b + 5], 0, 100) : 0;
+          id(lp_b) = ph ? clampi(t[b + 6], 0, 100) : 0;
           id(lp_valid) = true;
           ESP_LOGI("light", "phase %d: %s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
-                   (int)*idx, p.lit ? "auto" : "manual-off",
-                   p.on / 60, p.on % 60, p.off / 60, p.off % 60,
-                   p.ramp, p.w, p.r, p.g, p.b);
+                   ph, ph ? "auto" : "manual-off",
+                   id(lp_on_min) / 60, id(lp_on_min) % 60,
+                   id(lp_off_min) / 60, id(lp_off_min) % 60,
+                   id(lp_ramp), id(lp_w), id(lp_r), id(lp_g), id(lp_b));
+
+  # The seven controls read the ACTIVE phase's slot; after a phase change
+  # they are told to re-read at once rather than waiting for their poll.
+  - id: light_refresh_controls
+    then:
+      - component.update: light_ctl_white
+      - component.update: light_ctl_red
+      - component.update: light_ctl_green
+      - component.update: light_ctl_blue
+      - component.update: light_ctl_ramp
+      - component.update: light_ctl_on
+      - component.update: light_ctl_off
+
+  # A control was changed. Debounced, so dragging a slider sends one push
+  # when it settles rather than one per step; restart, so the last value
+  # wins.
+  - id: light_changed
+    mode: restart
+    then:
+      - delay: 1500ms
+      - script.execute: light_select_phase
+      - script.execute: light_refresh_controls
+      - script.execute: light_push
 
   # Send the selected phase to the lamp. restart: the newest request wins,
   # so any number of rapid phase changes ends on the last one picked --
@@ -422,6 +494,162 @@ interval:
           ESP_LOGW("light", "re-pushing the phase (attempt %d of 3)", id(light_fix_attempts));
           id(light_push).execute();
 
+# THE CONTROLS -- a window onto the ACTIVE phase's slot in light_table.
+# Change one and that phase is saved (flash, survives reboot and reflash)
+# and pushed to the lamp; pick another phase and they show its values. The
+# repo pattern for stored values: update_interval + lambda + set_action, the
+# global owns the value, the entity is only a view of it. "Off (cycling)" is
+# always manual-off; editing its slot has no effect on the lamp.
+number:
+  - platform: template
+    name: "Light White"
+    id: light_ctl_white
+    icon: mdi:white-balance-sunny
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return (float) id(light_table)[*i * 7 + 3];
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 3] = (int) x;
+          id(light_learned_lux) = 0.0f;   // new brightness: relearn what lit looks like
+      - script.execute: light_changed
+  - platform: template
+    name: "Light Red"
+    id: light_ctl_red
+    icon: mdi:alpha-r-circle
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return (float) id(light_table)[*i * 7 + 4];
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 4] = (int) x;
+          id(light_learned_lux) = 0.0f;   // new brightness: relearn what lit looks like
+      - script.execute: light_changed
+  - platform: template
+    name: "Light Green"
+    id: light_ctl_green
+    icon: mdi:alpha-g-circle
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return (float) id(light_table)[*i * 7 + 5];
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 5] = (int) x;
+          id(light_learned_lux) = 0.0f;   // new brightness: relearn what lit looks like
+      - script.execute: light_changed
+  - platform: template
+    name: "Light Blue"
+    id: light_ctl_blue
+    icon: mdi:alpha-b-circle
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return (float) id(light_table)[*i * 7 + 6];
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 6] = (int) x;
+          id(light_learned_lux) = 0.0f;   // new brightness: relearn what lit looks like
+      - script.execute: light_changed
+  - platform: template
+    name: "Light Ramp"
+    id: light_ctl_ramp
+    icon: mdi:sun-angle
+    unit_of_measurement: "min"
+    min_value: 0
+    max_value: 150
+    step: 5
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return (float) id(light_table)[*i * 7 + 2];
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 2] = (int) x;
+      - script.execute: light_changed
+
+datetime:
+  - platform: template
+    name: "Light On Time"
+    id: light_ctl_on
+    type: time
+    icon: mdi:weather-sunset-up
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      const int v = id(light_table)[*i * 7 + 0];
+      ESPTime t{};
+      t.hour = v / 60;
+      t.minute = v % 60;
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 0] = x.hour * 60 + x.minute;
+      - script.execute: light_changed
+  - platform: template
+    name: "Light Off Time"
+    id: light_ctl_off
+    type: time
+    icon: mdi:weather-sunset-down
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      const int v = id(light_table)[*i * 7 + 1];
+      ESPTime t{};
+      t.hour = v / 60;
+      t.minute = v % 60;
+      t.second = 0;
+      return t;
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i >= 5) return;
+          id(light_table)[*i * 7 + 1] = x.hour * 60 + x.minute;
+      - script.execute: light_changed
+
 button:
   - platform: template
     name: "Release Light for App (30 min)"
@@ -435,6 +663,19 @@ button:
     entity_category: diagnostic
     on_press:
       - script.execute: light_push
+
+  - platform: template
+    name: "Reset Light Phase to Defaults"
+    icon: mdi:restore
+    entity_category: config
+    on_press:
+      - script.execute:
+          id: light_seed_defaults
+          only: !lambda |-
+            auto i = id(light_phase).active_index();
+            return (i.has_value() && *i < 5) ? (int) *i : -2;
+      - lambda: id(light_learned_lux) = 0.0f;
+      - script.execute: light_changed
 
   - platform: template
     name: "Relearn Light Level"
