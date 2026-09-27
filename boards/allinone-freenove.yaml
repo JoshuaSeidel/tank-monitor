@@ -1,7 +1,15 @@
 # ALL-IN-ONE -- Freenove ESP32-S3-WROOM (FNK0085; ESP32-S3-WROOM-1 N8R8,
 # DevKitC-1 pin layout). The whole 75 gal on one board: two heaters, the fan,
-# both temperature probes, TDS, pH, the floor leak sensor, lux and spectral.
-# No light pod, no ADS1115, and every device on its own GPIOs.
+# both temperature probes, TDS, pH, the floor leak sensor, lux and spectral,
+# and the Chihiros light itself over BLE (packages/light_wrgb2.yaml).
+# No light pod, no ADS1115, no separate light bridge, and every device on its
+# own GPIOs.
+#
+# CUTTING OVER FROM THE OLD LIGHT BRIDGE: the lamp takes one BLE connection
+# at a time. Power the aquarium-light-bridge ESP32 OFF before this board
+# comes up, or the two fight for the lamp. Then turn off Home Assistant's
+# "Aquarium 75 - apply light phase" automation -- this board owns the phase
+# now ("Light Phase" select) and HA only reports it.
 #
 # Successor to boards/xiao-esp32s3-lg-dual.yaml + the light pod. Everything
 # the controller did is carried over unchanged -- the tank controller, the
@@ -66,6 +74,7 @@
 #   output id: heater_output     -> packages/control.yaml
 #   output id: fan_output        -> packages/control.yaml
 #   substitution spectral_i2c    -> packages/spectral.yaml
+#   substitution light_mac       -> packages/light_wrgb2.yaml
 #   water_temp_b, temp_gradient, grad_ema_*  -> packages/ble_link_v3.yaml
 
 substitutions:
@@ -77,6 +86,9 @@ substitutions:
   leak_on_v:  "1.2"
   leak_off_v: "0.8"
   spectral_i2c: bus_spec
+  # The 75's lamp -- a WRGB II Pro 120, advertising as DYWPR120. Load-critical,
+  # so it lives here in the versioned board file rather than a wrapper.
+  light_mac: "CF:20:3B:6D:17:C1"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -845,3 +857,8 @@ text_sensor:
 # complete build: a wrapper cannot leave the spectral side out.
 packages:
   spectral: !include ../packages/spectral.yaml
+  # The lamp, held over BLE, with the phase table and lux-based detection on
+  # this chip. Needs tank_lux above (lamp-only lux) and the esp32_ble block
+  # from ble_link_v3.yaml. Included here for the same reason: a wrapper
+  # cannot leave it out.
+  light: !include ../packages/light_wrgb2.yaml

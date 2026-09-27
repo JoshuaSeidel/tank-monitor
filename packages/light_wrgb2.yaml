@@ -1,0 +1,501 @@
+# The tank light, driven from the tank's own board.
+#
+# A Chihiros WRGB II / WRGB II Pro, controlled over BLE from the same chip
+# that runs the heaters, using the protocol helpers in the
+# JoshuaSeidel/chihiros-esphome fork. This replaces the separate
+# aquarium-light-bridge ESP32 AND the Home Assistant automation that used to
+# re-push the schedule every half hour. Everything here runs on the board:
+# Home Assistant only reports it, exactly as it does for the heaters.
+#
+# Needs from the including build:
+#   ${light_mac}      the lamp's BLE MAC (the board file sets it)
+#   sensor tank_lux   LAMP-ONLY lux -- daylight already unmixed out by NIR
+#   global cal_nir_ref  the learned daylight reference (ble_link_v3.yaml)
+#   time sntp_time    packages/base.yaml
+#   esp32_ble         packages/ble_link_v3.yaml (the panel server)
+#
+# ---------------------------------------------------------------------
+# WHY THE LINK IS HELD OPEN
+# ---------------------------------------------------------------------
+# The upstream bridge connects, pushes, and disconnects, and scans
+# continuously so it can reconnect at any moment. On a board that also runs
+# the heaters and serves the panel, a scanner that never stops is radio time
+# taken from Wi-Fi and the panel link for no reason. Here the tracker scans
+# from boot only until the lamp connects, then stops; it scans again only if
+# the link drops. With both links up, the radio does not scan at all.
+#
+# Held open, the link also means the Chihiros app CANNOT connect -- the lamp
+# takes one connection at a time. That is the point: nothing overrides the
+# phase selected here. "Release Light for App" hands the lamp over for 30
+# minutes and then takes it back, re-pushing the selected phase, so whatever
+# was done in the app is undone automatically. A release cannot be left on.
+#
+# ---------------------------------------------------------------------
+# DETECTION -- "the schedule says lit and the lamp is dark"
+# ---------------------------------------------------------------------
+# The lamp cannot report its state, so this looks at it instead. tank_lux is
+# lamp-only light (daylight is removed by its near-infrared signature, see
+# the board file), so it answers "is the fixture actually on" even with the
+# window open. Room LEDs have no NIR either and DO leak into it, which is why
+# the lit level is LEARNED rather than guessed -- a guessed lux threshold was
+# wrong on this project for a year once already:
+#
+#   * During the plateau of a lit phase, while the reading looks lit, the
+#     plateau lux is tracked as an average ("Light Learned Lux").
+#   * Plateau and reading below max(20 lx, a quarter of the learned level)
+#     for 5 minutes = the lamp is dark when it should be lit. Re-push.
+#   * Well outside the photoperiod and reading above HALF the learned level
+#     for 5 minutes = lit when it should be dark (lights left on overnight is
+#     the algae case). Re-push. Disabled until BOTH a lit level and the
+#     daylight reference (cal_nir_ref) have been learned: tank_lux passes
+#     sunlight through as lamp light until then, so a fresh board on a sunny
+#     afternoon would otherwise "detect" a lamp that is actually off.
+#   * No more than one fix per 15 minutes; after 3 fixes that did not take,
+#     stop pushing and raise "Light Not Responding" rather than hammering the
+#     radio. It clears the moment the lamp matches again.
+#
+# Ramps are excluded (5 min margin each side on top of the ramp itself) --
+# mid-ramp the lux is legitimately anywhere. Assumes the photoperiod does
+# not cross midnight; none of the phases do.
+
+substitutions:
+  # The Nordic UART service every Chihiros device speaks. Fixed by the
+  # lamp, not a setting. The panel server in ble_link_v3.yaml advertises the
+  # same service UUID -- no clash: that is the board's own GATT server, this
+  # is a client connection to a different device.
+  light_ble_service: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+  light_ble_tx:      "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+  light_ble_rx:      "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+  # "true" for a WRGB II Pro (independent white channel).
+  light_pro: "true"
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/chihiros-esphome
+      ref: main
+    components: [chihiros_ble]
+    # The default 1d would silently build yesterday's protocol code.
+    refresh: 0s
+
+# Pulls in the protocol headers (frame builder, WRGB2Device). No options.
+chihiros_ble:
+
+# Scans from boot until the lamp is found; the ble_client's on_connect stops
+# it. Same timing the upstream bridge uses; active, because the lamp's name
+# rides in the scan response.
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+    interval: 320ms
+    window: 60ms
+    continuous: true
+
+ble_client:
+  - mac_address: ${light_mac}
+    id: light_ble
+    on_connect:
+      then:
+        - globals.set:
+            id: light_linked
+            value: 'true'
+        - esp32_ble_tracker.stop_scan:
+        - logger.log:
+            level: INFO
+            format: "light: linked, scanning stopped"
+        # Always re-push on (re)connect: whatever happened while the link was
+        # down -- a reboot, a release to the app -- is overwritten here.
+        - delay: 500ms
+        - script.execute: light_push
+    on_disconnect:
+      then:
+        - globals.set:
+            id: light_linked
+            value: 'false'
+        - if:
+            condition:
+              lambda: return !id(light_released);
+            then:
+              - logger.log:
+                  level: WARN
+                  format: "light: link lost, scanning to reconnect"
+              - esp32_ble_tracker.start_scan:
+                  continuous: true
+
+globals:
+  - id: light_device
+    type: chihiros::WRGB2Device
+    restore_value: false
+  - id: light_linked
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: light_released
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # The selected phase, resolved from the table in light_select_phase.
+  # Detection compares the lamp against THIS, not against what was last
+  # successfully pushed.
+  - id: lp_valid
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: lp_auto
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: lp_on_min
+    type: int
+    restore_value: false
+    initial_value: '540'
+  - id: lp_off_min
+    type: int
+    restore_value: false
+    initial_value: '840'
+  - id: lp_ramp
+    type: int
+    restore_value: false
+    initial_value: '30'
+  - id: lp_r
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: lp_g
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: lp_b
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: lp_w
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Learned plateau lux. Persisted: a reboot should not forget what "on"
+  # looks like. Zeroed on a phase change, because the new phase is a
+  # different brightness.
+  - id: light_learned_lux
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: light_mismatch_min
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: light_fix_attempts
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: light_last_fix_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: light_not_responding
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # 0 unknown, 1 off phase, 2 dark (outside the photoperiod), 3 ramping,
+  # 4 lit (plateau). Drives detection and "Light Expected".
+  - id: light_expected
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+# List form: a mapping on_boot in a package can be dropped when packages
+# merge. Late priority, so the select has already restored its option. This
+# only resolves the phase; the push itself happens on connect.
+esphome:
+  on_boot:
+    - priority: -100
+      then:
+        - script.execute: light_select_phase
+
+select:
+  - platform: template
+    name: "Light Phase"
+    id: light_phase
+    icon: mdi:weather-sunny
+    optimistic: true
+    restore_value: true
+    initial_option: "Phase 1 - Plants in"
+    options:
+      - "Off (cycling)"
+      - "Phase 1 - Plants in"
+      - "Phase 2 - Shrimp"
+      - "Phase 3 - Fish"
+      - "Phase 4 - Mature"
+    on_value:
+      then:
+        - script.execute: light_select_phase
+        - lambda: |-
+            // New phase, new brightness: what "lit" looked like before no
+            // longer applies. Detection falls back to the 20 lx floor for
+            // "should be lit" and stays off for "should be dark" until the
+            // next plateau relearns it.
+            id(light_learned_lux) = 0.0f;
+            id(light_mismatch_min) = 0;
+            id(light_fix_attempts) = 0;
+            id(light_not_responding) = false;
+        - script.execute: light_push
+
+script:
+  # THE PHASE TABLE -- the one place a schedule value changes. Times in
+  # minutes since midnight; W is the dimming lever, R/G/B track it at
+  # 0.8 / 0.45 / 0.3. "Off (cycling)" is manual mode at 0: the lamp stays
+  # dark whatever its clock says.
+  - id: light_select_phase
+    then:
+      - lambda: |-
+          struct Phase { bool lit; int on, off, ramp, w, r, g, b; };
+          static const Phase table[] = {
+            {false, 540, 840, 30,  0,  0,  0,  0},   // Off (cycling)
+            {true,  540, 840, 30, 25, 20, 12,  8},   // Phase 1 - Plants in
+            {true,  540, 900, 30, 30, 25, 14,  9},   // Phase 2 - Shrimp
+            {true,  540, 900, 45, 35, 28, 16, 10},   // Phase 3 - Fish
+            {true,  540, 960, 45, 45, 36, 20, 14},   // Phase 4 - Mature
+          };
+          auto idx = id(light_phase).active_index();
+          if (!idx.has_value() || *idx >= sizeof(table) / sizeof(table[0])) {
+            id(lp_valid) = false;
+            ESP_LOGW("light", "no valid phase selected; nothing will be pushed");
+            return;
+          }
+          const Phase &p = table[*idx];
+          id(lp_auto) = p.lit;
+          id(lp_on_min) = p.on;
+          id(lp_off_min) = p.off;
+          id(lp_ramp) = p.ramp;
+          id(lp_w) = p.w; id(lp_r) = p.r; id(lp_g) = p.g; id(lp_b) = p.b;
+          id(lp_valid) = true;
+          ESP_LOGI("light", "phase %d: %s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
+                   (int)*idx, p.lit ? "auto" : "manual-off",
+                   p.on / 60, p.on % 60, p.off / 60, p.off % 60,
+                   p.ramp, p.w, p.r, p.g, p.b);
+
+  # Send the selected phase to the lamp. restart: the newest request wins,
+  # so any number of rapid phase changes ends on the last one picked --
+  # prepare() clears whatever was still queued from the interrupted run.
+  - id: light_push
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: return !id(lp_valid);
+          then:
+            - script.execute: light_select_phase
+      - if:
+          condition:
+            lambda: return id(light_linked) && id(lp_valid);
+          then:
+            - lambda: |-
+                const bool pro = ${light_pro};
+                id(light_device).prepare(
+                  id(sntp_time).now(), id(lp_auto),
+                  id(lp_on_min) / 60, id(lp_on_min) % 60,
+                  id(lp_off_min) / 60, id(lp_off_min) % 60,
+                  (uint8_t) id(lp_ramp),
+                  (uint8_t) id(lp_r), (uint8_t) id(lp_g), (uint8_t) id(lp_b),
+                  pro ? (uint8_t) id(lp_w) : chihiros::data::SKIP);
+            - while:
+                condition:
+                  lambda: return id(light_linked) && id(light_device).has_next();
+                then:
+                  - ble_client.ble_write:
+                      id: light_ble
+                      service_uuid: ${light_ble_service}
+                      characteristic_uuid: ${light_ble_tx}
+                      value: !lambda return id(light_device).next();
+                  - delay: 200ms
+            - logger.log:
+                level: INFO
+                format: "light: phase pushed"
+          else:
+            - logger.log:
+                level: INFO
+                format: "light: not linked; the phase goes out on connect"
+
+  # Hand the lamp to the Chihiros app for 30 minutes, then take it back.
+  # restart: pressing again extends the window rather than stacking.
+  - id: light_release
+    mode: restart
+    then:
+      - globals.set:
+          id: light_released
+          value: 'true'
+      - esp32_ble_tracker.stop_scan:
+      - switch.turn_off: light_link
+      - logger.log:
+          level: INFO
+          format: "light: released to the app for 30 min"
+      - delay: 30min
+      - globals.set:
+          id: light_released
+          value: 'false'
+      - switch.turn_on: light_link
+      - esp32_ble_tracker.start_scan:
+          continuous: true
+      - logger.log:
+          level: INFO
+          format: "light: taken back; the phase is re-pushed on connect"
+
+switch:
+  # Enables/disables the client. On = hold the link. Only light_release
+  # turns it off, and only for a bounded time.
+  - platform: ble_client
+    ble_client_id: light_ble
+    id: light_link
+    internal: true
+    restore_mode: ALWAYS_ON
+
+interval:
+  - interval: 1min
+    then:
+      - lambda: |-
+          auto now = id(sntp_time).now();
+          if (!now.is_valid() || !id(lp_valid)) { id(light_expected) = 0; return; }
+          const int m = now.hour * 60 + now.minute;
+
+          // Daily clock resync at 03:00, while the lamp is dark anyway, so
+          // its RTC never drifts off the schedule's edges.
+          if (now.hour == 3 && now.minute == 0) id(light_push).execute();
+
+          const int on = id(lp_on_min), off = id(lp_off_min), ramp = id(lp_ramp);
+          int expect;
+          if (!id(lp_auto)) expect = 1;                                         // off phase
+          else if (m >= on + ramp + 5 && m < off - ramp - 5) expect = 4;        // plateau
+          else if (m >= on - 5 && m < off + 5) expect = 3;                      // ramping
+          else expect = 2;                                                      // dark
+          id(light_expected) = expect;
+
+          // Nothing to judge while the lamp is handed to the app, while the
+          // link is down (that is its own alarm), or without a lux reading.
+          const float lux = id(tank_lux).state;
+          if (id(light_released) || !id(light_linked) || std::isnan(lux)) {
+            id(light_mismatch_min) = 0;
+            return;
+          }
+
+          float &learned = id(light_learned_lux);
+          bool mismatch = false;
+          if (expect == 4) {
+            const float dark_below = std::max(20.0f, 0.25f * learned);
+            if (lux < dark_below) {
+              mismatch = true;
+            } else if (learned <= 0.0f) {
+              learned = lux;                                   // first plateau sample
+            } else {
+              learned += 0.05f * (lux - learned);              // ~20 min average
+            }
+          } else if (expect == 1 || expect == 2) {
+            // Needs the daylight reference too. tank_lux fails OPEN -- until
+            // cal_nir_ref is learned, sunlight passes through as if it were
+            // the lamp, and a bright afternoon outside the photoperiod would
+            // read as "lamp left on" and end in a false Not Responding.
+            if (learned > 0.0f && id(cal_nir_ref) > 0.0f && lux > 0.5f * learned)
+              mismatch = true;
+          }
+
+          if (!mismatch) {
+            if (id(light_not_responding))
+              ESP_LOGI("light", "lamp matches the schedule again");
+            id(light_mismatch_min) = 0;
+            id(light_fix_attempts) = 0;
+            id(light_not_responding) = false;
+            return;
+          }
+
+          id(light_mismatch_min)++;
+          ESP_LOGW("light", "lamp does not match: expected %s, lamp lux %.0f, learned %.0f (%d min)",
+                   expect == 4 ? "lit" : "dark", lux, learned, id(light_mismatch_min));
+          if (id(light_mismatch_min) < 5 || id(light_not_responding)) return;
+          if (id(light_last_fix_ms) != 0 && millis() - id(light_last_fix_ms) < 15UL * 60UL * 1000UL) return;
+
+          if (id(light_fix_attempts) >= 3) {
+            id(light_not_responding) = true;
+            ESP_LOGE("light", "3 re-pushes did not fix it; stopping until the lamp matches again");
+            return;
+          }
+          id(light_fix_attempts)++;
+          id(light_last_fix_ms) = millis();
+          ESP_LOGW("light", "re-pushing the phase (attempt %d of 3)", id(light_fix_attempts));
+          id(light_push).execute();
+
+button:
+  - platform: template
+    name: "Release Light for App (30 min)"
+    icon: mdi:cellphone-link
+    on_press:
+      - script.execute: light_release
+
+  - platform: template
+    name: "Push Light Phase Now"
+    icon: mdi:clock-edit
+    entity_category: diagnostic
+    on_press:
+      - script.execute: light_push
+
+  - platform: template
+    name: "Relearn Light Level"
+    icon: mdi:refresh
+    entity_category: config
+    on_press:
+      - lambda: |-
+          ESP_LOGI("light", "learned lux cleared (was %.0f); relearning", id(light_learned_lux));
+          id(light_learned_lux) = 0.0f;
+
+binary_sensor:
+  - platform: template
+    name: "Light Linked"
+    icon: mdi:bluetooth-connect
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: return id(light_linked);
+
+  - platform: template
+    name: "Light Not Responding"
+    device_class: problem
+    lambda: return id(light_not_responding);
+
+sensor:
+  - platform: template
+    name: "Light Learned Lux"
+    unit_of_measurement: lx
+    icon: mdi:brightness-6
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: return id(light_learned_lux);
+
+  # Whatever the lamp says back. Logged, not decoded: if the lamp turns out
+  # to report its own state here, that is real readback and detection can
+  # stop relying on lux alone.
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: light_ble
+    service_uuid: ${light_ble_service}
+    characteristic_uuid: ${light_ble_rx}
+    id: light_notification
+    notify: true
+    internal: true
+    lambda: |-
+      ESP_LOGD("light", "notify (%d bytes): %s", (int) x.size(), chihiros::hex_dump(x).c_str());
+      return NAN;
+
+text_sensor:
+  - platform: template
+    name: "Light Expected"
+    icon: mdi:calendar-clock
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      if (id(light_released)) return {"released to app"};
+      if (!id(light_linked)) return {"no link"};
+      switch (id(light_expected)) {
+        case 1: return {"off phase"};
+        case 2: return {"dark"};
+        case 3: return {"ramping"};
+        case 4: return {"lit"};
+        default: return {"unknown"};
+      }
