@@ -220,6 +220,7 @@ binary_sensor:
   # of that is called saturated, leaving margin for the ADC's nonlinearity
   # near the top of its range.
   - platform: template
+    trigger_on_initial_state: true
     name: "Spectral Saturated"
     id: sp_saturated
     device_class: problem

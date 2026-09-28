@@ -168,6 +168,7 @@ binary_sensor:
   # connected here and disconnected there -- which is the correct reading
   # of a one-way radio failure.
   - platform: template
+    trigger_on_initial_state: true
     name: "Panel Link"
     id: panel_link
     device_class: connectivity

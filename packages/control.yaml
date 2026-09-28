@@ -194,12 +194,14 @@ binary_sensor:
   # Published from slow_pwm's state_change_action in the board file, so
   # this is the actual switching, not an inference from duty.
   - platform: template
+    trigger_on_initial_state: true
     id: heater_relay
     name: "Heater"
     device_class: running
     icon: "mdi:radiator"
 
   - platform: template
+    trigger_on_initial_state: true
     id: fan_relay
     name: "Fan"
     device_class: running
@@ -215,6 +217,7 @@ binary_sensor:
   # dead heater got called a latched fault to be cleared by hand when
   # nothing in this controller latches at all.
   - platform: template
+    trigger_on_initial_state: true
     name: "Probe Not Responding"
     device_class: problem
     entity_category: diagnostic
@@ -225,6 +228,7 @@ binary_sensor:
   # heater whose own thermostat has cut out -- none of which the
   # temperature alarms see until the tank has already drifted cold.
   - platform: template
+    trigger_on_initial_state: true
     name: "Heater Not Responding"
     device_class: problem
     entity_category: diagnostic
@@ -237,6 +241,7 @@ binary_sensor:
   # dead. A merely feeble fan will not trip this; Learned Fan Power is the
   # sensitive measure.
   - platform: template
+    trigger_on_initial_state: true
     name: "Fan Not Responding"
     device_class: problem
     entity_category: diagnostic
@@ -249,6 +254,7 @@ binary_sensor:
   # one no single-probe check can see. Always off on a board with no
   # cross-check probe. Self-clearing.
   - platform: template
+    trigger_on_initial_state: true
     name: "Probes Disagree"
     device_class: problem
     entity_category: diagnostic

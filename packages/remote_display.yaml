@@ -318,6 +318,7 @@ binary_sensor:
   # long enough not to flap on a single lost frame, short enough to notice
   # before you have made a decision based on a stale screen.
   - platform: template
+    trigger_on_initial_state: true
     name: "Controller Link"
     id: controller_link
     device_class: connectivity

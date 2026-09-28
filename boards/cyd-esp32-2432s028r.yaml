@@ -282,6 +282,7 @@ globals:
 
 binary_sensor:
   - platform: template
+    trigger_on_initial_state: true
     name: "Battery Charging"
     device_class: battery_charging
     entity_category: diagnostic

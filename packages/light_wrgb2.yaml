@@ -707,6 +707,7 @@ button:
 
 binary_sensor:
   - platform: template
+    trigger_on_initial_state: true
     name: "Light Linked"
     icon: mdi:bluetooth-connect
     device_class: connectivity
@@ -714,6 +715,7 @@ binary_sensor:
     lambda: return id(light_linked);
 
   - platform: template
+    trigger_on_initial_state: true
     name: "Light Not Responding"
     device_class: problem
     lambda: return id(light_not_responding);

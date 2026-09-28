@@ -477,12 +477,14 @@ binary_sensor:
   # are the individual relays, and seeing them out of lockstep means a relay
   # is not following its drive.
   - platform: template
+    trigger_on_initial_state: true
     id: heater_a_relay
     name: "Heater ${side_a_name}"
     device_class: running
     icon: "mdi:radiator"
 
   - platform: template
+    trigger_on_initial_state: true
     id: heater_b_relay
     name: "Heater ${side_b_name}"
     device_class: running
@@ -493,6 +495,7 @@ binary_sensor:
   # calibration -- all three are things you want to be told about rather
   # than discover in the data months later.
   - platform: template
+    trigger_on_initial_state: true
     name: "Probe Disagreement"
     id: probe_disagreement
     device_class: problem
@@ -511,6 +514,14 @@ binary_sensor:
   # The delays are the debounce on top. A splash that bridges the tabs for
   # a few seconds is not a leak; a leak does not un-bridge them in ten.
   - platform: template
+    # trigger_on_initial_state: ESPHome defaults it OFF, and then a binary
+    # sensor's FIRST state fires no callbacks -- MQTT only sends a state that
+    # already exists when it connects. This one's first state lands ~16 s
+    # after boot (first ADC median + the 10 s delayed_off), after MQTT is up,
+    # so a dry floor was never sent and HA kept the last firmware's "wet"
+    # (2026-09-28). Every published template binary sensor in this repo sets
+    # it, so none can go silent this way; none has on_state automations.
+    trigger_on_initial_state: true
     name: "Leak"
     id: leak_floor
     device_class: moisture

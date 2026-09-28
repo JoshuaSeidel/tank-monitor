@@ -277,6 +277,7 @@ binary_sensor:
   # can stay up while notifications stop, and that failure looks identical
   # to a healthy link if you only watch the connection state.
   - platform: template
+    trigger_on_initial_state: true
     name: "Controller Link"
     id: controller_link
     device_class: connectivity
@@ -286,6 +287,7 @@ binary_sensor:
       return (millis() - id(r_stamp_ms)) < 45000;
 
   - platform: template
+    trigger_on_initial_state: true
     name: "BLE Connected"
     id: ble_connected
     device_class: connectivity
