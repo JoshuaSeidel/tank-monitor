@@ -137,6 +137,18 @@ esphome:
     - priority: -200
       then:
         - script.execute: apply_mode
+    # The per-side relays are published only from slow_pwm's
+    # state_change_action, so with the tank at temperature (duty 0, no edge)
+    # they sat at "unknown" indefinitely. control.yaml seeds heater_relay and
+    # fan_relay the same way; slow_pwm is off at boot, so false is the truth.
+    - priority: -100
+      then:
+        - binary_sensor.template.publish:
+            id: heater_a_relay
+            state: false
+        - binary_sensor.template.publish:
+            id: heater_b_relay
+            state: false
     - priority: 1001
       then:
         - lambda: |-
