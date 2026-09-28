@@ -18,9 +18,33 @@
 #     with a _2 suffix and the automations point at the dead ones. Delete
 #     the light pod's device too -- nothing publishes it any more.
 #
+# BENCH / DRY RUN while the XIAO is still live: change device_name to
+# tank-monitor-aio-test (friendly_name "Tank Monitor AIO TEST") for that
+# flash, and put it back before the real swap. A board brought up under the
+# live name collides with the XIAO on MQTT and registers the _2 duplicates
+# described above. Delete the test device from Home Assistant afterwards.
+#
 # The display panel pairs with the controller by BLE MAC. This is a new
 # chip, so read "Controller BLE MAC" from this board once it is up and put
 # it in the panel's wrapper.
+#
+# ---------------------------------------------------------------------
+# The tank light -- this board drives it; nothing to set here
+# ---------------------------------------------------------------------
+# The Chihiros WRGB II Pro is controlled from this board over BLE
+# (packages/light_wrgb2.yaml). Like spectral, it is included by the BOARD
+# FILE, not listed below, so a wrapper cannot leave it out.
+#
+# light_mac, the lamp's BLE address, is also set in the board file --
+# "CF:20:3B:6D:17:C1", this tank's DYWPR120. Load-critical, so it lives in
+# versioned git rather than here. Only if the lamp is ever replaced,
+# override it in the substitutions below:
+#   light_mac: "AA:BB:CC:DD:EE:FF"
+#
+# The lamp takes ONE BLE connection. Power the old aquarium-light-bridge
+# ESP32 off before this board comes up, and turn off Home Assistant's
+# "Aquarium 75 - apply light phase" automation: this board owns the phase
+# now ("Light Phase" and its seven controls) and HA only reports it.
 #
 # ---------------------------------------------------------------------
 # After the swap: RECALIBRATE
@@ -54,7 +78,8 @@ packages:
       - packages/ph.yaml
       # BLE v3 to the panel, and NEVER espnow_link.yaml alongside it.
       - packages/ble_link_v3.yaml
-      # Pulls in packages/spectral.yaml itself -- do not list it here too.
+      # Pulls in packages/spectral.yaml and packages/light_wrgb2.yaml
+      # itself -- do not list either here too.
       - boards/allinone-freenove.yaml
     # refresh defaults to 1d, which would silently build yesterday's config.
     refresh: 0s
