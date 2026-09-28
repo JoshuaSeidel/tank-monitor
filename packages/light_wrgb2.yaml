@@ -606,48 +606,67 @@ number:
           id(light_table)[*i * 7 + 2] = (int) x;
       - script.execute: light_changed
 
-datetime:
+# Text, not datetime: ESPHome publishes a datetime over MQTT as JSON
+# ({"hour":9,...}) and Home Assistant's MQTT time entity only accepts
+# "HH:MM:SS" -- both directions failed, so the times sat at "unknown" in HA
+# and could not be set from it. HH:MM text round-trips cleanly; anything
+# else is refused on the device and the stored value republished.
+text:
   - platform: template
     name: "Light On Time"
     id: light_ctl_on
-    type: time
     icon: mdi:weather-sunset-up
+    mode: text
+    min_length: 4
+    max_length: 5
+    pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
     update_interval: 60s
     lambda: |-
       auto i = id(light_phase).active_index();
       if (!i.has_value() || *i >= 5) return {};
       const int v = id(light_table)[*i * 7 + 0];
-      ESPTime t{};
-      t.hour = v / 60;
-      t.minute = v % 60;
-      t.second = 0;
-      return t;
+      char buf[6];
+      snprintf(buf, sizeof(buf), "%02d:%02d", v / 60, v % 60);
+      return std::string(buf);
     set_action:
       - lambda: |-
           auto i = id(light_phase).active_index();
           if (!i.has_value() || *i >= 5) return;
-          id(light_table)[*i * 7 + 0] = x.hour * 60 + x.minute;
+          int h = -1, m = -1;
+          if (sscanf(x.c_str(), "%d:%d", &h, &m) != 2 || h < 0 || h > 23 || m < 0 || m > 59) {
+            ESP_LOGW("light", "Light On Time '%s' is not HH:MM; kept the stored value", x.c_str());
+            id(light_ctl_on).publish_state(id(light_ctl_on).state);
+            return;
+          }
+          id(light_table)[*i * 7 + 0] = h * 60 + m;
       - script.execute: light_changed
   - platform: template
     name: "Light Off Time"
     id: light_ctl_off
-    type: time
     icon: mdi:weather-sunset-down
+    mode: text
+    min_length: 4
+    max_length: 5
+    pattern: "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"
     update_interval: 60s
     lambda: |-
       auto i = id(light_phase).active_index();
       if (!i.has_value() || *i >= 5) return {};
       const int v = id(light_table)[*i * 7 + 1];
-      ESPTime t{};
-      t.hour = v / 60;
-      t.minute = v % 60;
-      t.second = 0;
-      return t;
+      char buf[6];
+      snprintf(buf, sizeof(buf), "%02d:%02d", v / 60, v % 60);
+      return std::string(buf);
     set_action:
       - lambda: |-
           auto i = id(light_phase).active_index();
           if (!i.has_value() || *i >= 5) return;
-          id(light_table)[*i * 7 + 1] = x.hour * 60 + x.minute;
+          int h = -1, m = -1;
+          if (sscanf(x.c_str(), "%d:%d", &h, &m) != 2 || h < 0 || h > 23 || m < 0 || m > 59) {
+            ESP_LOGW("light", "Light Off Time '%s' is not HH:MM; kept the stored value", x.c_str());
+            id(light_ctl_off).publish_state(id(light_ctl_off).state);
+            return;
+          }
+          id(light_table)[*i * 7 + 1] = h * 60 + m;
       - script.execute: light_changed
 
 button:
