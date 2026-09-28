@@ -519,10 +519,10 @@ The Freenove board is labelled with GPIO numbers directly (DevKitC-1 layout).
 | Device | Signal | GPIO | Harness wire (as built) |
 |---|---|---|---|
 | pH board | analog out | **1** | **blue** (single) |
-| TDS board | `A` (analog out) | **4** | **purple** (single) |
-| Leak sensor | sensor output; 2.2 MΩ + 100 nF from the pin to GND | **5** | **green** (single) |
-| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **6** | **gray** |
-| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **7** | **white** |
+| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **4** | **gray** |
+| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **5** | **white** |
+| TDS board | `A` (analog out) | **6** | **purple** (single) |
+| Leak sensor | sensor output; 2.2 MΩ + 100 nF from the pin to GND | **7** | **green** (single) |
 | Heater A relay | control | **8** | **yellow** (single) |
 | Heater B relay | control | **9** | **orange** |
 | Fan relay | control | **10** | **brown** |
@@ -546,11 +546,19 @@ LED, on GPIO38 or 48 depending on the board revision; neither is used here.
 Everything except GPIO 1 is on the same header row. Leave these alone:
 `0`, `3`, `45`, `46` (strapping), `35`–`37` (PSRAM), `19`/`20` (USB),
 `43`/`44` (console), `38`–`40` (microSD), `2` and `48` (LEDs). GPIO 4–18 also
-run to the camera connector; with no camera fitted they are ordinary pins.
+run to the camera connector. **GPIO 4 and 5 are the camera's SCCB bus and are
+pulled up to 3V3 on the Freenove board**, fitted camera or not, so they carry
+the 1-Wire probes (which want a pull-up anyway) and never an analog input.
+Until 2026-09-28 TDS and leak sat on 4 and 5: TDS read ~2.33 V in air and the
+leak read a flat 3.15 V ("wet") no matter what was wired to it.
+
+The Freenove header has **one** `GND` pin, bottom right next to GPIO19 (USB
+ports at the bottom). Bottom left is `5V` and top right is `TX`: this is where
+it differs from a DevKitC-1, which has GND in both of those places.
 
 ## Power
 
-Two `3V3` pins and several `GND` pins feed seven devices, so power is still
+One `3V3` pin and one `GND` pin feed seven devices, so power is still
 spliced off the board (see the XIAO section's rails). **Give the two light
 sensors their own 3.3 V**: a small 3.3 V regulator fed from the `5V` pin, or
 a resettable fuse on their power lead. Their leads run up to the fixture,

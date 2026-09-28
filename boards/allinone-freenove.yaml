@@ -31,10 +31,10 @@
 # ---------------------------------------------------------------------
 #   signal                       GPIO   notes
 #   pH board signal (blue)       1      ADC1_CH0
-#   TDS board signal             4      ADC1_CH3
-#   Leak sensor                  5      ADC1_CH4; 2.2M + 100nF to GND at the pin
-#   DS18B20 A (control probe)    6      4.7k pull-up to 3V3
-#   DS18B20 B (cross-check)      7      4.7k pull-up to 3V3
+#   DS18B20 A (control probe)    4      4.7k pull-up to 3V3 (CAM_SIOD)
+#   DS18B20 B (cross-check)      5      4.7k pull-up to 3V3 (CAM_SIOC)
+#   TDS board signal             6      ADC1_CH5
+#   Leak sensor                  7      ADC1_CH6; 2.2M + 100nF to GND at the pin
 #   Heater A relay               8
 #   Heater B relay               9
 #   Fan relay                    10
@@ -49,13 +49,20 @@
 #   43, 44         the USB-serial console
 #   38, 39, 40     the microSD slot
 #   2, 48          onboard LED and WS2812 RGB LED
-# GPIO 4-18 also run to the (unfitted) camera connector. With no camera
-# plugged in they are ordinary GPIOs; do not fit one.
+# GPIO 4-18 also run to the (unfitted) camera connector; do not fit one.
+# GPIO4 and GPIO5 are the camera's SCCB bus (CAM_SIOD / CAM_SIOC) and are
+# PULLED UP TO 3V3 ON THE BOARD, camera or not. Never put an analog input
+# on them: on 2026-09-28 TDS (GPIO4) sat at ~2.33 V in air with the probe
+# unplugged, and the leak input (GPIO5) read a dead-flat 3.15 V -- "wet" --
+# against its 2.2M pull-down from the first boot. The 1-Wire buses live
+# there instead, because 1-Wire wants a pull-up anyway: the board's sits in
+# parallel with the 4.7k.
 #
 # ---------------------------------------------------------------------
 # POWER -- the one thing that is still shared
 # ---------------------------------------------------------------------
-# Two 3V3 pins, several GND pins, seven things that need 3.3 V. Splice off
+# One 3V3 pin and one GND pin (bottom right, beside GPIO19 -- NOT the
+# DevKitC-1 positions) for seven things that need 3.3 V. Splice off
 # the board, as on every board in this project.
 #
 # The light sensors are on long leads up to the fixture, and on 2026-09-17
@@ -108,10 +115,10 @@ mqtt:
 one_wire:
   - platform: gpio
     id: onewire_a
-    pin: GPIO6      # control probe. 4.7k pull-up to 3V3.
+    pin: GPIO4      # control probe. 4.7k pull-up to 3V3 (+ the board's CAM_SIOD pull-up).
   - platform: gpio
     id: onewire_b
-    pin: GPIO7      # cross-check probe. 4.7k pull-up to 3V3.
+    pin: GPIO5      # cross-check probe. 4.7k pull-up to 3V3 (+ the board's CAM_SIOC pull-up).
 
 # Two buses, one sensor each. 10 kHz on both: the leads run up to the
 # fixture, and the slow clock buys capacitance margin on a long run.
@@ -223,7 +230,7 @@ sensor:
   # capture buttons, sensors.yaml's TDS calibration) cancels its offset
   # and gain error; recalibrate both after moving to this board.
   - platform: adc
-    pin: GPIO4
+    pin: GPIO6
     id: tds_voltage
     attenuation: 12db
     samples: 16
@@ -250,13 +257,13 @@ sensor:
 
   # Floor leak sensor (Level Sense LS-2600): open when dry, ~1.4 MOhm and
   # SOURCING when wet, so the input wants a pull-DOWN. At the pin:
-  #   red   -> 3V3            2.2M  between GPIO5 and GND
-  #   black -> GPIO5          100nF between GPIO5 and GND
+  #   red   -> 3V3            2.2M  between GPIO7 and GND
+  #   black -> GPIO7          100nF between GPIO7 and GND
   # Dry reads 0 V, wet ~1-2.5 V. The 100nF is not optional: a megohm node
   # on six feet of cable is an antenna, and it is also what gives the ADC's
   # sampling capacitor a stiff source to charge from.
   - platform: adc
-    pin: GPIO5
+    pin: GPIO7
     id: leak_voltage
     name: "Leak Sensor Voltage"
     unit_of_measurement: "V"
