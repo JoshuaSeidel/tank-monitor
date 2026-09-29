@@ -93,9 +93,17 @@ substitutions:
   leak_on_v:  "1.2"
   leak_off_v: "0.8"
   spectral_i2c: bus_spec
-  # The 75's lamp -- a WRGB II Pro 120, advertising as DYWPR120. Load-critical,
-  # so it lives here in the versioned board file rather than a wrapper.
-  light_mac: "CF:20:3B:6D:17:C1"
+  # The 75's lamp -- a WRGB II Pro 120. It advertises as
+  # "DYWPR120E9B8ED2E998E": the name carries its own address, so check any
+  # new value against the name. Random-static; the tracker learns the type
+  # from the advertisement. Read off Home Assistant's Bluetooth adapter on
+  # 2026-09-29. Load-critical, so it lives here in the versioned board file
+  # rather than a wrapper.
+  # The CF:20:3B:6D:17:C1 this held until then is the upstream author's own
+  # DYNT90, copied from the fork's example defaults -- never this tank's
+  # lamp. ble_client only connects after hearing its exact address, so with
+  # it the board waited silently for a lamp that is not in the house.
+  light_mac: "E9:B8:ED:2E:99:8E"
 
 esp32:
   board: esp32-s3-devkitc-1

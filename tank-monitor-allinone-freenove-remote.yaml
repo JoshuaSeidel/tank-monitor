@@ -36,7 +36,8 @@
 # FILE, not listed below, so a wrapper cannot leave it out.
 #
 # light_mac, the lamp's BLE address, is also set in the board file --
-# "CF:20:3B:6D:17:C1", this tank's DYWPR120. Load-critical, so it lives in
+# "E9:B8:ED:2E:99:8E", this tank's lamp, advertising as DYWPR120E9B8ED2E998E
+# (the name carries the address). Load-critical, so it lives in
 # versioned git rather than here. Only if the lamp is ever replaced,
 # override it in the substitutions below:
 #   light_mac: "AA:BB:CC:DD:EE:FF"
