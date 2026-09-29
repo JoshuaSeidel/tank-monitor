@@ -67,6 +67,13 @@ substitutions:
   side_a_name: "Left"
   side_b_name: "Right"
 
+  # Where the follow-the-sun light phases (3 and 4) take sunrise and sunset
+  # from -- the tank's location, decimal degrees, one decimal (~10 km) is
+  # plenty. The board file defaults to south-central Pennsylvania; a value
+  # here overrides it.
+  light_latitude: "39.8"
+  light_longitude: "-76.7"
+
 packages:
   tank_monitor:
     url: https://github.com/JoshuaSeidel/tank-monitor
