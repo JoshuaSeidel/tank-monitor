@@ -84,12 +84,18 @@ number:
     # the thing that acts on it, so it owns it. This entity is now a view
     # onto that one value plus a way to change it. The default for a tank
     # that has never been configured comes from `setpoint:` above.
+    #
+    # A view republishes only when polled, so the set_action ends by reading
+    # the controller back at once. Without it the new setpoint sat unseen
+    # for up to 30 s: Home Assistant's slider snapped back, and two quick
+    # presses of the device page's + both started from the old value.
     lambda: "return id(controller).get_setpoint() * 9.0f / 5.0f + 32.0f;"
     update_interval: 30s
     set_action:
       - tank_controller.set_setpoint:
           id: controller
           setpoint: !lambda "return (x - 32.0f) * 5.0f / 9.0f;"
+      - component.update: target_temperature
 
   # Same shape as Target Temperature, for the same reason: the controller
   # owns and persists the value, this is a view onto it plus a way to
@@ -113,6 +119,7 @@ number:
       - tank_controller.set_fan_deadband:
           id: controller
           fan_deadband: !lambda "return x * 5.0f / 9.0f;"
+      - component.update: fan_deadband
 
   # Same shape again. Meaningless on a board with no cross-check probe, but
   # harmless, and keeping it here means every board has the entity the day
@@ -132,6 +139,7 @@ number:
       - tank_controller.set_disagreement_band:
           id: controller
           disagreement_band: !lambda "return x * 5.0f / 9.0f;"
+      - component.update: probe_disagreement_band
 
 switch:
   - platform: template
@@ -160,6 +168,9 @@ button:
     on_press:
       - tank_controller.reset_learning:
           id: controller
+      # Confidence is what a reset visibly throws away; show it at once
+      # rather than a minute later, when it looks like the press did nothing.
+      - component.update: model_confidence
 
 # Both relay sensors publish only on a transition, so without this they sit
 # at "unknown" from boot until the first time that relay closes -- which for
@@ -407,6 +418,7 @@ sensor:
   # is wrong" from "the model is new", which the combined number cannot.
   - platform: template
     name: "Model Confidence"
+    id: model_confidence
     unit_of_measurement: "%"
     icon: "mdi:brain"
     accuracy_decimals: 0

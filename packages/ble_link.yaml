@@ -146,8 +146,13 @@ esp32_ble_server:
                   // optimistic; this is the one that actually moves the tank,
                   // so a malformed packet must not drive it somewhere the UI
                   // would refuse to.
-                  if (f >= 70.0f && f <= 80.0f)
+                  if (f >= 70.0f && f <= 80.0f) {
                     id(controller).set_setpoint((f - 32.0f) * 5.0f / 9.0f);
+                    // Read back at once, as the number's own set_action
+                    // does, so HA and the device page show the panel's
+                    // setpoint now rather than at the next 30 s poll.
+                    id(target_temperature).update();
+                  }
                 } else if (s.rfind("AL", 0) == 0) {
                   id(controller).set_learning_enabled(s.size() > 2 && s[2] == '1');
                 }

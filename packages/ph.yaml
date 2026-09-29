@@ -137,7 +137,7 @@ sensor:
 
       const float ph = p_hi + (v - v7) / slope;
       // 3 to 11, not 0 to 14. The electrode only ever sees tank water or a
-      // calibration buffer (4.00, 7.00, occasionally 10.01), all inside
+      // calibration buffer (4.00, 6.86, 9.18, occasionally 10.01), all inside
       // this window with room to spare. What lands OUTSIDE it is an input
       // with no electrode on it: a floating ADC pin drifts between 0.03
       // and 0.3 V, and 0.3 V is pH 13.7 -- "legal" under 0-14, and a
@@ -150,9 +150,11 @@ sensor:
 
   # The stored calibration, visible so it can be recorded and so a probe
   # that has drifted is obvious. A healthy DFRobot electrode separates the
-  # two points by roughly 0.5 V; much less than that means it is tired.
+  # two points by roughly 0.177 V per pH unit between them -- about 0.41 V
+  # across 9.18/6.86; much less than that means it is tired.
   - platform: template
     name: "Cal pH High Voltage"
+    id: cal_ph_high_v
     unit_of_measurement: "V"
     accuracy_decimals: 4
     entity_category: diagnostic
@@ -161,6 +163,7 @@ sensor:
 
   - platform: template
     name: "Cal pH Low Voltage"
+    id: cal_ph_low_v
     unit_of_measurement: "V"
     accuracy_decimals: 4
     entity_category: diagnostic
@@ -169,6 +172,7 @@ sensor:
 
   - platform: template
     name: "Cal pH Slope"
+    id: cal_ph_slope
     unit_of_measurement: "V/pH"
     accuracy_decimals: 4
     entity_category: diagnostic
@@ -212,6 +216,10 @@ button:
           if (std::isnan(v)) { ESP_LOGW("cal", "high point capture skipped: no probe reading"); return; }
           ESP_LOGI("cal", "pH %.2f point captured at %.4f V (was %.4f)", id(cal_ph_hi), v, id(cal_ph_v7));
           id(cal_ph_v7) = v;
+      # The readouts poll once a minute; without these the captured volts
+      # and the slope they imply lag the press by up to that long.
+      - component.update: cal_ph_high_v
+      - component.update: cal_ph_slope
 
   - platform: template
     name: "Capture Low Point"
@@ -223,12 +231,20 @@ button:
           if (std::isnan(v)) { ESP_LOGW("cal", "low point capture skipped: no probe reading"); return; }
           ESP_LOGI("cal", "pH %.2f point captured at %.4f V (was %.4f)", id(cal_ph_lo), v, id(cal_ph_v4));
           id(cal_ph_v4) = v;
+      - component.update: cal_ph_low_v
+      - component.update: cal_ph_slope
 
 number:
   # Lambda-backed mirrors of the globals, per the repo convention for
   # calibration values: update_interval + lambda + set_action, never
   # optimistic/restore_value -- the global owns the value and survives
   # a flash, the entity is only a window onto it.
+  #
+  # Which means nothing republishes it until update_interval comes round,
+  # so each set_action ends by asking the entity -- and the slope, which is
+  # computed from it -- to re-read. Otherwise Home Assistant and the
+  # device's own page snap back to the old value for up to a minute, and
+  # the capture prompt names a pH the device is no longer holding.
   - platform: template
     name: "Cal pH High Value"
     id: cal_ph_hi_num
@@ -242,6 +258,8 @@ number:
     lambda: "return id(cal_ph_hi);"
     set_action:
       - lambda: id(cal_ph_hi) = x;
+      - component.update: cal_ph_hi_num
+      - component.update: cal_ph_slope
 
   - platform: template
     name: "Cal pH Low Value"
@@ -256,3 +274,5 @@ number:
     lambda: "return id(cal_ph_lo);"
     set_action:
       - lambda: id(cal_ph_lo) = x;
+      - component.update: cal_ph_lo_num
+      - component.update: cal_ph_slope

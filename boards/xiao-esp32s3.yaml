@@ -235,6 +235,8 @@ number:
     lambda: "return id(cal_temp_offset_b_c) * 9.0f / 5.0f;"
     set_action:
       - lambda: id(cal_temp_offset_b_c) = x * 5.0f / 9.0f;
+      # Republish now, not at the next poll -- see packages/sensors.yaml.
+      - component.update: cal_temp_offset_b_num
 
 output:
   # Time-proportional over a 15 minute window. These are mechanical relay

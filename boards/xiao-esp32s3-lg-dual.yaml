@@ -818,6 +818,9 @@ number:
     lambda: "return id(cycling_target_f);"
     set_action:
       - lambda: id(cycling_target_f) = x;
+      # Each of these views republishes as soon as it is set, not at the
+      # next poll -- see packages/sensors.yaml.
+      - component.update: cycling_target_num
       - script.execute: apply_mode
 
   - platform: template
@@ -835,6 +838,7 @@ number:
     lambda: "return id(cal_temp_offset_b_c) * 9.0f / 5.0f;"
     set_action:
       - lambda: id(cal_temp_offset_b_c) = x * 5.0f / 9.0f;
+      - component.update: cal_temp_offset_b_num
 
   - platform: template
     name: "Gradient Alarm Threshold"
@@ -849,6 +853,7 @@ number:
     lambda: "return id(cal_gradient_alarm_f);"
     set_action:
       - lambda: id(cal_gradient_alarm_f) = x;
+      - component.update: cal_gradient_alarm_num
 
 text_sensor:
   # BUILD GUARD -- see boards/xiao-esp32s3.yaml for the incident this exists

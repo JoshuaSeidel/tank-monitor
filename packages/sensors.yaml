@@ -207,6 +207,11 @@ globals:
     restore_value: true
     initial_value: '0.0'
 
+# The lambda-backed numbers below are views onto the globals above, so
+# nothing republishes them until update_interval comes round. Every
+# set_action ends with a component.update on its own entity, or Home
+# Assistant and the device's page snap back to the old value for up to a
+# minute after a change that has in fact been stored.
 number:
   - platform: template
     name: "Cal TDS K Factor"
@@ -221,6 +226,7 @@ number:
     lambda: "return id(cal_tds_k);"
     set_action:
       - lambda: id(cal_tds_k) = x;
+      - component.update: cal_tds_k_num
 
   # What the calibration solution is worth. 342 ppm (the 707 uS/cm NaCl
   # standard) and 1000 ppm are the usual bottles; set this to whatever the
@@ -254,6 +260,7 @@ number:
     lambda: "return id(cal_temp_offset_c) * 9.0f / 5.0f;"
     set_action:
       - lambda: id(cal_temp_offset_c) = x * 5.0f / 9.0f;
+      - component.update: cal_temp_offset_num
 
 button:
   # Put the probe in the standard, wait for the reading to settle, press.
@@ -282,3 +289,8 @@ button:
           ESP_LOGI("cal", "TDS calibrated: %.1f ppm -> %.1f ppm, k %.3f -> %.3f",
                    shown, want, id(cal_tds_k), k);
           id(cal_tds_k) = k;
+      # Show the result now rather than on the next poll: the new K, and the
+      # reading it produces -- which should be the standard the probe is
+      # standing in, and is the check that the calibration took.
+      - component.update: cal_tds_k_num
+      - component.update: tds

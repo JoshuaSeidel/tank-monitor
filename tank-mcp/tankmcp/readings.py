@@ -145,7 +145,7 @@ async def ph_status(ha: HomeAssistant, tank: E.TankEntities) -> dict[str, Any]:
             "verdict": ph_verdict(probe),
             "source": "probe",
             "live": True,
-            "note": "DFRobot glass electrode on the controller. Calibrate against pH 4.00 and 7.00 buffer every few months.",
+            "note": "DFRobot glass electrode on the controller. Calibrate every few months on two buffers that bracket the tank (9.18 and 6.86) and check against a third (4.00).",
         }
 
     manual = await ha.number(E.MANUAL["ph"])

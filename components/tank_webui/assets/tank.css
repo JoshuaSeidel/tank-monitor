@@ -69,6 +69,9 @@ header h1{font-size:15px;font-weight:500;letter-spacing:.14em;color:var(--faint)
   color:var(--dim);cursor:pointer;font-size:13px;transition:background .2s,color .2s}
 .btn:hover{background:var(--line);color:var(--ink)}
 .btn.warn{color:var(--red);border-color:#3a1f22}
+/* A control whose entity has not reported yet: tank.js has no address to
+   post it to, so it looks as inert as it is. */
+button:disabled,input:disabled{opacity:.35;cursor:default;pointer-events:none}
 .chem{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 6px}
 .chem div span{display:block}
 .age{color:var(--faint);font-size:11px;margin-top:10px;text-align:right}

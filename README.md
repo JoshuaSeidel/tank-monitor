@@ -92,7 +92,7 @@ DFRobot themselves will tell you if you ask.
 | Part | Notes | Where |
 |---|---|---|
 | **DFRobot SEN0169-V2**, *wide voltage* edition | $64.90. 3.3–5.5 V supply and **0–3 V output** — the classic edition outputs 0–5 V and would damage an ESP32 ADC pin | [DFRobot](https://www.dfrobot.com/product-2069.html) · [wiki](https://wiki.dfrobot.com/sen0169-v2/) |
-| **pH 4.00 and 7.00 buffer sachets** | the sensor is meaningless uncalibrated | [search](https://www.amazon.com/s?k=pH+4.00+7.00+calibration+buffer+solution+sachets) |
+| **pH 4.00 / 6.86 / 9.18 buffer sachets** (the NIST set) | the sensor is meaningless uncalibrated. Calibrate on the two that bracket the tank (9.18 and 6.86), check against the third | [search](https://www.amazon.com/s?k=pH+4.00+6.86+9.18+calibration+buffer+solution+sachets) |
 | **KCl storage solution** | the electrode must never dry out. A dried probe is a dead probe | [search](https://www.amazon.com/s?k=pH+probe+KCl+storage+solution) |
 | Suction-cup probe holder | fixes angle and depth; the bulb must point down | [search](https://www.amazon.com/s?k=aquarium+pH+probe+holder+suction+cup) |
 
@@ -539,9 +539,16 @@ a one-line change.
 
 Every build serves its own UI at the device's IP — no Home Assistant, no
 internet, no CDN. ESPHome's page is only `<esp-app></esp-app>` plus one
-script tag, so blanking `js_url` suppresses its bundle and `www/tank.js`
-becomes the whole interface. State arrives over `/events`; controls POST
-back to the REST endpoints `web_server` already exposes.
+script tag, so pointing `js_url` at the device's own `/tank.js` replaces its
+CDN bundle and
+`components/tank_webui/assets/tank.js` becomes the whole interface. State
+arrives over `/events`; controls POST back to the REST endpoints
+`web_server` already exposes, addressed by the id each entity reported on
+`/events` — its display name, e.g. `/number/Cal%20pH%20High%20Value/set`.
+Since ESPHome 2026.7 those routes match by name only; the old object-id form
+(`/number/cal_ph_high_value/set`) returns 404. A control stays disabled until
+its entity has reported, so a board without one (no backlight, no pH) never
+posts to an address that does not exist.
 
 **Nothing to copy.** The script and stylesheet live inside the
 `tank_webui` external component, which git delivers in full — unlike
@@ -816,7 +823,9 @@ because it still works with the broker, the router and HA all down.
    that is very hard to trace back.
 2. Set **Cal TDS Standard** to what the bottle says (342 ppm and 1000 ppm are
    the usual ones).
-3. Stand the probe in it, wait for the reading to settle.
+3. Stand the probe in it and watch **TDS** settle — the single sample
+   Calibrate TDS solves against, which the device page shows as *Reading
+   now*. Not `TDS 1h Mean`: that is still an hour of tank water.
 4. Press **Calibrate TDS**.
 
 It solves `k = k · standard / reading` and refuses any result outside
@@ -826,16 +835,38 @@ rather type a known value.
 
 ### pH — two point
 
-1. Rinse in distilled water and **blot** dry. Never wipe the glass bulb: it
+The two points are named for their role, not a number: **Cal pH High Value**
+and **Cal pH Low Value** hold what each buffer actually says. Choose a pair
+that **brackets the tank**. A glass electrode is linear from about 4 to 10,
+so a third point buys nothing — but a tank at 7.4 calibrated on 6.86 and 4.00
+is extrapolated above its highest point, which is where slope error hurts
+most. With the NIST set (4.00 / 6.86 / 9.18) that means calibrating on 9.18
+and 6.86 and keeping 4.00 back as the check.
+
+1. Set **Cal pH High Value** and **Cal pH Low Value** to what the two bottles
+   say.
+2. Rinse in distilled water and **blot** dry. Never wipe the glass bulb: it
    builds a static charge that takes minutes to bleed off, and the reading
    wanders the whole time.
-2. Stand in pH 7.00 buffer, wait two minutes, press **Capture pH 7.00**.
-3. Rinse, blot, stand in pH 4.00 buffer, wait two minutes, press
-   **Capture pH 4.00**.
+3. Stand in the high buffer, wait two minutes, press **Capture High Point**.
+4. Rinse, blot, stand in the low buffer, wait two minutes, press
+   **Capture Low Point**.
+5. Rinse, blot, stand in the third buffer and read **Water pH**. Within about
+   0.1 means the electrode is linear and healthy. Never calibrate on the check
+   buffer — that is what makes it independent evidence rather than a
+   restatement of the calibration.
 
-**Cal pH Slope** is the check that matters. A healthy electrode sits near
-0.177 V/pH (the Nernst slope at 25 °C). Much below about 0.150 and it is worn
-out — recalibrating a dead electrode just moves where it is wrong.
+On the device's own page the capture buttons carry the configured value
+(**Capture high 9.18**), so the bottle in your hand can be checked against the
+label before anything is stored. **Cal pH High Voltage** and **Cal pH Low
+Voltage** show what was captured — write them down, and a point that has
+drifted is obvious next time.
+
+**Cal pH Slope** is the check that matters. It reads negative on this board —
+more volts, lower pH — and a healthy electrode sits near −0.177 V/pH (the
+Nernst slope at 25 °C); the device's page shows the magnitude. Much below
+about 0.150 in size and it is worn out — recalibrating a dead electrode just
+moves where it is wrong.
 
 The reading is temperature-corrected against the DS18B20 at runtime, so a
 probe calibrated at room temperature still reads correctly at 74 °F.

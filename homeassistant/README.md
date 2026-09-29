@@ -31,7 +31,7 @@ The lesson generalises past this one device. A continuous reading that cannot
 be calibrated is not more trustworthy than an intermittent one that can — it
 is less, because it is wrong more often and more confidently. That is why pH
 is moving to a DFRobot glass electrode on the controller: it can be stood in
-pH 7.00 buffer and proven right.
+a buffer of known pH and proven right.
 
 ### The TDS number is an hourly mean, and the mean is computed on the device
 
