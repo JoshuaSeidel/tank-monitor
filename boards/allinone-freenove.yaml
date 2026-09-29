@@ -104,6 +104,10 @@ substitutions:
   # lamp. ble_client only connects after hearing its exact address, so with
   # it the board waited silently for a lamp that is not in the house.
   light_mac: "E9:B8:ED:2E:99:8E"
+  # Where the follow-the-sun light phases take sunrise and sunset from:
+  # south-central Pennsylvania, rounded to ~10 km.
+  light_latitude: "39.8"
+  light_longitude: "-76.7"
 
 esp32:
   board: esp32-s3-devkitc-1

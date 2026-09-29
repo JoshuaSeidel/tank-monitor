@@ -221,6 +221,40 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'
+  # FOLLOW THE SUN, per phase, in select order. 0 = the table's fixed times.
+  # >0 = the lights span today's sunrise to sunset and this many minutes of
+  # it are full brightness; the rest of the natural day is a slow dawn and
+  # dusk ramp. Kept apart from light_table so adding it did not discard the
+  # stored table. Seeded by light_seed_sun, the only place its defaults live.
+  - id: light_sun_plateau
+    type: std::array<int, 5>
+    restore_value: true
+  - id: light_sun_seeded
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # The selected phase follows the sun: lp_on/off/ramp are computed, not
+  # read from the table. lp_sun_day is the day of year they were computed
+  # for (-1 = not yet), so the minute tick recomputes after midnight and
+  # once the clock first syncs.
+  - id: lp_sun
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: lp_sun_day
+    type: int
+    restore_value: false
+    initial_value: '-1'
+
+# Sunrise/sunset are computed here, from the clock, so a sun-following phase
+# keeps working with Home Assistant down. The tank is in south-central
+# Pennsylvania; one decimal (~10 km) is well under a minute of sunrise.
+# Override light_latitude/light_longitude in the board file if it moves.
+sun:
+  id: light_sun
+  time_id: sntp_time
+  latitude: ${light_latitude}
+  longitude: ${light_longitude}
 
 # List form: a mapping on_boot in a package can be dropped when packages
 # merge. Late priority, so the select has already restored its option. This
@@ -237,6 +271,16 @@ esphome:
                   id: light_seed_defaults
                   only: -1
               - script.wait: light_seed_defaults
+        # Boards seeded before follow-the-sun existed have a table but no
+        # sun settings; give them the defaults without touching the table.
+        - if:
+            condition:
+              lambda: return !id(light_sun_seeded);
+            then:
+              - script.execute:
+                  id: light_seed_sun
+                  only: -1
+              - script.wait: light_seed_sun
         - script.execute: light_select_phase
 
 select:
@@ -300,6 +344,27 @@ script:
           }
           id(light_table_seeded) = true;
           ESP_LOGI("light", "phase defaults written (%s)", only < 0 ? "all" : "one phase");
+      - script.execute:
+          id: light_seed_sun
+          only: !lambda return only;
+      - script.wait: light_seed_sun
+
+  # Follow-the-sun defaults: Phases 3 and 4 (CO2 on) span sunrise to sunset
+  # with 7 h and 7.5 h at full brightness. Past ~8 h of full light a planted
+  # tank feeds algae whatever the season, so the natural day's length goes
+  # into the dawn and dusk ramps rather than into the plateau. Phases 1-2
+  # keep fixed hours: they run while the tank is new and light-limited.
+  - id: light_seed_sun
+    parameters:
+      only: int
+    then:
+      - lambda: |-
+          static const int sun_defaults[5] = {0, 0, 0, 420, 450};
+          for (int ph = 0; ph < 5; ph++) {
+            if (only != -1 && ph != only) continue;
+            id(light_sun_plateau)[ph] = sun_defaults[ph];
+          }
+          id(light_sun_seeded) = true;
 
   # Resolve the selected phase from the stored table into lp_*. "Off
   # (cycling)" is manual mode at 0 whatever its stored values say: the lamp
@@ -325,8 +390,46 @@ script:
           id(lp_g) = ph ? clampi(t[b + 5], 0, 100) : 0;
           id(lp_b) = ph ? clampi(t[b + 6], 0, 100) : 0;
           id(lp_valid) = true;
-          ESP_LOGI("light", "phase %d: %s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
-                   ph, ph ? "auto" : "manual-off",
+
+          // Follow the sun: lights span sunrise..sunset; the plateau is
+          // capped and the rest of the day becomes ramp. Ramps are limited
+          // to 150 min (the lamp's range here), so on a long summer day the
+          // span is trimmed symmetrically around solar noon. Without a valid
+          // clock or a computable sun the table's fixed times stand in.
+          id(lp_sun) = false;
+          const int plat = ph ? id(light_sun_plateau)[ph] : 0;
+          auto now = id(sntp_time).now();
+          if (plat > 0) {
+            id(lp_sun_day) = now.is_valid() ? now.day_of_year : -1;
+            auto rise = id(light_sun).sunrise(-0.833);
+            auto set = id(light_sun).sunset(-0.833);
+            if (now.is_valid() && rise.has_value() && set.has_value()) {
+              // Next events, in UTC; the lamp runs local wall-clock time.
+              auto r = ESPTime::from_epoch_local(rise->timestamp);
+              auto z = ESPTime::from_epoch_local(set->timestamp);
+              int on = r.hour * 60 + r.minute, off = z.hour * 60 + z.minute;
+              const int day = off - on;
+              if (day > 60) {
+                int ramp = (day - plat) / 2;
+                if (ramp > 150) {
+                  const int noon = (on + off) / 2, span = plat + 2 * 150;
+                  on = noon - span / 2;
+                  off = on + span;
+                  ramp = 150;
+                } else if (ramp < 15) {
+                  ramp = 15;       // a short winter day shortens the plateau
+                }
+                id(lp_on_min) = clampi(on, 0, 1439);
+                id(lp_off_min) = clampi(off, 0, 1439);
+                id(lp_ramp) = ramp;
+                id(lp_sun) = true;
+              }
+            }
+            if (!id(lp_sun))
+              ESP_LOGW("light", "phase %d follows the sun but sunrise is not computable yet; fixed times until it is", ph);
+          }
+          ESP_LOGI("light", "phase %d: %s%s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
+                   ph, ph ? "auto" : "manual-off", id(lp_sun) ? " (sun)" : "",
                    id(lp_on_min) / 60, id(lp_on_min) % 60,
                    id(lp_off_min) / 60, id(lp_off_min) % 60,
                    id(lp_ramp), id(lp_w), id(lp_r), id(lp_g), id(lp_b));
@@ -342,6 +445,7 @@ script:
       - component.update: light_ctl_ramp
       - component.update: light_ctl_on
       - component.update: light_ctl_off
+      - component.update: light_ctl_sun_hours
 
   # A control was changed. Debounced, so dragging a slider sends one push
   # when it settles rather than one per step; restart, so the last value
@@ -440,6 +544,19 @@ interval:
           // Daily clock resync at 03:00, while the lamp is dark anyway, so
           // its RTC never drifts off the schedule's edges.
           if (now.hour == 3 && now.minute == 0) id(light_push).execute();
+
+          // A sun-following phase moves every day: recompute after midnight
+          // (and once the clock first syncs) and push while the lamp is dark.
+          {
+            auto i = id(light_phase).active_index();
+            if (i.has_value() && *i > 0 && *i < 5 && id(light_sun_plateau)[*i] > 0 &&
+                id(lp_sun_day) != now.day_of_year) {
+              id(light_select_phase).execute();
+              id(light_refresh_controls).execute();
+              id(light_push).execute();
+              return;
+            }
+          }
 
           const int on = id(lp_on_min), off = id(lp_off_min), ramp = id(lp_ramp);
           int expect;
@@ -606,12 +723,42 @@ number:
     lambda: |-
       auto i = id(light_phase).active_index();
       if (!i.has_value() || *i >= 5) return {};
+      if (id(lp_sun)) return (float) id(lp_ramp);   // computed from the sun
       return (float) id(light_table)[*i * 7 + 2];
     set_action:
       - lambda: |-
           auto i = id(light_phase).active_index();
           if (!i.has_value() || *i >= 5) return;
+          if (id(light_sun_plateau)[*i] > 0) {
+            ESP_LOGW("light", "this phase follows the sun; its ramp is computed. Change Light Full Brightness Hours instead");
+            id(light_ctl_ramp).publish_state(id(lp_ramp));
+            return;
+          }
           id(light_table)[*i * 7 + 2] = (int) x;
+      - script.execute: light_changed
+
+  # Follow-the-sun phases only: hours of full brightness inside today's
+  # sunrise..sunset; the rest becomes dawn and dusk. 0 = fixed hours (the
+  # On/Off Time and Ramp controls). Setting it on a phase turns following on.
+  - platform: template
+    name: "Light Full Brightness Hours"
+    id: light_ctl_sun_hours
+    icon: mdi:weather-sunny-alert
+    unit_of_measurement: "h"
+    min_value: 0
+    max_value: 10
+    step: 0.5
+    mode: box
+    update_interval: 60s
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      if (!i.has_value() || *i >= 5) return {};
+      return id(light_sun_plateau)[*i] / 60.0f;
+    set_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i == 0 || *i >= 5) return;
+          id(light_sun_plateau)[*i] = (int) (x * 60.0f);
       - script.execute: light_changed
 
 # Text, not datetime: ESPHome publishes a datetime over MQTT as JSON
@@ -632,7 +779,8 @@ text:
     lambda: |-
       auto i = id(light_phase).active_index();
       if (!i.has_value() || *i >= 5) return {};
-      const int v = id(light_table)[*i * 7 + 0];
+      // Following the sun: show today's computed time, not the table's.
+      const int v = id(lp_sun) ? id(lp_on_min) : id(light_table)[*i * 7 + 0];
       char buf[6];
       snprintf(buf, sizeof(buf), "%02d:%02d", v / 60, v % 60);
       return std::string(buf);
@@ -643,6 +791,11 @@ text:
           int h = -1, m = -1;
           if (sscanf(x.c_str(), "%d:%d", &h, &m) != 2 || h < 0 || h > 23 || m < 0 || m > 59) {
             ESP_LOGW("light", "Light On Time '%s' is not HH:MM; kept the stored value", x.c_str());
+            id(light_ctl_on).publish_state(id(light_ctl_on).state);
+            return;
+          }
+          if (id(light_sun_plateau)[*i] > 0) {
+            ESP_LOGW("light", "this phase follows the sun; set Light Full Brightness Hours to 0 to use fixed times");
             id(light_ctl_on).publish_state(id(light_ctl_on).state);
             return;
           }
@@ -660,7 +813,8 @@ text:
     lambda: |-
       auto i = id(light_phase).active_index();
       if (!i.has_value() || *i >= 5) return {};
-      const int v = id(light_table)[*i * 7 + 1];
+      // Following the sun: show today's computed time, not the table's.
+      const int v = id(lp_sun) ? id(lp_off_min) : id(light_table)[*i * 7 + 1];
       char buf[6];
       snprintf(buf, sizeof(buf), "%02d:%02d", v / 60, v % 60);
       return std::string(buf);
@@ -671,6 +825,11 @@ text:
           int h = -1, m = -1;
           if (sscanf(x.c_str(), "%d:%d", &h, &m) != 2 || h < 0 || h > 23 || m < 0 || m > 59) {
             ESP_LOGW("light", "Light Off Time '%s' is not HH:MM; kept the stored value", x.c_str());
+            id(light_ctl_off).publish_state(id(light_ctl_off).state);
+            return;
+          }
+          if (id(light_sun_plateau)[*i] > 0) {
+            ESP_LOGW("light", "this phase follows the sun; set Light Full Brightness Hours to 0 to use fixed times");
             id(light_ctl_off).publish_state(id(light_ctl_off).state);
             return;
           }
