@@ -171,7 +171,9 @@ Ratios are deliberate: white is the only dimming lever, and red/green/blue track
 it at 0.8 / 0.45 / 0.3. Chihiros' own default is blue at 0.8 of white, which is
 most of why a new Pro fixture grows algae. There is no CO2 on this tank, so
 carbon — not light — caps plant growth, and every watt past that cap feeds algae.
-W 45 is the ceiling until CO2 exists.
+Phase 2 (W 55, an estimated 40–50 µmol/m²/s at the substrate) is the ceiling
+until CO2 exists; Phases 3–4 are the CO2 ladder. See the DEFAULTS comment in
+`packages/light_wrgb2.yaml` for the PAR each phase is sized to.
 
 The automation sets the five numbers and both times, waits 10 s, then presses
 apply. The wait is not padding: changing a photoperiod time makes the bridge push

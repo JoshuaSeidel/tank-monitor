@@ -271,7 +271,15 @@ select:
 script:
   # DEFAULTS -- the one place default values are written down. Times in
   # minutes since midnight; W is the dimming lever, R/G/B track it at
-  # 0.8 / 0.45 / 0.3. Writes every phase (only: -1) on first boot, or just
+  # roughly 0.8 / 0.45 / 0.3. Sized for PAR at the substrate of the 75
+  # (lamp on its stock legs, ~46 cm of water), estimated from a PAR sweep
+  # of a WRGB II Pro 90 (Chihiros publishes none), so +/-30%:
+  #   Phase 1 ~32-37  bottom of the 30-50 band for a fertilised, no-CO2 tank
+  #   Phase 2 ~40-50  the no-CO2 ceiling; past ~50-60 algae outgrows plants
+  #   Phase 3 ~55-65  CO2 on (hold here 1-2 weeks while CO2 settles)
+  #   Phase 4 ~75-90  CO2 dialled in; what the red stems want
+  # The previous ladder (W25..W45) put the substrate at ~16-37, i.e. the
+  # old ceiling was the bottom of the right band. Writes every phase (only: -1) on first boot, or just
   # one phase for "Reset Light Phase to Defaults". After that the stored
   # table (light_table) is the truth and these numbers are never read.
   - id: light_seed_defaults
@@ -281,10 +289,10 @@ script:
       - lambda: |-
           static const int defaults[35] = {
             540, 840, 30,  0,  0,  0,  0,   // Off (cycling)
-            540, 840, 30, 25, 20, 12,  8,   // Phase 1 - Plants in
-            540, 900, 30, 30, 25, 14,  9,   // Phase 2 - Shrimp
-            540, 900, 45, 35, 28, 16, 10,   // Phase 3 - Fish
-            540, 960, 45, 45, 36, 20, 14,   // Phase 4 - Mature
+            540, 960, 45, 45, 36, 20, 14,   // Phase 1 - Plants in
+            540, 960, 45, 55, 45, 28, 20,   // Phase 2 - Shrimp
+            540, 990, 45, 60, 50, 32, 24,   // Phase 3 - Fish
+            540, 990, 45, 70, 60, 38, 30,   // Phase 4 - Mature
           };
           for (int ph = 0; ph < 5; ph++) {
             if (only != -1 && ph != only) continue;
