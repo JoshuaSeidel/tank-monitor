@@ -1,3 +1,11 @@
+# =====================================================================
+# RETIRED 2026-09-29 -- DO NOT FLASH. The light pod is gone.
+# The 75 gal now runs on ONE board, tank-monitor-allinone-freenove-remote.yaml,
+# which reads the light sensors and pH itself and holds the lamp over BLE.
+# Its controller_mac placeholder below is left unset on purpose: it makes
+# the build fail rather than produce a pod that pairs with nothing.
+# Kept for its history and its comments only.
+# =====================================================================
 # LIGHT POD -- XIAO ESP32-S3, a BH1750, an AS7341 and the Gravity pH board,
 # over the 75 gal. (A SparkFun Qwiic Pocket ESP32-C6 build also exists, as
 # boards/sparkfun-esp32c6-pocket-light-pod.yaml; swap the board line below to

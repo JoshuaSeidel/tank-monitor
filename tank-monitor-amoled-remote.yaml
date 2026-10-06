@@ -19,20 +19,19 @@
 # The CYD keeps ESP-NOW and keeps working, untouched, until it retires.
 #
 # ---------------------------------------------------------------------
-# s3_ble_mac -- you must set this
+# s3_ble_mac -- the nano controller's BLE address
 # ---------------------------------------------------------------------
 # ESPHome's ble_client can only address a peer by MAC; there is no name- or
-# service-based connect. Find the controller's at its boot log:
+# service-based connect. The controller (tank-monitor-s3, built from
+# tank-monitor-xiao-remote.yaml) publishes its own as "Controller BLE MAC"
+# (sensor.tank_monitor_s3_controller_ble_mac), read from the running BLE
+# stack. The value below is that sensor on 2026-10-06, and is the address
+# this panel was already linked to that day (sensor.tank_monitor_round_ble_target,
+# binary_sensor.tank_monitor_round_controller_link on).
 #
-#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
-#
+# A new controller chip means a new MAC: read the sensor (or the boot log
+# line "[esp32_ble:...] ESP-IDF BLE MAC address: ...") and change it here.
 # It is NOT the WiFi MAC and NOT the OTA/mDNS name.
-#
-# The value shipped below is deliberately NOT a valid MAC, so ESPHome's
-# address validator rejects it and the build stops until you replace it.
-# A real-looking placeholder would compile cleanly and then simply never
-# connect -- silently, forever -- which is the failure this project keeps
-# meeting. Better to fail at the keyboard than at the tank.
 #
 # ---------------------------------------------------------------------
 # device_name
@@ -43,8 +42,8 @@
 substitutions:
   device_name: tank-monitor-round
   friendly_name: Tank Monitor Round
-  # ---- REPLACE THIS with the S3 controller's BLE MAC (see above) ----
-  s3_ble_mac: "SET-ME-FROM-THE-S3-BOOT-LOG"
+  # The nano's controller, tank-monitor-s3 -- see "s3_ble_mac" above.
+  s3_ble_mac: "E0:72:A1:F7:D6:86"
   # chemistry.yaml derives its MQTT prefix from device_name. This panel
   # predates that, and Home Assistant publishes the nano tank's tests under
   # the original prefix -- pin it so nothing changes here.

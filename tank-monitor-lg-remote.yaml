@@ -1,3 +1,11 @@
+# =====================================================================
+# RETIRED 2026-09-29 -- DO NOT FLASH. The XIAO 75 gal controller is gone.
+# The 75 gal now runs on ONE board, tank-monitor-allinone-freenove-remote.yaml,
+# which reads the light sensors and pH itself and holds the lamp over BLE.
+# It uses the SAME device_name (tank-monitor-75-gallon): flashed and powered,
+# it would overwrite the live controller's entities in Home Assistant.
+# Kept for its history and its comments only.
+# =====================================================================
 # LARGE TANK controller -- XIAO ESP32-S3, dual heaters, dual probes.
 # Put THIS file in the ESPHome dashboard. Nothing else lives locally except
 # secrets.yaml, so a push to main is all the next build needs.

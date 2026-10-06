@@ -1,3 +1,11 @@
+# =====================================================================
+# RETIRED 2026-09-29 -- DO NOT FLASH. The separate light bridge is gone.
+# The 75 gal now runs on ONE board, tank-monitor-allinone-freenove-remote.yaml,
+# which reads the light sensors and pH itself and holds the lamp over BLE.
+# Its MAC placeholders below are left unset on purpose: a second device
+# holding the lamp would fight the controller for its one connection.
+# Kept for its history and its comments only.
+# =====================================================================
 # LARGE TANK light bridge -- Chihiros WRGB II Pro 120 over BLE.
 # Put THIS file in the ESPHome dashboard.
 #

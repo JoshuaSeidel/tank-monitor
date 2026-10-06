@@ -19,21 +19,19 @@
 # collide on every id AND bring up two radios. Never do it.
 #
 # ---------------------------------------------------------------------
-# s3_ble_mac -- you must set this
+# s3_ble_mac -- the 75 gal controller's BLE address
 # ---------------------------------------------------------------------
 # ESPHome's ble_client can only address a peer by MAC; there is no name- or
-# service-based connect. Find the 75 gal controller's at its boot log:
+# service-based connect. The controller publishes its own as "Controller BLE
+# MAC" (sensor.tank_monitor_75_gallon_controller_ble_mac), read from the
+# running BLE stack rather than computed. The value below is that sensor on
+# 2026-10-06: the all-in-one Freenove board (Wi-Fi MAC D0:CF:13:02:1A:60,
+# BLE = Wi-Fi + 2). The live panel was linked to it that day
+# (binary_sensor.tank_monitor_75g_controller_link on, frames 1 s old).
 #
-#   [esp32_ble:...] ESP-IDF BLE MAC address: AA:BB:CC:DD:EE:FF
-#
-# It is NOT the WiFi MAC and NOT the OTA/mDNS name. The controller also
-# publishes it as "Controller BLE MAC" once it is up -- in Home Assistant,
-# sensor.tank_monitor_75_gallon_controller_ble_mac.
-#
-# The value below is deliberately NOT a valid MAC, so ESPHome's address
-# validator rejects it and the build stops until you replace it. A
-# real-looking placeholder would compile cleanly and then never connect --
-# silently, forever. Better to fail at the keyboard than at the tank.
+# A new controller chip means a new MAC: read the sensor (or the boot log
+# line "[esp32_ble:...] ESP-IDF BLE MAC address: ...") and change it here.
+# It is NOT the WiFi MAC and NOT the OTA/mDNS name.
 #
 # THIS IS THE 75 GAL CONTROLLER'S MAC, NOT THE 12-GAL XIAO'S. Both are ESP32-S3 and
 # both print the same log line. Pointing this panel at the 12-gal
@@ -54,8 +52,8 @@
 substitutions:
   device_name: tank-monitor-75g
   friendly_name: Tank Monitor 75G Panel
-  # ---- REPLACE THIS with the 75 gal controller's BLE MAC (see above) ----
-  s3_ble_mac: "SET-ME-FROM-THE-75-GALLON-CONTROLLER-BOOT-LOG"
+  # The 75 gal all-in-one controller -- see "s3_ble_mac" above.
+  s3_ble_mac: "D0:CF:13:02:1A:62"
 
   # ---- Where the hardware is, in inches, for the Vessel page ----
   # The board file draws the back wall from these. Only the ones that
