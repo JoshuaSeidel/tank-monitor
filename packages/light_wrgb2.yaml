@@ -19,6 +19,7 @@
 #   global cal_nir_ref  the learned daylight reference (ble_link_v3.yaml)
 #   time sntp_time    packages/base.yaml
 #   esp32_ble         packages/ble_link_v3.yaml (the panel server)
+#   ble_guard         packages/ble_link_v3.yaml (disconnect reasons)
 #
 # ---------------------------------------------------------------------
 # WHY THE LINK IS HELD OPEN
@@ -102,9 +103,9 @@ ble_client:
     id: light_ble
     on_connect:
       then:
-        - globals.set:
-            id: light_linked
-            value: 'true'
+        - lambda: |-
+            id(light_linked) = true;
+            id(light_up_ms) = millis();
         - esp32_ble_tracker.stop_scan:
         - logger.log:
             level: INFO
@@ -113,20 +114,16 @@ ble_client:
         # down -- a reboot, a release to the app -- is overwritten here.
         - delay: 500ms
         - script.execute: light_push
+    # Fires on ESP_GATTC_CLOSE_EVT only. ESPHome has two ways to end a link
+    # WITHOUT that event: its 10 s "Timeout waiting for CLOSE_EVT, forcing
+    # IDLE" path in BLEClientBase::loop(), and a BLE stack teardown. Either
+    # one left Light Linked stuck on and the scan never restarted -- the
+    # watchdog interval below is what catches those.
     on_disconnect:
       then:
-        - globals.set:
-            id: light_linked
-            value: 'false'
-        - if:
-            condition:
-              lambda: return !id(light_released);
-            then:
-              - logger.log:
-                  level: WARN
-                  format: "light: link lost, scanning to reconnect"
-              - esp32_ble_tracker.start_scan:
-                  continuous: true
+        - script.execute:
+            id: light_link_down
+            cause: 1
 
 globals:
   - id: light_device
@@ -140,6 +137,33 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Link diagnostics. Not restored: they describe this boot's link, and
+  # millis() stamps mean nothing after a reboot. "Light Link Drops" is
+  # total_increasing, so Home Assistant handles the reset to 0.
+  #   light_down_cause  0 none yet, 1 disconnect event, 2 found by watchdog
+  - id: light_link_drops
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: light_up_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: light_down_cause
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Consecutive 10 s watchdog checks that disagreed with the real client
+  # state / found the scan not running. Two in a row before acting, so a
+  # transition caught mid-flight is not "corrected".
+  - id: light_wd_strikes
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: light_scan_strikes
+    type: int
+    restore_value: false
+    initial_value: '0'
   # The selected phase, resolved from the table in light_select_phase.
   # Detection compares the lamp against THIS, not against what was last
   # successfully pushed.
@@ -500,6 +524,32 @@ script:
                 level: INFO
                 format: "light: not linked; the phase goes out on connect"
 
+  # The link is down, however that was found out. One place, so the
+  # disconnect event and the watchdog cannot disagree about what "down"
+  # does: clear Light Linked, count the drop (not when the lamp was handed
+  # to the app on purpose), and scan to reconnect unless released.
+  - id: light_link_down
+    mode: queued
+    parameters:
+      cause: int
+    then:
+      - lambda: |-
+          if (id(light_linked) && !id(light_released)) {
+            id(light_link_drops)++;
+            id(light_down_cause) = cause;
+          }
+          id(light_linked) = false;
+      - if:
+          condition:
+            lambda: return !id(light_released);
+          then:
+            - logger.log:
+                level: WARN
+                format: "light: link lost (%s), scanning to reconnect"
+                args: ['cause == 2 ? "found by watchdog" : "disconnect event"']
+            - esp32_ble_tracker.start_scan:
+                continuous: true
+
   # Hand the lamp to the Chihiros app for 30 minutes, then take it back.
   # restart: pressing again extends the window rather than stacking.
   - id: light_release
@@ -534,6 +584,53 @@ switch:
     restore_mode: ALWAYS_ON
 
 interval:
+  # LINK WATCHDOG. Light Linked is set and cleared by the client's connect
+  # and close events, and both can be missed (see on_disconnect above). This
+  # compares it with the client's real state every 10 s and fixes whichever
+  # way it is wrong, then checks that an unlinked lamp is actually being
+  # scanned for -- the scan is what reconnects it, and nothing else restarts
+  # a scan that has stopped.
+  - interval: 10s
+    then:
+      - lambda: |-
+          using esphome::esp32_ble_tracker::ClientState;
+          using esphome::esp32_ble_tracker::ScannerState;
+          if (id(light_released)) {           // handed to the app on purpose
+            id(light_wd_strikes) = 0;
+            id(light_scan_strikes) = 0;
+            return;
+          }
+          const bool real = id(light_ble).connected();
+          if (id(light_linked) != real) {
+            if (++id(light_wd_strikes) < 2) return;
+            id(light_wd_strikes) = 0;
+            if (!real) {
+              ESP_LOGW("light", "watchdog: Light Linked was on but the client is %s -- its disconnect was never "
+                       "reported; clearing it and scanning", esphome::esp32_ble_tracker::client_state_to_string(id(light_ble).state()));
+              id(light_link_down).execute(2);
+            } else {
+              ESP_LOGW("light", "watchdog: the client is connected but Light Linked was off -- its connect was "
+                       "never reported; setting it and pushing the phase");
+              id(light_linked) = true;
+              id(light_up_ms) = millis();
+              id(light_push).execute();
+            }
+            return;
+          }
+          id(light_wd_strikes) = 0;
+          // Unlinked, idle, and nobody scanning: the lamp can never come back.
+          auto *trk = esphome::esp32_ble_tracker::global_esp32_ble_tracker;
+          if (!real && trk != nullptr && id(light_ble).state() == ClientState::IDLE &&
+              trk->get_scanner_state() == ScannerState::IDLE) {
+            if (++id(light_scan_strikes) < 2) return;
+            id(light_scan_strikes) = 0;
+            ESP_LOGW("light", "watchdog: lamp unlinked and no scan running; restarting the scan");
+            trk->set_scan_continuous(true);
+            trk->start_scan();
+          } else {
+            id(light_scan_strikes) = 0;
+          }
+
   - interval: 1min
     then:
       - lambda: |-
@@ -888,6 +985,31 @@ binary_sensor:
     lambda: return id(light_not_responding);
 
 sensor:
+  # Link health. Drops counts every unplanned loss of the lamp link (not a
+  # release to the app); a steady climb with "supervision timeout" in Light
+  # Link Last Drop is a radio-range problem, "peer closed it" is the lamp.
+  - platform: template
+    name: "Light Link Drops"
+    icon: mdi:bluetooth-off
+    entity_category: diagnostic
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: return (float) id(light_link_drops);
+
+  # Minutes since the link last came up; unknown while it is down.
+  - platform: template
+    name: "Light Link Uptime"
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    unit_of_measurement: min
+    device_class: duration
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: |-
+      if (!id(light_linked)) return NAN;
+      return (float) ((millis() - id(light_up_ms)) / 60000UL);
+
   - platform: template
     name: "Light Learned Lux"
     unit_of_measurement: lx
@@ -913,6 +1035,27 @@ sensor:
       return NAN;
 
 text_sensor:
+  # Why the lamp link last ended: the radio's own disconnect reason, as the
+  # board's GATT layer saw it (packages/ble_link_v3.yaml's ble_link_guard),
+  # or that the disconnect was never reported and the watchdog found it.
+  - platform: template
+    name: "Light Link Last Drop"
+    icon: mdi:bluetooth-off
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: |-
+      if (id(light_down_cause) == 0) return {"none since boot"};
+      const int r = id(ble_guard).last_disconnect_reason(id(light_ble).get_address());
+      char b[96];
+      if (r < 0)
+        snprintf(b, sizeof(b), "%s, no reason reported",
+                 id(light_down_cause) == 2 ? "lost without an event (watchdog)" : "disconnected");
+      else
+        snprintf(b, sizeof(b), "%s%s (0x%02X)",
+                 id(light_down_cause) == 2 ? "watchdog; last radio reason: " : "",
+                 esphome::ble_link_guard::BLELinkGuard::reason_str(r), r);
+      return {std::string(b)};
+
   - platform: template
     name: "Light Expected"
     icon: mdi:calendar-clock
