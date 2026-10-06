@@ -120,6 +120,49 @@ esp32:
 # the device name, and same-named entities on two boards collide.
 mqtt:
   discovery_unique_id_generator: mac
+  # NETWORK OUTAGES MUST NOT STOP THE HEATER LOOP.
+  #
+  # 2026-09-30 11:01 the router went down for ~4 minutes. This board's last
+  # MQTT message was 11:00:06; it rebooted at 11:02:06 on the TASK WATCHDOG
+  # (uptime 185 s at 11:05:11), i.e. the main loop -- the loop that runs the
+  # heaters -- stopped for over 5 s about a minute into the outage. Broker
+  # restarts (TCP refused at once) never did this; a 15 s router stall on
+  # 2026-10-06 did not either. Two things in that path can block the loop
+  # past the watchdog's 5 s, and both are fixed here and below:
+  #
+  # idf_send_async: with it OFF (ESPHome's default) every publish runs
+  # esp_mqtt_client_publish() ON THE MAIN LOOP. That takes the MQTT client's
+  # lock -- held by the MQTT task for its whole connect, up to its 10 s
+  # network timeout -- and then writes the socket, also with a 10 s timeout.
+  # ESPHome's own source says so ("might block for several seconds ... network
+  # timeout (10s)"). On a link that is up but not passing traffic, or right
+  # after a reconnect when ~110 discovery messages go out at once, that is a
+  # 10 s stall of the heater loop. ON queues each publish for a separate task
+  # (30 deep; overflow is dropped and logged, never blocks).
+  #
+  # keepalive 60 s: the default 15 s ended the session on every short
+  # router stall (2026-10-06 02:49, "connection closed by client"), which
+  # then re-sends every entity's discovery and state in one burst. 60 s rides
+  # out a stall of under a minute; the broker marks the board offline after
+  # 90 s of real silence instead of ~22.
+  idf_send_async: true
+  keepalive: 60s
+
+# The fallback access point (packages/base.yaml) starts after 90 s without
+# Wi-Fi by default. It switches the radio to AP+STA on channel 1 and brings
+# up the captive portal -- on a radio that is also holding two BLE links --
+# and while the portal is up ESPHome stops scanning for the home network.
+# The 2026-09-30 watchdog reset landed 60-120 s into the outage, squarely on
+# that 90 s mark. Whether or not the AP start itself was the block, nothing
+# good comes of it on a board bolted to a tank with known credentials: a
+# router reboot is never 10 minutes, a credentials change is. Recovery by AP
+# still works -- it just waits until the network is really gone. (Wi-Fi's own
+# reboot_timeout, 15 min, is left alone: the AP is up from 10 to 15 min, the
+# board reboots at 15 with its relays seeded off, and regulation resumes
+# within seconds; the cycle repeats only while the network stays down.)
+wifi:
+  ap:
+    ap_timeout: 10min
 
 # Two 1-Wire buses, one probe each: a flooded probe takes down its own bus
 # and nothing else, and sensors.yaml's address-less probe drops in unmodified
@@ -898,6 +941,51 @@ text_sensor:
       check(id(bus_spec), 0x39, "AS7341");
       if (any_bad && !id(i2c_autopsy).empty()) out += "; at boot: " + id(i2c_autopsy);
       return out;
+
+  # WHY IT LAST CRASHED -- kept across the reboot and across power cuts
+  # (components/crash_report). "Reset Reason" says only "task watchdog";
+  # these say where. "Last Crash" is the reason, the core, and for a
+  # watchdog the unit of work the main loop was stuck in and for how long,
+  # e.g. "Task wdt on core 0; main loop stuck 5.0 s in 'mqtt' ...".
+  # "Last Crash Backtrace" is the PC and backtrace; decode against the
+  # firmware.elf of the build that crashed:
+  #   xtensa-esp32s3-elf-addr2line -pfiaC -e .esphome/build/<name>/build/<name>.elf 0x... 0x...
+  # Both read "none recorded" until there is something to record.
+  - platform: template
+    name: "Last Crash"
+    icon: "mdi:alert-octagon-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(crash).summary()};'
+  - platform: template
+    name: "Last Crash Backtrace"
+    icon: "mdi:format-list-numbered"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(crash).backtrace()};'
+
+button:
+  # Once a crash has been read and dealt with, so the next one is not
+  # confused with it.
+  - platform: template
+    name: "Clear Crash Report"
+    icon: "mdi:delete-sweep-outline"
+    entity_category: config
+    on_press:
+      - lambda: id(crash).clear();
+
+# The crash record itself: ESPHome's panic backtrace plus a task-watchdog
+# breadcrumb, captured at boot and saved to flash. See the text sensors above.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [crash_report]
+    refresh: 0s
+
+crash_report:
+  id: crash
 
 # The AS7341 and its derived values (shares, NIR ratio, saturation), shared
 # with the light pod. Included from HERE so this board file alone is a
