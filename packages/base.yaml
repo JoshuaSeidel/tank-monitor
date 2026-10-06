@@ -123,6 +123,20 @@ mqtt:
   will_message:
     topic: ${device_name}/status
     payload: offline
+  # PUBLISHING MUST NEVER STALL THE MAIN LOOP. With this off (ESPHome's
+  # default) every publish runs esp_mqtt_client_publish() on the main loop:
+  # it takes the MQTT client's lock, which the MQTT task holds through a whole
+  # reconnect (up to its 10 s network timeout), then writes the socket with
+  # the same 10 s timeout -- ESPHome's own source says it "might block for
+  # several seconds". On a controller that loop runs the heaters, and the
+  # task watchdog reboots the board after 5 s; on 2026-09-30 a 4-minute
+  # router outage did exactly that to the 75 gal board. On, each publish is
+  # queued (30 deep) for a separate task and the loop never waits. A full
+  # queue drops the message and counts it in the log; discovery and initial
+  # states that fail to queue are retried by ESPHome on the next loop, so a
+  # reconnect burst still arrives complete. Every board here is ESP-IDF,
+  # which this option requires.
+  idf_send_async: true
 
 # Shared by every board's display lambda. Panels differ; the palette does
 # not -- these are chosen for contrast at 5-8 ft, not for a specific LCD.

@@ -127,25 +127,17 @@ mqtt:
   # (uptime 185 s at 11:05:11), i.e. the main loop -- the loop that runs the
   # heaters -- stopped for over 5 s about a minute into the outage. Broker
   # restarts (TCP refused at once) never did this; a 15 s router stall on
-  # 2026-10-06 did not either. Two things in that path can block the loop
-  # past the watchdog's 5 s, and both are fixed here and below:
-  #
-  # idf_send_async: with it OFF (ESPHome's default) every publish runs
-  # esp_mqtt_client_publish() ON THE MAIN LOOP. That takes the MQTT client's
-  # lock -- held by the MQTT task for its whole connect, up to its 10 s
-  # network timeout -- and then writes the socket, also with a 10 s timeout.
-  # ESPHome's own source says so ("might block for several seconds ... network
-  # timeout (10s)"). On a link that is up but not passing traffic, or right
-  # after a reconnect when ~110 discovery messages go out at once, that is a
-  # 10 s stall of the heater loop. ON queues each publish for a separate task
-  # (30 deep; overflow is dropped and logged, never blocks).
+  # 2026-10-06 did not either. The publish path that can block for 10 s is
+  # closed for every board in packages/base.yaml (idf_send_async). What is
+  # specific to this board is below and in the wifi block after it.
   #
   # keepalive 60 s: the default 15 s ended the session on every short
   # router stall (2026-10-06 02:49, "connection closed by client"), which
   # then re-sends every entity's discovery and state in one burst. 60 s rides
   # out a stall of under a minute; the broker marks the board offline after
-  # 90 s of real silence instead of ~22.
-  idf_send_async: true
+  # 90 s of real silence instead of ~22. Kept to this board on purpose:
+  # every other board keeps ESPHome's default, so how fast Home Assistant
+  # sees them go offline is unchanged.
   keepalive: 60s
 
 # The fallback access point (packages/base.yaml) starts after 90 s without
