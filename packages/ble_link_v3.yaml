@@ -170,8 +170,35 @@ globals:
 # lux. ESPHome's server resumes advertising after a connection precisely so
 # a second client can still find it -- but max_clients defaults to 1, which
 # silently means the second one can never attach.
+#
+# On the all-in-one board the third slot is the board's OWN link out to the
+# lamp (packages/light_wrgb2.yaml), and that link is the reason for the
+# guard below: Bluedroid reports every LE link to every GATT app, so the
+# server counts the lamp as one of its "clients", and ESPHome only resumes
+# advertising after a connect while that count is under max_clients. It also
+# never looks at whether an advertising start was refused. On 2026-09-29 the
+# server was seen to stop advertising once the lamp link came up, leaving
+# the panel nothing to reconnect to.
 esp32_ble:
   max_connections: 3
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [ble_link_guard]
+    refresh: 0s
+
+# Watches the radio's own link and advertising events, counts links by their
+# real role (the board as central = lamp, as peripheral = panel), and puts
+# advertising back whenever a connection slot is free and advertising is not
+# known to be running -- logged at WARN, counted in "BLE Advertising
+# Restarts". It re-asserts once a minute even when advertising looks fine,
+# because the failure it guards against is the controller stopping without
+# saying so. A refused start is logged with the stack's status code.
+ble_link_guard:
+  id: ble_guard
 
 esp32_ble_server:
   max_clients: 2
@@ -359,6 +386,39 @@ sensor:
     accuracy_decimals: 3
     update_interval: 60s
     lambda: 'return id(cal_nir_ref) > 0.0f ? id(cal_nir_ref) : NAN;'
+
+  # The panel's side of the link, from the board. "BLE Links" counts every
+  # open link, the board's own one to the lamp included; with the lamp held
+  # and the panel attached it reads 2 on the all-in-one, 1 on a board with
+  # no lamp. Restarts climbing means advertising keeps being found off --
+  # the log says whether a start was refused and with what status.
+  - platform: template
+    name: "BLE Links"
+    icon: "mdi:bluetooth-connect"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return (float) id(ble_guard).link_count();'
+
+  - platform: template
+    name: "BLE Advertising Restarts"
+    icon: "mdi:bluetooth-audio"
+    entity_category: diagnostic
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return (float) id(ble_guard).restarts();'
+
+binary_sensor:
+  # On while the board is advertising, i.e. while a panel could find it. Off
+  # is normal only when every connection slot is taken.
+  - platform: template
+    trigger_on_initial_state: true
+    name: "BLE Advertising"
+    icon: "mdi:bluetooth-audio"
+    device_class: running
+    entity_category: diagnostic
+    lambda: 'return id(ble_guard).advertising();'
 
 button:
   - platform: template
