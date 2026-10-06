@@ -1,9 +1,31 @@
+# LOCAL validation wrapper for boards/cyd-esp32-2432s028r.yaml -- the CYD
+# display panel (deployed as tank-monitor-v2 by tank-monitor-cyd-remote.yaml).
+#
+# Same package list as that deploy wrapper, but every package is !include'd
+# from the working tree, so `esphome config` and `esphome compile` on this
+# file test what you just edited rather than what is on main. A TEST harness,
+# not the deploy wrapper.
+#
+# Display-only, like the deploy wrapper: remote_display.yaml REPLACES
+# control.yaml and sensors.yaml, and the panel runs no BLE (BLE alongside
+# ESP-NOW took the CYD off the network, 2026-09-04).
+#
+# device_name carries a -test suffix so a stray flash of a half-edited build
+# cannot impersonate the live panel on MQTT.
 substitutions:
-  device_name: tank-monitor-v2
-  friendly_name: Tank Monitor v2
+  device_name: tank-monitor-v2-test
+  friendly_name: Tank Monitor v2 TEST
+  chem_topic_prefix: tank-monitor
 packages:
   base: !include packages/base.yaml
-  control: !include packages/control_local.yaml
-  sensors: !include packages/sensors.yaml
-  chem: !include packages/chemistry.yaml
+  webui: !include packages/webui.yaml
+  remote: !include packages/remote_display.yaml
+  chemistry: !include packages/chemistry.yaml
   board: !include boards/cyd-esp32-2432s028r.yaml
+
+# The component from the working tree, not from main.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tank_webui]
