@@ -84,113 +84,119 @@ edit it in the UI, export it back to this file.
 
 ## 75-gal light — Chihiros WRGB II Pro 120
 
+**The tank's own board owns the light.** Since 2026-09-29 the all-in-one
+controller (`tank-monitor-75-gallon`, `boards/allinone-freenove.yaml`) holds a
+BLE link to the lamp and pushes the selected phase itself
+(`packages/light_wrgb2.yaml`). Home Assistant only shows and sets it, exactly as
+it does for the heaters; nothing in HA re-pushes a schedule. The old
+`aquarium-light-bridge` ESP32, `input_select.aquarium_75_light_phase` and
+`automation.aquarium_75_apply_light_phase` are retired and were deleted from HA
+on 2026-10-06.
+
 Lives on the **`dashboard-modern` → Aquarium** view (`/dashboard-modern/aquarium`),
-as the **Light** section of the 75-gal block, between "Heaters and controller" and
-"Trends". It is gated on `input_select.aquarium_tank` = `75 Gal` like every other
-section there. This is *not* on the `aquarium-tank` dashboard that
+in the 75-gal block, gated on `input_select.aquarium_tank` = `75 Gal` like every
+other section there. This is *not* on the `aquarium-tank` dashboard that
 `aquarium-dashboard.json` tracks.
 
-| Object | What it is |
+| Entity (prefix `tank_monitor_75_gallon_`) | What it is |
 |---|---|
-| `input_select.aquarium_75_light_phase` | The phase selector — five presets |
-| `automation.aquarium_75_apply_light_phase` | Pushes the selected preset to the bridge |
-| `number.olivers_room_aquarium_light_bridge_wrgb2_schedule_*` | The values the fixture is told to hold |
-| `time.olivers_room_aquarium_light_bridge_photoperiod_start` / `_end` | The window |
-| `button.olivers_room_aquarium_light_bridge_wrgb2_apply_schedule` | Push now, over BLE |
+| `select…light_phase` | The phase: Off (cycling), Phase 1–4. Changing it pushes at once |
+| `text…light_on_time` / `text…light_off_time` | Start and end of the photoperiod (HH:MM) for the selected phase |
+| `number…light_ramp` | Dawn/dusk ramp, minutes |
+| `number…light_white` / `_red` / `_green` / `_blue` | Plateau brightness, % |
+| `number…light_full_brightness_hours` | >0 = this phase follows the sun (below); 0 = fixed times |
+| `button…push_light_phase_now` | Re-send the selected phase |
+| `button…release_light_for_app_30_min` | Hands the lamp to the Chihiros app for 30 min, then takes it back and re-pushes |
+| `button…reset_light_phase_to_defaults` | Restores the selected phase to the table below |
+| `binary_sensor…light_linked` | The BLE link to the lamp is up |
+| `binary_sensor…light_not_responding` | Three re-pushes did not make the lamp match the schedule |
+| `sensor…light_expected` | What the lamp should be doing now: lit / ramping / dark / off phase |
+| `sensor…light_link_drops`, `…light_link_uptime`, `…light_link_last_drop` | Link health and the radio's reason for the last drop |
 
-Note the bridge deployed as `aquarium-light-bridge` in the "Oliver's Room" area,
-not as the `tank-monitor-lg-light` name in the repo wrapper — so every entity ID
-carries an `olivers_room_aquarium_light_bridge` prefix. Same intentional
-repo-name/deployed-name split as the 75-gal controller.
+The controls edit **the selected phase** and are stored in the board's flash,
+so tuning never needs a reflash; pick another phase and they show its values.
 
-The phases (09:00 anchored, daytime — the tank is lit while someone is at the
-desk, 07:00–17:00, not in the evening):
+**Follow the sun (Phases 3–4).** With Full Brightness Hours > 0 the board
+computes the window from today's sunrise and sunset at the tank (south-central
+Pennsylvania, from the board's own clock — no HA needed): lights span sunrise
+to sunset, the plateau is capped at that many hours, and the rest of the day
+becomes the dawn and dusk ramp (15–150 min; on a long summer day the window is
+trimmed symmetrically around solar noon). It is recomputed after midnight and
+pushed while the lamp is dark. On Time / Off Time / Ramp then show the
+computed values and refuse edits. Phases 1–2 keep fixed hours.
 
-| Phase | Window | Ramp | W / R / G / B |
-|---|---|---|---|
-| Off (cycling) | 09:00–14:00 | 30 | 0 / 0 / 0 / 0 |
-| 1 — Plants in | 09:00–14:00 | 30 | 25 / 20 / 12 / 8 |
-| 2 — Shrimp | 09:00–15:00 | 30 | 30 / 25 / 14 / 9 |
-| 3 — Fish | 09:00–15:00 | 45 | 35 / 28 / 16 / 10 |
-| 4 — Mature | 09:00–16:00 | 45 | 45 / 36 / 20 / 14 |
+Defaults (`light_seed_defaults` / `light_seed_sun` in
+`packages/light_wrgb2.yaml` — what a fresh board and "Reset" write; the live
+values are whatever has been tuned since):
 
-**The schedule lives on the fixture, not here.** The bridge connects, pushes the
-frame, and disconnects; the lamp then runs the photoperiod off its own RTC. Home
-Assistant going down does not darken the tank, and neither does the bridge — the
-same reasoning that keeps the CO2 failsafe on absolute times.
+| Phase | Window | Ramp | W / R / G / B | Follows the sun |
+|---|---|---|---|---|
+| Off (cycling) | — | — | 0 / 0 / 0 / 0 (manual mode, dark) | no |
+| 1 — Plants in | 09:00–16:00 | 45 | 45 / 36 / 20 / 14 | no |
+| 2 — Shrimp | 09:00–16:00 | 45 | 55 / 45 / 28 / 20 | no |
+| 3 — Fish | sunrise–sunset (fallback 09:00–16:30) | computed (fallback 45) | 60 / 50 / 32 / 24 | 7 h plateau |
+| 4 — Mature | sunrise–sunset (fallback 09:00–16:30) | computed (fallback 45) | 70 / 60 / 38 / 30 | 7.5 h plateau |
 
-### Off is manual mode, not a zeroed schedule
-
-Off switches the lamp to manual mode at 0, which darkens it at once. That
-choice predates the bridge fix below and was kept because it is proven.
-
-**The bridge fix (2026-09-26, chihiros-esphome `ca8fc35`).** Two symptoms
-looked like lamp firmware limits and were not:
-
-- 2026-09-23: an all-zero auto schedule left the tank lit.
-- 2026-09-26: Off → Phase 1 at 09:41, inside a 09:00–14:00 window, stored the
-  schedule but left the tank dark until the next on/off edge.
-
-The bridge's own btsnoop notes record the app's auto sequence as
-`MODE 0x12 → MODE 0x05 → SCHEDULE`, but `prepare()` sent
-`MODE 0x07 → SCHEDULE → MODE 0x12`. `0x07` is a CO2 command; `0x05` — clear
-the stored auto slots — was never sent, so schedules **accumulated** in the
-lamp instead of replacing each other. That is why the zeroed schedule
-"didn't darken" it: the Phase 1 slot was still stored beside it.
-
-With the app's sequence restored, a phase change applies within seconds,
-mid-window included. Confirmed on the lamp 2026-09-26: Off went dark, then
-Phase 1 came back on at once.
-
-So "Off (cycling)" takes the other path in `WRGB2Device::prepare()`:
-
-```cpp
-if (auto_mode) {                        // lit phases
-    push(reset_schedule(seq()));
-    push(wrgb_schedule(..., r, g, b, w, seq()));
-    push(reset_auto(seq()));
-    push(rtc_packet(time, seq()));      // "triggers lamp schedule evaluation"
-} else {                                // Off — immediate, and it works
-    push(wrgb_channel(WRGB_R, r, seq()));
-    ...
-}
-```
-
-The automation sets the five numbers to 0 **first**, then turns the auto-mode
-switch off. Order matters: in manual mode the bridge sends the same
-`schedule_*` numbers as per-channel brightness, so they have to be 0 before the
-mode flips. The manual `wrgb2_red/green/blue/white` numbers are never sent —
-`on_connect` always passes the `schedule_*` ones to `prepare()`, which looks
-like an upstream bug in the fork, but is harmless here.
-
-Trade-off worth knowing: in Off, the lamp is in manual mode and no longer
-running a schedule, so it will not light itself at 09:00. That is the desired
-behaviour while cycling, and the stored schedule is zeroed anyway.
-
-Ratios are deliberate: white is the only dimming lever, and red/green/blue track
-it at 0.8 / 0.45 / 0.3. Chihiros' own default is blue at 0.8 of white, which is
-most of why a new Pro fixture grows algae. There is no CO2 on this tank, so
-carbon — not light — caps plant growth, and every watt past that cap feeds algae.
-Phase 2 (W 55, an estimated 40–50 µmol/m²/s at the substrate) is the ceiling
-until CO2 exists; Phases 3–4 are the CO2 ladder. See the DEFAULTS comment in
+Ratios are deliberate: white is the only dimming lever, and red/green/blue
+track it at roughly 0.8 / 0.45 / 0.3. Chihiros' own default is blue at 0.8 of
+white, which is most of why a new Pro fixture grows algae. Phase 2 (an
+estimated 40–50 µmol/m²/s at the substrate) is the ceiling until CO2 runs;
+Phases 3–4 are the CO2 ladder. See the DEFAULTS comment in
 `packages/light_wrgb2.yaml` for the PAR each phase is sized to.
 
-The automation sets the five numbers and both times, waits 10 s, then presses
-apply. The wait is not padding: changing a photoperiod time makes the bridge push
-on its own after a 1.5 s debounce, and the Chihiros bridge firmware crashes on
-overlapping BLE connections. Serialising is the point, and `mode: queued` keeps
-two rapid selections from interleaving.
+**The schedule still runs on the lamp.** A lit phase is pushed as an
+auto-mode schedule (clear slots → schedule → auto → clock, the app's own
+sequence — chihiros-esphome `ca8fc35`); the lamp then runs it off its RTC, so
+the board or HA going down does not darken the tank. "Off (cycling)" is manual
+mode at 0, which darkens it at once and does not relight itself. The board
+re-pushes at 03:00 daily to resync the lamp's drifting clock, and on every
+reconnect.
 
-### Two gaps worth knowing
+**The board checks the lamp.** `tank_lux` is lamp-only lux (daylight is
+removed by its near-infrared signature on the AS7341). During a plateau the
+board learns what "lit" reads; lit-when-it-should-be-dark or the reverse for
+5 minutes triggers a re-push, at most one per 15 minutes, and after three that
+do not take it raises Light Not Responding instead of hammering the radio.
 
-**Nothing verifies the fixture.** The 75-gal's two BH1750 runs are still disabled
-(they shorted the 3V3 rail), so no lux sensor confirms the lamp does what the
-dashboard says. If they are ever revived, the `light_on_lux` threshold cannot be
-copied from the nano's 18 — a 09:00–16:00 photoperiod overlaps room daylight,
-which alone would clear it.
+### 75-gal CO2
 
-**Selecting the phase already showing does nothing.** It is a state trigger, so
-re-picking the current option is not a change. Use *Push to fixture* to re-send.
+Rebuilt in HA on 2026-10-06 to follow the light the board is actually
+running, including the daily follow-the-sun times. The gas window is three
+template sensors over the board's Light On Time / Off Time / Ramp; tune the
+offsets in their `input_number` helpers, never in the automations:
+
+| Helper | Value |
+|---|---|
+| `sensor.aquarium_75_co2_start` | light on + ramp − `input_number.aquarium_75_co2_lead` (90 min) |
+| `sensor.aquarium_75_co2_stop` | light off − ramp − `input_number.aquarium_75_co2_stop_before_dusk` (90 min) |
+| `sensor.aquarium_75_bubbler_start` | CO2 stop + `input_number.aquarium_75_bubbler_gap_after_co2` (180 min) |
+
+All three go unknown when the board is offline, and an unknown time never
+fires — gas does not start on a guess.
+
+- **`automation.aquarium_75_co2_schedule`** — `switch.75g_co2` on at the start,
+  off at the stop, again one hour after the stop (failsafe), and at **17:00
+  absolute** (backstop that cannot be defeated by a blank sensor). The start is
+  refused — with a notification — unless the light phase is not Off and the
+  probe pH (`sensor.tank_monitor_75_gallon_water_ph`) is reporting and above the
+  floor + 0.2.
+- **`automation.aquarium_75_bubbler_schedule`** — `switch.75g_bubbler` off at the
+  CO2 start, on at the bubbler start, and on at **22:00 absolute** as a
+  backstop; every turn-on also forces CO2 off (gas yields to aeration, never
+  the reverse).
+- **`automation.aquarium_75_co2_ph_floor_cutoff`** — always enabled. Probe pH
+  below `input_number.aquarium_75_ph_floor` (6.5) for 2 minutes while
+  `switch.75g_co2` is on → gas off, bubbler on, persistent notification. It only
+  ever turns gas off; the next scheduled start re-checks the floor.
+
+The schedule and bubbler automations are **intentionally off** until the
+November CO2 readiness gate; enable them together. Until then the airstone runs
+around the clock. The old `input_datetime.aquarium_75_co2_on` / `_off` /
+`_bubbler_on` fixed times were deleted.
+
+The 75's manual pH helper (`input_number.aquarium_75_ph_manual`) is no longer
+published to `tank-monitor-75g/chem/ph`: the 75 gal panel's pH now comes from
+the controller's calibrated probe over BLE (v3 frame field 17).
 
 > **`aquarium-dashboard.json` in this folder is stale.** It predates the two-tank
 > restructure entirely — 4 nano-only sections, no visibility conditions, no tank
