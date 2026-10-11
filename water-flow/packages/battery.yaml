@@ -1,0 +1,87 @@
+# 1S LiPo monitoring for a battery-powered water-flow meter. Included by the
+# water-change unit only: the RO unit runs from USB-C 5 V and has no battery,
+# and a battery entity on it would publish a number that means nothing.
+#
+# Hardware: a 100k / 100k divider from the switched battery line (BAT+ after
+# the on/off switch) to the board's battery_pin, bottom leg to GND, and a
+# 100 nF ceramic across the bottom leg. The capacitor is what makes a
+# 100k-impedance source readable: the ADC's sample capacitor charges from it
+# in nanoseconds instead of from the resistors. The divider draws ~20 uA,
+# and only while the switch is on.
+substitutions:
+  # (top + bottom) / bottom. 100k / 100k -> 2.0.
+  battery_divider_ratio: "2.0"
+  # Under this the board calls the battery low. A 1S LiPo at 3.55 V under
+  # Wi-Fi load has roughly 10% left, and the XIAO's 3.3 V regulator starts
+  # dropping out a little below 3.4 V -- this leaves enough to finish the
+  # session in progress, not to start another one.
+  battery_low_v: "3.55"
+
+sensor:
+  # 4.2 V full reads 2.1 V at the pin, inside the ADC's calibrated range at
+  # 12 dB on both the S3 and the C3. Under 2.5 V after scaling means there
+  # is no battery to read (bottom resistor only, or the pack unplugged while
+  # running from USB) and the board reports unknown rather than "empty".
+  - platform: adc
+    id: battery_voltage
+    name: "Battery Voltage"
+    pin: ${battery_pin}
+    attenuation: 12db
+    device_class: voltage
+    unit_of_measurement: "V"
+    state_class: measurement
+    accuracy_decimals: 2
+    entity_category: diagnostic
+    update_interval: 2s
+    filters:
+      - multiply: ${battery_divider_ratio}
+      # Wi-Fi transmit bursts sag the cell for milliseconds; ten samples
+      # over 20 s average them out. Publishes every 10 s.
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 5
+      - lambda: |-
+          if (x < 2.5f) return NAN;
+          return x;
+
+  # Approximate state of charge from a resting 1S LiPo curve, 5% steps,
+  # linear between them. Read under Wi-Fi load it runs a few percent low --
+  # a fuel gauge, not a coulomb counter.
+  - platform: template
+    name: "Battery"
+    id: battery_percent
+    device_class: battery
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: |-
+      const float v = id(battery_voltage).state;
+      if (std::isnan(v)) return NAN;
+      static const float volts[] = {3.27f, 3.61f, 3.69f, 3.71f, 3.73f, 3.75f, 3.77f, 3.79f, 3.80f, 3.82f, 3.84f,
+                                    3.85f, 3.87f, 3.91f, 3.95f, 3.98f, 4.02f, 4.08f, 4.11f, 4.15f, 4.20f};
+      const int n = sizeof(volts) / sizeof(volts[0]);  // 0, 5, 10 ... 100 %
+      if (v <= volts[0]) return 0.0f;
+      if (v >= volts[n - 1]) return 100.0f;
+      for (int i = 1; i < n; i++) {
+        if (v < volts[i]) {
+          const float f = (v - volts[i - 1]) / (volts[i] - volts[i - 1]);
+          return 5.0f * ((i - 1) + f);
+        }
+      }
+      return 100.0f;
+
+binary_sensor:
+  # The sealed unit's only warning before it goes dark mid-drain. Charge it
+  # before the next change when this is on.
+  - platform: template
+    name: "Low Battery"
+    id: low_battery
+    device_class: battery
+    trigger_on_initial_state: true
+    lambda: |-
+      const float v = id(battery_voltage).state;
+      return !std::isnan(v) && v < ${battery_low_v};
+    filters:
+      # A transmit burst is not a flat battery.
+      - delayed_on: 30s

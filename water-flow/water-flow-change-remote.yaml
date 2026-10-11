@@ -1,0 +1,34 @@
+# WATER FLOW -- CHANGE. The sealed, battery-powered 1/2" flow meter on the
+# water-change hose (drain into the Brute, refill from it), on a Seeed XIAO
+# ESP32-S3 with a 1S LiPo. Put THIS file in the ESPHome dashboard; nothing
+# else lives locally except secrets.yaml (the same one the tank-monitor
+# boards use -- it reuses their MQTT / OTA / AP secrets).
+#
+# Builds from GitHub main every time (refresh: 0s). For a change to reach
+# the board, push it to main first. Development builds from the working
+# tree use water-flow/local-water-flow-change.yaml instead.
+#
+# On an XIAO ESP32-C3 instead: replace the board line below with
+#   - water-flow/boards/xiao-esp32c3.yaml
+# The wiring lands on the same D-numbered pads.
+#
+# The box is sealed: flash it over USB once on the bench, and over the air
+# after that (it must be switched on and online for OTA).
+substitutions:
+  # Exactly this name: Home Assistant's entity ids (sensor.water_flow_change_*)
+  # and MQTT topics (water-flow-change/...) derive from it.
+  device_name: water-flow-change
+  friendly_name: Water Flow Change
+
+packages:
+  water_flow:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - water-flow/packages/flow_meter.yaml
+      - water-flow/packages/battery.yaml
+      - water-flow/packages/water_change.yaml
+      - water-flow/boards/xiao-esp32s3.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s

@@ -1,0 +1,17 @@
+# LOCAL validation wrapper for the RO flow meter.
+#
+# Every package is !include'd from the working tree, so `esphome config` and
+# `esphome compile` on this file test what you just edited rather than what
+# is on main. A TEST harness, not the deploy wrapper -- that one is
+# water-flow/water-flow-ro-remote.yaml and pulls from git.
+#
+# device_name carries a -test suffix so a stray flash of a half-edited build
+# cannot impersonate the live meter on MQTT.
+substitutions:
+  device_name: water-flow-ro-test
+  friendly_name: Water Flow RO TEST
+packages:
+  base: !include ../packages/base.yaml
+  flow: !include packages/flow_meter.yaml
+  unit: !include packages/ro_fill.yaml
+  board: !include boards/xiao-esp32s3.yaml

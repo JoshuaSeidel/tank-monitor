@@ -1,0 +1,272 @@
+# UNIT 1 -- water-flow-ro. A 1/4" hall flow sensor on the RO unit's product
+# line: how much RO water went into the tank (or the Brute) per fill, and in
+# total. Pair with water-flow/packages/flow_meter.yaml.
+#
+# Sensor: uxcell 1/4in quick-connect hall flow sensor, DC 5 V, rated
+# 0.05-0.8 L/min. A 100 GPD membrane makes ~0.26 L/min (0.07 gal/min),
+# comfortably inside that range -- but as the membrane fouls and the feed
+# cools it slows, and below 0.05 L/min the rotor stops and nothing at all
+# is counted. Home Assistant watches for that (plug on, Flowing off).
+#
+# ---------------------------------------------------------------------
+# What this unit does and does not do
+# ---------------------------------------------------------------------
+# It measures. It does not switch the RO: the RO runs off a Kasa plug
+# (switch.ro_water) that only Home Assistant can reach. "Fill Target
+# Reached" is the signal; an HA automation turns the plug off on it. The
+# board keeps counting whatever dribbles through after the plug goes off,
+# in the same fill, so the final number is the real one.
+#
+# Daily and monthly RO usage are NOT computed here. "Total Produced" is a
+# lifetime total_increasing counter and Home Assistant's utility_meter
+# turns that into today / this month correctly whether or not this board
+# was powered at midnight -- which an on-device daily counter on a board
+# that is off most of the day could not.
+substitutions:
+  # ---------------------------------------------------------------------
+  # Calibration starting point -- CORRECT IT AFTER THE FIRST MEASURED FILL
+  # ---------------------------------------------------------------------
+  # Pulses per litre. uxcell publishes no constant for this part. 4560 is
+  # F = 76 x Q (Hz per L/min) -- the figure listed for uxcell's sibling 1/4"
+  # quick-connect hall sensor, which uses the same style of small rotor. It
+  # is a starting value to within maybe +/-30%, not a measurement. The first
+  # fill into a container of known volume fixes it on the device: enter the
+  # measured gallons in "Measured Fill" and press "Calibrate From Measured
+  # Fill" (water-flow/README.md, "First-run calibration").
+  #
+  # Only used the first time the board boots; after that the stored value
+  # (the "Calibration Pulses per Litre" entity) is what counts.
+  k_initial: "4560"
+
+  # Pulse filter. At 0.8 L/min and 4560 pulses/L the line runs ~61 Hz, a
+  # half-period of ~8 ms. 1 ms rejects every switching and contact glitch
+  # and would still count correctly if the real constant were 3x higher.
+  flow_internal_filter: 1ms
+  # A 100 GPD membrane at 4560/L pulses ~20 Hz; even at the sensor's 0.05
+  # L/min floor it is ~4 Hz. 5 s of silence is no water.
+  flow_timeout: 5s
+  # 0.07 gal/min needs the third decimal to be readable.
+  flow_rate_decimals: "3"
+
+globals:
+  # Pulses per litre. Restored; set by the number below or the calibrate
+  # button.
+  - id: ro_k
+    type: float
+    restore_value: true
+    initial_value: '${k_initial}'
+  # The current (or last) fill, as raw pulses: the volume shown is always
+  # pulses / current calibration, so calibrating restates the last fill to
+  # the measured value automatically. Restored, so the last fill can still
+  # be calibrated against after the board has been switched off.
+  - id: ro_fill_pulses
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # Lifetime gallons, each pulse valued at the calibration in force when it
+  # was counted. Never restated and never decreases -- Home Assistant reads
+  # any decrease of a total_increasing sensor as a meter reset and would
+  # double-count. double, so 0.0001 gal increments still register after
+  # thousands of gallons.
+  - id: ro_total_gal
+    type: double
+    restore_value: true
+    initial_value: '0.0'
+  # Gallons. 0 disables the target.
+  - id: ro_fill_target
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  # What the user measured in the container for the last fill. An input for
+  # one button press, not a setting -- not restored.
+  - id: ro_measured_gal
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  # A fill has started (or been reset) since boot. "Fill Target Reached"
+  # needs it so the previous fill, restored from flash, does not report
+  # the target reached the moment the board powers up.
+  - id: ro_fill_live
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+esphome:
+  on_boot:
+    # List form: package merging can drop a non-list on_boot.
+    - priority: 600
+      then:
+        - lambda: id(k_active) = id(ro_k);
+
+script:
+  # Contract with flow_meter.yaml.
+  - id: flow_credit
+    parameters:
+      pulses: int
+    then:
+      - lambda: |-
+          if (pulses <= 0 || id(ro_k) <= 0.0f) return;
+          id(ro_fill_pulses) += (uint32_t) pulses;
+          id(ro_total_gal) += (double) pulses / id(ro_k) / 3.785411784;
+
+  - id: flow_session_start
+    then:
+      - lambda: |-
+          ESP_LOGI("ro", "new fill (previous: %u pulses, %.3f gal)", (unsigned) id(ro_fill_pulses),
+                   id(ro_fill_pulses) / id(ro_k) / 3.785411784f);
+          id(ro_fill_pulses) = 0;
+          id(ro_fill_live) = true;
+      - component.update: ro_fill_volume
+
+sensor:
+  - platform: template
+    name: "Fill Volume"
+    id: ro_fill_volume
+    icon: "mdi:cup-water"
+    unit_of_measurement: "gal"
+    # measurement, not total: it restarts every fill and restates on
+    # calibration, so it is not a meter Home Assistant should sum.
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: |-
+      if (id(ro_k) <= 0.0f) return NAN;
+      return id(ro_fill_pulses) / id(ro_k) / 3.785411784f;
+    filters:
+      - delta: 0.005
+
+  - platform: template
+    name: "Total Produced"
+    id: ro_total
+    icon: "mdi:water-check"
+    device_class: water
+    unit_of_measurement: "gal"
+    state_class: total_increasing
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: "return (float) id(ro_total_gal);"
+    filters:
+      - delta: 0.005
+
+  # The raw count behind Fill Volume -- what a calibration divides by.
+  - platform: template
+    name: "Fill Pulses"
+    id: ro_fill_pulse_count
+    icon: "mdi:pulse"
+    unit_of_measurement: "pulses"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: "return (float) id(ro_fill_pulses);"
+    filters:
+      - delta: 1
+
+binary_sensor:
+  # On the moment the fill reaches the target. Home Assistant turns
+  # switch.ro_water off on the off -> on edge. Off again when the next fill
+  # starts, on Reset Fill below the target, or if the target is raised.
+  - platform: template
+    name: "Fill Target Reached"
+    id: ro_target_reached
+    icon: "mdi:water-check"
+    trigger_on_initial_state: true
+    lambda: |-
+      const float target = id(ro_fill_target);
+      if (!id(ro_fill_live) || target <= 0.0f || id(ro_k) <= 0.0f) return false;
+      return id(ro_fill_pulses) / id(ro_k) / 3.785411784f >= target;
+
+number:
+  # Lambda-backed mirrors of the globals (repo convention: update_interval +
+  # lambda + set_action, never optimistic / restore_value on the number).
+  - platform: template
+    name: "Fill Target"
+    id: ro_fill_target_num
+    icon: "mdi:target"
+    unit_of_measurement: "gal"
+    mode: box
+    min_value: 0
+    max_value: 100
+    step: 0.1
+    update_interval: 60s
+    lambda: "return id(ro_fill_target);"
+    set_action:
+      - lambda: |-
+          id(ro_fill_target) = x;
+          ESP_LOGI("ro", "fill target %.1f gal%s", x, x <= 0.0f ? " (disabled)" : "");
+      - component.update: ro_fill_target_num
+      - script.execute: flow_save_now
+
+  - platform: template
+    name: "Calibration Pulses per Litre"
+    id: ro_k_num
+    icon: "mdi:tune-variant"
+    entity_category: config
+    mode: box
+    min_value: 50
+    max_value: 20000
+    step: 1
+    update_interval: 60s
+    lambda: "return id(ro_k);"
+    set_action:
+      - lambda: |-
+          ESP_LOGI("ro", "calibration %.0f -> %.0f pulses/L", id(ro_k), x);
+          id(ro_k) = x;
+          id(k_active) = x;
+      - component.update: ro_k_num
+      - component.update: ro_fill_volume
+      - script.execute: flow_save_now
+
+  - platform: template
+    name: "Measured Fill"
+    id: ro_measured_num
+    icon: "mdi:beaker-check"
+    entity_category: config
+    unit_of_measurement: "gal"
+    mode: box
+    min_value: 0
+    max_value: 100
+    step: 0.01
+    update_interval: 60s
+    lambda: "return id(ro_measured_gal);"
+    set_action:
+      - lambda: id(ro_measured_gal) = x;
+      - component.update: ro_measured_num
+
+button:
+  - platform: template
+    name: "Reset Fill"
+    icon: "mdi:restart"
+    on_press:
+      - lambda: |-
+          ESP_LOGI("ro", "fill reset by hand at %u pulses", (unsigned) id(ro_fill_pulses));
+          id(ro_fill_pulses) = 0;
+          id(ro_fill_live) = true;
+      - component.update: ro_fill_volume
+      - component.update: ro_fill_pulse_count
+      - script.execute: flow_save_now
+
+  # K = last fill's pulses / measured litres. The fill shown restates to the
+  # measured value immediately (it is pulses / K); Total Produced keeps what it
+  # counted -- see ro_total_gal for why it never moves backwards.
+  - platform: template
+    name: "Calibrate From Measured Fill"
+    icon: "mdi:scale-balance"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          const uint32_t pulses = id(ro_fill_pulses);
+          const float measured = id(ro_measured_gal);
+          if (measured <= 0.0f) { ESP_LOGW("ro", "calibration skipped: enter Measured Fill first"); return; }
+          if (pulses < 100) { ESP_LOGW("ro", "calibration skipped: last fill has only %u pulses", (unsigned) pulses); return; }
+          const float k = pulses / (measured * 3.785411784f);
+          if (k < 50.0f || k > 20000.0f) {
+            ESP_LOGW("ro", "calibration rejected: %.0f pulses/L is outside 50-20000; check the measurement", k);
+            return;
+          }
+          ESP_LOGI("ro", "calibrated: %u pulses over %.2f gal -> %.0f pulses/L (was %.0f)", (unsigned) pulses,
+                   measured, k, id(ro_k));
+          id(ro_k) = k;
+          id(k_active) = k;
+      - component.update: ro_k_num
+      - component.update: ro_fill_volume
+      - script.execute: flow_save_now

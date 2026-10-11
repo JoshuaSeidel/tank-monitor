@@ -1,0 +1,45 @@
+# Seeed XIAO ESP32-C3 -- optional alternative board for either water-flow
+# meter. Same footprint and pad labels as the XIAO ESP32-S3, so the wiring
+# lands on the same D-numbered pads; only the GPIO numbers behind them
+# differ. Pads are labelled D0-D10 and those are NOT GPIO numbers:
+#
+#   D0=2  D1=3  D2=4  D3=5  D4=6  D5=7  D6=21  D7=20  D8=8  D9=9  D10=10
+#
+#   signal               SILKSCREEN   GPIO
+#   flow pulse (divided)  D3          5     interrupt input, 3.3 V logic
+#   battery sense         D1          3     ADC1 -- change unit only
+#
+# Why these two:
+#   - D0 (GPIO2), D8 (GPIO8) and D9 (GPIO9) are ESP32-C3 STRAPPING PINS.
+#     Nothing that holds a level at boot goes on them.
+#   - The C3's ADC1 is GPIO0-4; GPIO5 is ADC2, which cannot read while
+#     Wi-Fi is on. Battery sense therefore sits on D1 = GPIO3. The pulse
+#     line is digital and does not care, so it takes D3 = GPIO5 -- the same
+#     pad as on the S3 board, so one harness fits either board.
+#   - GPIO4-7 double as JTAG. ESPHome does not enable JTAG on them; they
+#     are ordinary GPIOs here.
+#
+# The C3 has no PCNT peripheral. Nothing here needs one: flow_meter.yaml
+# counts with pulse_meter, an interrupt per pulse, on both boards. The
+# fastest sensor in this project tops out near 260 Hz.
+#
+# No user LED on this board, so no status_led: watch for "Status" to come
+# online in Home Assistant instead.
+#
+# Power is the same as the S3: 5V pad = VBUS, live only from USB-C;
+# BAT+/BAT- pads under the board with the on-board charger. Needs its
+# U.FL antenna attached.
+substitutions:
+  flow_pin: GPIO5
+  battery_pin: GPIO3
+
+esp32:
+  board: seeed_xiao_esp32c3
+  variant: esp32c3
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+# See water-flow/boards/xiao-esp32s3.yaml.
+mqtt:
+  discovery_unique_id_generator: mac

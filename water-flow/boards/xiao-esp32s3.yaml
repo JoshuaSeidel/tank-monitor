@@ -1,0 +1,57 @@
+# Seeed XIAO ESP32-S3 -- the default board for both water-flow meters.
+# Pads are labelled D0-D10 and those are NOT GPIO numbers: wire by the
+# silkscreen column below. (Same board as boards/xiao-esp32s3.yaml at the
+# repo root; its D-label table applies here too.)
+#
+#   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
+#
+# WHAT THIS FILE OWES water-flow/packages/flow_meter.yaml -- the whole
+# board contract is two pins, given as substitutions so the shared package
+# can stay pin-free:
+#
+#   signal               SILKSCREEN   GPIO
+#   flow pulse (divided)  D3          4     interrupt input, 3.3 V logic
+#   battery sense         D1          2     ADC1 -- change unit only
+#
+# Why these two:
+#   - D2 (GPIO3) is an ESP32-S3 STRAPPING PIN ({0, 3, 45, 46}). The pulse
+#     line's divider would hold it at a level during boot; it stays empty.
+#   - Every exposed pin GPIO1-9 is ADC1, so the battery divider never runs
+#     into the ADC2-vs-Wi-Fi conflict. D1 because it is ADC1 on the C3 as
+#     well -- one harness fits either board file.
+#   - GPIO4 is a plain GPIO with interrupt support; pulse_meter needs only
+#     that. No internal pull: the 20k bottom leg of the divider holds it low.
+#
+# Power: the 5V pad is VBUS -- live only from USB-C. On battery (BAT+/BAT-
+# pads under the board) the 5 V flow sensor needs its own step-up. See
+# water-flow/README.md for both power designs.
+#
+# The XIAO ESP32-S3 has no on-board antenna; the U.FL antenna it ships
+# with must be attached, or Wi-Fi works only within a few feet.
+substitutions:
+  flow_pin: GPIO4
+  battery_pin: GPIO2
+
+esp32:
+  board: seeed_xiao_esp32s3
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+# ESPHome's default "legacy" unique_id generator omits the device name, so
+# two of these boards (or one of these and any tank-monitor board) would
+# generate identical unique_ids for "Wi-Fi Signal", "Uptime" and the rest,
+# and Home Assistant silently refuses the second. In the board file, not
+# the wrapper -- see boards/xiao-esp32s3.yaml for that history.
+mqtt:
+  discovery_unique_id_generator: mac
+
+# The yellow user LED (GPIO21, lit when driven low). Blinking = not yet on
+# Wi-Fi / MQTT; dark = online and counting. This is the "wait until it is
+# online" cue in the operating procedure -- no phone needed. Fast blink =
+# an error, read the log. Dark while running costs nothing.
+status_led:
+  pin:
+    number: GPIO21
+    inverted: true

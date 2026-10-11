@@ -1,0 +1,412 @@
+# UNIT 2 -- water-flow-change. A 1/2" hall flow sensor on the hose used for
+# water changes, in BOTH directions: draining the tank into the Brute, and
+# refilling the tank from it. Pair with water-flow/packages/flow_meter.yaml
+# and water-flow/packages/battery.yaml.
+#
+# Sensor: YF-S201-class 1/2" hall sensor, rated 1-30 L/min, nominally
+# F = 7.5 x Q (Hz per L/min) = 450 pulses per litre.
+#
+# ---------------------------------------------------------------------
+# Direction is a setting, not a measurement
+# ---------------------------------------------------------------------
+# A paddle-wheel sensor spins the same way-agnostic pulse train whichever
+# way the water goes, so the board cannot tell a drain from a refill. The
+# "Mode" select says which one is happening, and every pulse is booked to
+# "Removed This Change" or "Added This Change" by it. Set Mode BEFORE the
+# water starts; a pulse counted in the wrong mode is in the wrong column.
+#
+# Each direction has its own calibration. The rotor sees a different inlet
+# geometry run backwards and the YF-S201's constant is only nominal even
+# forwards, so one K for both directions would be wrong in at least one.
+#
+# ---------------------------------------------------------------------
+# Steps
+# ---------------------------------------------------------------------
+# A step is one continuous run in one mode: one Brute-load drained, one
+# Brute-load put back. It starts when flow starts after the idle gap, or
+# when Mode changes. "Step Volume" is that run so far, and the last step is
+# what "Calibrate From Measured Step" calibrates -- fill or empty the Brute
+# to a known mark in one step and the measurement is exact.
+substitutions:
+  # ---------------------------------------------------------------------
+  # Calibration starting point -- CORRECT IT AFTER THE FIRST MEASURED STEP
+  # ---------------------------------------------------------------------
+  # Pulses per litre, both directions. 450 is the YF-S201 datasheet
+  # constant (F = 7.5 x Q). Individual sensors are commonly 5-15% off it,
+  # and more in reverse. One measured Brute-load per direction fixes each
+  # on the device (water-flow/README.md, "First-run calibration"). Only used
+  # the first time the board boots; after that the stored values count.
+  k_initial: "450"
+
+  # Pulse filter. 30 L/min x 7.5 = 225 Hz, a half-period of ~2.2 ms; the
+  # sensor's duty cycle is 50 +/- 10%, so the shortest level is ~1.8 ms
+  # even slightly over range. 500 us keeps 3x margin under that while
+  # rejecting every microsecond-wide glitch.
+  flow_internal_filter: 500us
+  # At the 1 L/min floor the sensor still pulses 7.5 Hz. 5 s of silence is
+  # no water.
+  flow_timeout: 5s
+  flow_rate_decimals: "2"
+
+  # Real water in the 75 gal tank after substrate, hardscape and the
+  # waterline -- what "Percent Changed" divides by. Only the first boot's
+  # value; the "Tank Water Volume" entity holds it after that.
+  tank_volume_gal: "62"
+
+globals:
+  # 0 = Draining, 1 = Refilling.
+  - id: wc_mode
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: wc_k_drain
+    type: float
+    restore_value: true
+    initial_value: '${k_initial}'
+  - id: wc_k_refill
+    type: float
+    restore_value: true
+    initial_value: '${k_initial}'
+  # This change's volumes, gallons, each pulse valued at its own mode's
+  # calibration when counted. Restated by a calibration (they are what the
+  # user is trying to get right today); zeroed by "New Water Change".
+  - id: wc_removed_gal
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: wc_added_gal
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  # Lifetime gallons. Never restated and never decreases: Home Assistant
+  # reads a decrease of a total_increasing sensor as a meter reset.
+  - id: wc_lifetime_removed_gal
+    type: double
+    restore_value: true
+    initial_value: '0.0'
+  - id: wc_lifetime_added_gal
+    type: double
+    restore_value: true
+    initial_value: '0.0'
+  # The current (or last) step: raw pulses and the mode they were counted
+  # in. Restored so the last step can be calibrated after a power cycle.
+  - id: wc_step_pulses
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  - id: wc_step_mode
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: wc_tank_gal
+    type: float
+    restore_value: true
+    initial_value: '${tank_volume_gal}'
+  # One-press input for the calibrate button; not a setting, not restored.
+  - id: wc_measured_gal
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+
+esphome:
+  on_boot:
+    # List form: package merging can drop a non-list on_boot.
+    - priority: 600
+      then:
+        - lambda: |-
+            id(k_active) = id(wc_mode) == 0 ? id(wc_k_drain) : id(wc_k_refill);
+
+script:
+  # Contract with flow_meter.yaml.
+  - id: flow_credit
+    parameters:
+      pulses: int
+    then:
+      - lambda: |-
+          if (pulses <= 0) return;
+          const bool draining = id(wc_mode) == 0;
+          const float k = draining ? id(wc_k_drain) : id(wc_k_refill);
+          if (k <= 0.0f) return;
+          const float gal = pulses / k / 3.785411784f;
+          id(wc_step_pulses) += (uint32_t) pulses;
+          id(wc_step_mode) = id(wc_mode);
+          if (draining) {
+            id(wc_removed_gal) += gal;
+            id(wc_lifetime_removed_gal) += gal;
+          } else {
+            id(wc_added_gal) += gal;
+            id(wc_lifetime_added_gal) += gal;
+          }
+
+  - id: flow_session_start
+    then:
+      - lambda: |-
+          id(wc_step_pulses) = 0;
+          id(wc_step_mode) = id(wc_mode);
+          ESP_LOGI("change", "new %s step", id(wc_mode) == 0 ? "drain" : "refill");
+      - component.update: wc_step_volume
+
+select:
+  - platform: template
+    name: "Mode"
+    id: wc_mode_select
+    icon: "mdi:swap-vertical-bold"
+    options:
+      - "Draining"
+      - "Refilling"
+    update_interval: 60s
+    lambda: |-
+      return std::string(id(wc_mode) == 0 ? "Draining" : "Refilling");
+    set_action:
+      - lambda: |-
+          const int mode = (x == "Refilling") ? 1 : 0;
+          if (mode == id(wc_mode)) return;
+          id(wc_mode) = mode;
+          id(k_active) = mode == 0 ? id(wc_k_drain) : id(wc_k_refill);
+          // A mode change is a new step, even mid-flow.
+          id(wc_step_pulses) = 0;
+          id(wc_step_mode) = mode;
+          ESP_LOGI("change", "mode -> %s", mode == 0 ? "Draining" : "Refilling");
+      - component.update: wc_mode_select
+      - component.update: wc_step_volume
+      - script.execute: flow_save_now
+
+sensor:
+  - platform: template
+    name: "Step Volume"
+    id: wc_step_volume
+    icon: "mdi:cup-water"
+    unit_of_measurement: "gal"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: |-
+      const float k = id(wc_step_mode) == 0 ? id(wc_k_drain) : id(wc_k_refill);
+      if (k <= 0.0f) return NAN;
+      return id(wc_step_pulses) / k / 3.785411784f;
+    filters:
+      - delta: 0.005
+
+  - platform: template
+    name: "Removed This Change"
+    id: wc_removed
+    icon: "mdi:water-minus"
+    unit_of_measurement: "gal"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: "return id(wc_removed_gal);"
+    filters:
+      - delta: 0.005
+
+  - platform: template
+    name: "Added This Change"
+    id: wc_added
+    icon: "mdi:water-plus"
+    unit_of_measurement: "gal"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: "return id(wc_added_gal);"
+    filters:
+      - delta: 0.005
+
+  # Added minus removed: 0 is back to where the change started, negative is
+  # still short.
+  - platform: template
+    name: "Net Change"
+    id: wc_net
+    icon: "mdi:plus-minus-variant"
+    unit_of_measurement: "gal"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: "return id(wc_added_gal) - id(wc_removed_gal);"
+    filters:
+      - delta: 0.005
+
+  - platform: template
+    name: "Percent Changed"
+    id: wc_percent
+    icon: "mdi:percent"
+    unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 2s
+    lambda: |-
+      if (id(wc_tank_gal) <= 0.0f) return NAN;
+      return id(wc_removed_gal) / id(wc_tank_gal) * 100.0f;
+    filters:
+      - delta: 0.05
+
+  - platform: template
+    name: "Lifetime Removed"
+    id: wc_lifetime_removed
+    icon: "mdi:water-minus-outline"
+    device_class: water
+    unit_of_measurement: "gal"
+    state_class: total_increasing
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: "return (float) id(wc_lifetime_removed_gal);"
+    filters:
+      - delta: 0.005
+
+  - platform: template
+    name: "Lifetime Added"
+    id: wc_lifetime_added
+    icon: "mdi:water-plus-outline"
+    device_class: water
+    unit_of_measurement: "gal"
+    state_class: total_increasing
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: "return (float) id(wc_lifetime_added_gal);"
+    filters:
+      - delta: 0.005
+
+  # The raw count behind Step Volume -- what a calibration divides by.
+  - platform: template
+    name: "Step Pulses"
+    id: wc_step_pulse_count
+    icon: "mdi:pulse"
+    unit_of_measurement: "pulses"
+    accuracy_decimals: 0
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: "return (float) id(wc_step_pulses);"
+    filters:
+      - delta: 1
+
+number:
+  # Lambda-backed mirrors of the globals (repo convention: update_interval +
+  # lambda + set_action, never optimistic / restore_value on the number).
+  - platform: template
+    name: "Tank Water Volume"
+    id: wc_tank_num
+    icon: "mdi:fishbowl-outline"
+    entity_category: config
+    unit_of_measurement: "gal"
+    mode: box
+    min_value: 1
+    max_value: 200
+    step: 0.5
+    update_interval: 60s
+    lambda: "return id(wc_tank_gal);"
+    set_action:
+      - lambda: id(wc_tank_gal) = x;
+      - component.update: wc_tank_num
+      - component.update: wc_percent
+      - script.execute: flow_save_now
+
+  - platform: template
+    name: "Drain Pulses per Litre"
+    id: wc_k_drain_num
+    icon: "mdi:tune-variant"
+    entity_category: config
+    mode: box
+    min_value: 50
+    max_value: 5000
+    step: 0.1
+    update_interval: 60s
+    lambda: "return id(wc_k_drain);"
+    set_action:
+      - lambda: |-
+          ESP_LOGI("change", "drain calibration %.1f -> %.1f pulses/L", id(wc_k_drain), x);
+          id(wc_k_drain) = x;
+          if (id(wc_mode) == 0) id(k_active) = x;
+      - component.update: wc_k_drain_num
+      - component.update: wc_step_volume
+      - script.execute: flow_save_now
+
+  - platform: template
+    name: "Refill Pulses per Litre"
+    id: wc_k_refill_num
+    icon: "mdi:tune-variant"
+    entity_category: config
+    mode: box
+    min_value: 50
+    max_value: 5000
+    step: 0.1
+    update_interval: 60s
+    lambda: "return id(wc_k_refill);"
+    set_action:
+      - lambda: |-
+          ESP_LOGI("change", "refill calibration %.1f -> %.1f pulses/L", id(wc_k_refill), x);
+          id(wc_k_refill) = x;
+          if (id(wc_mode) == 1) id(k_active) = x;
+      - component.update: wc_k_refill_num
+      - component.update: wc_step_volume
+      - script.execute: flow_save_now
+
+  - platform: template
+    name: "Measured Step"
+    id: wc_measured_num
+    icon: "mdi:beaker-check"
+    entity_category: config
+    unit_of_measurement: "gal"
+    mode: box
+    min_value: 0
+    max_value: 100
+    step: 0.01
+    update_interval: 60s
+    lambda: "return id(wc_measured_gal);"
+    set_action:
+      - lambda: id(wc_measured_gal) = x;
+      - component.update: wc_measured_num
+
+button:
+  - platform: template
+    name: "New Water Change"
+    icon: "mdi:water-sync"
+    on_press:
+      - lambda: |-
+          ESP_LOGI("change", "new water change (last: removed %.2f gal, added %.2f gal)", id(wc_removed_gal),
+                   id(wc_added_gal));
+          id(wc_removed_gal) = 0.0f;
+          id(wc_added_gal) = 0.0f;
+          id(wc_step_pulses) = 0;
+          id(wc_step_mode) = id(wc_mode);
+      - component.update: wc_removed
+      - component.update: wc_added
+      - component.update: wc_net
+      - component.update: wc_percent
+      - component.update: wc_step_volume
+      - component.update: wc_step_pulse_count
+      - script.execute: flow_save_now
+
+  # K for the last step's direction = its pulses / measured litres. The step
+  # and this change's Removed / Added restate to the measurement at once;
+  # the lifetime totals keep what they counted (they never move backwards).
+  - platform: template
+    name: "Calibrate From Measured Step"
+    icon: "mdi:scale-balance"
+    entity_category: config
+    on_press:
+      - lambda: |-
+          const uint32_t pulses = id(wc_step_pulses);
+          const float measured = id(wc_measured_gal);
+          const bool draining = id(wc_step_mode) == 0;
+          if (measured <= 0.0f) { ESP_LOGW("change", "calibration skipped: enter Measured Step first"); return; }
+          if (pulses < 100) { ESP_LOGW("change", "calibration skipped: last step has only %u pulses", (unsigned) pulses); return; }
+          const float k = pulses / (measured * 3.785411784f);
+          if (k < 50.0f || k > 5000.0f) {
+            ESP_LOGW("change", "calibration rejected: %.1f pulses/L is outside 50-5000; check the measurement", k);
+            return;
+          }
+          float &k_store = draining ? id(wc_k_drain) : id(wc_k_refill);
+          const float counted = pulses / k_store / 3.785411784f;
+          float &this_change = draining ? id(wc_removed_gal) : id(wc_added_gal);
+          this_change = std::max(0.0f, this_change + (measured - counted));
+          ESP_LOGI("change", "%s calibrated: %u pulses over %.2f gal -> %.1f pulses/L (was %.1f)",
+                   draining ? "drain" : "refill", (unsigned) pulses, measured, k, k_store);
+          k_store = k;
+          if (id(wc_mode) == id(wc_step_mode)) id(k_active) = k;
+      - component.update: wc_k_drain_num
+      - component.update: wc_k_refill_num
+      - component.update: wc_step_volume
+      - component.update: wc_removed
+      - component.update: wc_added
+      - component.update: wc_net
+      - component.update: wc_percent
+      - script.execute: flow_save_now

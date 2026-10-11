@@ -1,0 +1,31 @@
+# WATER FLOW -- RO. The 1/4" flow meter on the RO unit's product line, on a
+# Seeed XIAO ESP32-S3 powered from USB-C 5 V. Put THIS file in the ESPHome
+# dashboard; nothing else lives locally except secrets.yaml (the same one
+# the tank-monitor boards use -- it reuses their MQTT / OTA / AP secrets).
+#
+# Builds from GitHub main every time (refresh: 0s). For a change to reach
+# the board, push it to main first. Development builds from the working
+# tree use water-flow/local-water-flow-ro.yaml instead.
+#
+# On an XIAO ESP32-C3 instead: replace the board line below with
+#   - water-flow/boards/xiao-esp32c3.yaml
+# The wiring lands on the same D-numbered pads.
+#
+# No battery package: this unit runs from USB and has no battery to report.
+substitutions:
+  # Exactly this name: Home Assistant's entity ids (sensor.water_flow_ro_*)
+  # and MQTT topics (water-flow-ro/...) derive from it.
+  device_name: water-flow-ro
+  friendly_name: Water Flow RO
+
+packages:
+  water_flow:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - water-flow/packages/flow_meter.yaml
+      - water-flow/packages/ro_fill.yaml
+      - water-flow/boards/xiao-esp32s3.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s

@@ -1,0 +1,18 @@
+# LOCAL validation wrapper for the water-change flow meter.
+#
+# Every package is !include'd from the working tree, so `esphome config` and
+# `esphome compile` on this file test what you just edited rather than what
+# is on main. A TEST harness, not the deploy wrapper -- that one is
+# water-flow/water-flow-change-remote.yaml and pulls from git.
+#
+# device_name carries a -test suffix so a stray flash of a half-edited build
+# cannot impersonate the live meter on MQTT.
+substitutions:
+  device_name: water-flow-change-test
+  friendly_name: Water Flow Change TEST
+packages:
+  base: !include ../packages/base.yaml
+  flow: !include packages/flow_meter.yaml
+  battery: !include packages/battery.yaml
+  unit: !include packages/water_change.yaml
+  board: !include boards/xiao-esp32s3.yaml

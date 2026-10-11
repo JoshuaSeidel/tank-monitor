@@ -1,0 +1,257 @@
+# Shared core of both water-flow meters: the pulse input, flow sessions,
+# live flow rate, persistence and the low-power network settings.
+# Board-agnostic -- the pins come from a water-flow/boards/*.yaml
+# file -- and unit-agnostic -- what a pulse MEANS (fill, drain, refill) comes
+# from water-flow/packages/ro_fill.yaml or water_change.yaml.
+#
+# Pair with packages/base.yaml (Wi-Fi, MQTT, SNTP, OTA, diagnostics), one
+# board file and one unit file, plus water-flow/packages/battery.yaml on a
+# battery-powered unit. Never with a tank-controller package.
+#
+# ---------------------------------------------------------------------
+# The contract
+# ---------------------------------------------------------------------
+# A BOARD FILE owes this package two substitutions and nothing else:
+#   flow_pin       GPIO the divided-down pulse line lands on
+#   battery_pin    ADC1 GPIO the battery divider lands on (read only when
+#                  water-flow/packages/battery.yaml is included)
+#
+# A UNIT FILE owes it:
+#   substitutions  flow_internal_filter, flow_timeout, flow_rate_decimals,
+#                  k_initial (pulses per litre before the unit's on_boot
+#                  copies its stored calibration into k_active)
+#   script flow_credit(pulses: int)  -- add N confirmed pulses to whatever
+#                  this unit is measuring, using its own calibration
+#   script flow_session_start        -- a new flow session has begun after
+#                  an idle gap: zero the per-session volume
+#   keep global k_active (declared here) equal to the pulses-per-litre that
+#   applies to water flowing right now -- the live flow rate reads it.
+#
+# ---------------------------------------------------------------------
+# Counting survives everything except a power cut
+# ---------------------------------------------------------------------
+# Pulses are counted in an interrupt (pulse_meter), not by polling, and the
+# main loop only collects the count. Nothing in the counting path touches
+# the network: MQTT publishes are queued (idf_send_async in base.yaml), so
+# a Wi-Fi or broker drop mid-fill costs nothing but the live view. The
+# volumes catch up in Home Assistant the moment MQTT reconnects, because
+# ESPHome republishes every state on connect.
+#
+# pulse_meter rather than pulse_counter because the ESP32-C3 has no PCNT
+# peripheral; one counting path for both boards means one thing to trust.
+# At these rates (worst case ~260 Hz on the 1/2" sensor) an interrupt per
+# pulse is nothing.
+#
+# ---------------------------------------------------------------------
+# Flow sessions and stray pulses
+# ---------------------------------------------------------------------
+# A "session" is water actually running. It starts when pulse_meter has
+# seen two pulses within flow_timeout of each other (that is when it first
+# reports a non-zero rate), and it ends when no pulse has arrived for
+# idle_gap_s. Pauses shorter than the gap -- a kinked hose, swapping the
+# Brute's hose from one hand to the other -- stay in the same session.
+#
+# Two pulses, not one, because a single pulse is not water: a knock on the
+# housing, the rotor settling, a spike on a long lead. One stray pulse must
+# not zero the last fill's volume, which the calibration step still needs.
+# The first pulse after idle is held in flow_pending and credited only if
+# the session is confirmed; if the meter times out first, it is dropped.
+substitutions:
+  # No pulse for this long ends a flow session; the next flow starts a new
+  # fill (RO) or a new step (water change). Seconds.
+  idle_gap_s: "120"
+
+
+# ---------------------------------------------------------------------
+# Persistence: write often while water runs, never while idle
+# ---------------------------------------------------------------------
+# Restored globals queue a save within 1 s of changing; this interval is how
+# often the queue goes to flash. The ESP32 backend compares every queued
+# blob against what NVS already holds and skips identical ones, so an idle
+# meter writes NOTHING however long it is left on -- the interval only costs
+# wear while the numbers are moving.
+#
+# 30 s bounds the loss if power is cut mid-flow (battery flat, USB plug
+# pulled): ~0.04 gal of RO, or a few gallons at full hose flow. A 5 h RO
+# fill at 30 s is ~600 small NVS writes, which NVS wear levelling spreads
+# over its pages -- decades of daily fills on a 100k-cycle flash.
+#
+# The normal case is better than 30 s: the moment flow stops (pulse_meter
+# times out) flow_save_now forces a full sync, so switching the board off
+# ~10 s after the water stops never loses anything.
+preferences:
+  flash_write_interval: 30s
+
+wifi:
+  # Modem sleep between DTIM beacons. MQTT keeps working (it only adds a
+  # little latency to incoming commands), and it roughly halves the radio's
+  # share of a battery -- and of a power bank, for the USB-powered unit.
+  # It is ESPHome's default on ESP32 already; stated here so nobody
+  # "optimises" it away.
+  power_save_mode: light
+  # ESPHome's default reboots the board after 15 min without Wi-Fi. Here a
+  # reboot mid-fill would end the session and zero the fill on the next
+  # pulse, for no gain -- the counting does not need the network. Stay up
+  # and keep counting; the AP fallback from base.yaml still comes up.
+  reboot_timeout: 0s
+
+mqtt:
+  # Short keepalive so Home Assistant notices the power switch quickly: the
+  # broker publishes the offline will ~1.5 x keepalive after the last packet.
+  # One ping per 15 s is a negligible cost against the radio's idle draw.
+  keepalive: 15s
+  # Same reasoning as Wi-Fi: a broker outage is not a reason to reboot.
+  reboot_timeout: 0s
+
+globals:
+  # pulse_meter's running total at the last count, to turn totals into
+  # deltas. The total restarts at 0 every boot, and so does this.
+  - id: flow_last_total
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: flow_last_pulse_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # True while a confirmed session is running. False at boot: whatever was
+  # flowing before a reboot is over as far as this board knows.
+  - id: flow_session_live
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Pulses seen since idle that have not yet been confirmed as water.
+  - id: flow_pending
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Pulses per litre for the water flowing NOW. Maintained by the unit file.
+  - id: k_active
+    type: float
+    restore_value: false
+    initial_value: '${k_initial}'
+
+script:
+  # Force the queued preferences to flash. The delay lets every restored
+  # global's 1 s poll queue its new value first; a sync issued in the same
+  # lambda that changed a global would miss it. mode: restart so a burst of
+  # triggers collapses into one write.
+  - id: flow_save_now
+    mode: restart
+    then:
+      - delay: 1500ms
+      - lambda: |-
+          global_preferences->sync();
+          ESP_LOGI("flow", "volumes saved to flash");
+
+sensor:
+  # The flow sensor's pulse line, through the 10k/20k divider. No internal
+  # pull-up or pull-down: the divider's bottom leg holds the pin low when
+  # the sensor is unplugged or unpowered, which reads as "no flow" rather
+  # than as noise.
+  - platform: pulse_meter
+    id: flow_meter
+    name: "Pulse Rate"
+    internal: true
+    unit_of_measurement: "pulses/min"
+    pin:
+      number: ${flow_pin}
+      mode:
+        input: true
+    # PULSE mode: a level change only counts if the line then holds that
+    # level for internal_filter. Boost-converter switching noise and
+    # contact bounce are microseconds wide and never qualify. The unit file
+    # sets the width against its sensor's fastest half-period.
+    internal_filter_mode: PULSE
+    internal_filter: ${flow_internal_filter}
+    # No pulse for this long and the rate reports 0, "Flowing" goes off and
+    # the volumes are flushed to flash.
+    timeout: ${flow_timeout}
+    on_value:
+      - lambda: |-
+          if (x > 0.0f && !id(flow_session_live)) {
+            // Second pulse inside the timeout: this is water. New session.
+            id(flow_session_live) = true;
+            id(flow_session_start)->execute();
+            const uint32_t held = id(flow_pending);
+            id(flow_pending) = 0;
+            if (held > 0) id(flow_credit)->execute((int) held);
+            ESP_LOGI("flow", "flow session started");
+          } else if (x == 0.0f) {
+            if (!id(flow_session_live) && id(flow_pending) > 0) {
+              ESP_LOGD("flow", "dropped %u unconfirmed pulse(s)", (unsigned) id(flow_pending));
+              id(flow_pending) = 0;
+            }
+            id(flow_save_now)->execute();
+          }
+    total:
+      id: flow_pulse_total
+      name: "Pulse Total"
+      internal: true
+      unit_of_measurement: "pulses"
+      on_value:
+        - lambda: |-
+            const uint32_t total = (uint32_t) x;
+            const uint32_t delta = total - id(flow_last_total);
+            id(flow_last_total) = total;
+            if (delta == 0) return;
+            const uint32_t now = millis();
+            const bool in_session = id(flow_session_live) &&
+                (now - id(flow_last_pulse_ms)) < (uint32_t) (${idle_gap_s} * 1000UL);
+            id(flow_last_pulse_ms) = now;
+            if (in_session) {
+              id(flow_credit)->execute((int) delta);
+            } else {
+              if (id(flow_session_live)) ESP_LOGI("flow", "idle gap passed; previous session closed");
+              id(flow_session_live) = false;
+              id(flow_pending) += delta;
+            }
+
+  - platform: template
+    name: "Flow Rate"
+    id: flow_rate_gpm
+    icon: "mdi:water-pump"
+    device_class: volume_flow_rate
+    unit_of_measurement: "gal/min"
+    state_class: measurement
+    accuracy_decimals: ${flow_rate_decimals}
+    update_interval: 2s
+    lambda: |-
+      const float ppm = id(flow_meter).state;
+      if (std::isnan(ppm) || id(k_active) <= 0.0f) return 0.0f;
+      return ppm / id(k_active) / 3.785411784f;
+    filters:
+      # Only publish changes; the retained MQTT state covers the rest.
+      - delta: 0.0005
+
+  # The same number in the unit the sensor datasheets use, for checking a
+  # reading against the sensor's rated range.
+  - platform: template
+    name: "Flow Rate Litres per Minute"
+    id: flow_rate_lpm
+    icon: "mdi:water-pump"
+    device_class: volume_flow_rate
+    unit_of_measurement: "L/min"
+    state_class: measurement
+    accuracy_decimals: ${flow_rate_decimals}
+    entity_category: diagnostic
+    update_interval: 2s
+    lambda: |-
+      const float ppm = id(flow_meter).state;
+      if (std::isnan(ppm) || id(k_active) <= 0.0f) return 0.0f;
+      return ppm / id(k_active);
+    filters:
+      - delta: 0.002
+
+binary_sensor:
+  # Water is running: a pulse within flow_timeout, confirmed by a second.
+  # Nothing below the sensor's minimum flow can be reported -- below it the
+  # rotor stops and no pulse arrives, which reads exactly like no water.
+  # Home Assistant detects a stall from the outside instead (plug on, this
+  # off). See water-flow/README.md.
+  - platform: template
+    name: "Flowing"
+    id: flowing
+    device_class: running
+    trigger_on_initial_state: true
+    lambda: "return id(flow_meter).state > 0.0f;"
