@@ -21,6 +21,7 @@ CONF_MIN_TEMPERATURE = "min_temperature"
 CONF_MAX_TEMPERATURE = "max_temperature"
 CONF_FULL_SCALE_LUX = "full_scale_lux"
 CONF_RESPONSE_TIME = "response_time"
+CONF_MAX_TIME_CONSTANT = "max_time_constant"
 CONF_LEARNING = "learning"
 CONF_FAN_DEADBAND = "fan_deadband"
 CONF_CROSS_CHECK = "cross_check"
@@ -102,6 +103,22 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FULL_SCALE_LUX, default=2000.0): cv.positive_float,
             cv.Optional(CONF_RESPONSE_TIME, default="20min"): cv.positive_time_period_minutes,
             cv.Optional(CONF_LEARNING, default=True): cv.boolean,
+            # Ceiling on the learned passive time constant (Tank Time
+            # Constant), i.e. the floor on the model's loss coefficient ka.
+            # 1000 min suits the ~10 gal nano and stays the default; a large
+            # lidded tank can be slower than that, and a bound the fit wants
+            # to cross pins ka and leaves the model biased for good (see
+            # THETA_MAX in tank_controller.cpp). Set it where m*c/UA rules
+            # values out: tau = m*c / (smallest loss slope the tank could
+            # physically have). 100 min keeps the RLS prior (67 min)
+            # learnable from either side; 20000 min is two weeks, beyond any
+            # aquarium.
+            cv.Optional(CONF_MAX_TIME_CONSTANT, default="1000min"): cv.All(
+                cv.positive_time_period_minutes,
+                cv.Range(
+                    min=cv.TimePeriod(minutes=100), max=cv.TimePeriod(minutes=20000)
+                ),
+            ),
             # How far above setpoint the water must sit before the fan may
             # run, degF. First-boot default only: the "Fan Deadband" number
             # in control.yaml changes it at runtime and the controller
@@ -146,6 +163,7 @@ async def to_code(config):
     cg.add(var.set_full_scale_lux(config[CONF_FULL_SCALE_LUX]))
     cg.add(var.set_response_time(config[CONF_RESPONSE_TIME].total_minutes))
     cg.add(var.set_learning_enabled(config[CONF_LEARNING]))
+    cg.add(var.set_max_time_constant(config[CONF_MAX_TIME_CONSTANT].total_minutes))
     cg.add(var.set_fan_deadband(_f_delta_to_c(config[CONF_FAN_DEADBAND])))
     cg.add(var.set_disagreement_band(_f_delta_to_c(config[CONF_DISAGREEMENT_BAND])))
     if CONF_CROSS_CHECK in config:

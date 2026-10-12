@@ -133,6 +133,9 @@ class TankController : public PollingComponent {
   void set_max_temperature(float v) { this->max_temp_ = v; }
   void set_full_scale_lux(float v) { this->full_scale_lux_ = v; }
   void set_response_time(float minutes) { this->response_time_ = minutes; }
+  // Ceiling on the learned passive time constant (1/ka), minutes. Sets the
+  // floor on ka; see THETA_MAX in tank_controller.cpp.
+  void set_max_time_constant(float minutes);
   void set_learning_enabled(bool v) { this->learning_enabled_ = v; }
   bool get_learning_enabled() const { return this->learning_enabled_; }
   void set_fan_available(bool v) { this->fan_available_ = v; }
@@ -193,6 +196,7 @@ class TankController : public PollingComponent {
   float predicted_light_for_(int minutes_ahead) const;
   int current_slot_(int minutes_ahead = 0) const;
   void clamp_model_();
+  float theta_max_(uint8_t i) const;
   void load_prior_();
   void save_state_();
 
@@ -225,6 +229,9 @@ class TankController : public PollingComponent {
   float max_temp_{30.0f};
   float full_scale_lux_{2000.0f};
   float response_time_{20.0f};
+  // 1 / max_time_constant. 0.001 = 1000 min, the bound every board had
+  // before it became configurable.
+  float ka_min_{0.001f};
   bool learning_enabled_{true};
   bool fan_available_{true};
   bool hold_{false};

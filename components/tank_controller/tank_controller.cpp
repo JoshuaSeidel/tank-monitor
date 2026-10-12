@@ -220,6 +220,27 @@ static const float LAMBDA = 0.9995f;
 // output. It was allowed to reach -0.000 while the heater was not -- an
 // asymmetry with no physical justification, since a fan that does nothing
 // at all is not a fan.
+//
+// theta[2]'s upper bound (-ka closest to zero, i.e. the SLOWEST tank) is
+// the one entry in THETA_MAX that is not used as written. -0.001 is a
+// 1000 minute time constant, which was sized for the ~10 gal nano and is
+// still the default -- but a 75 gal tank holding ~235 L under a lid can
+// plausibly be slower than that, and a bound the fit wants to cross does
+// not just cap a diagnostic: when the tank is regulated tightly away from
+// TEMP_REF, (T - TEMP_REF) is nearly constant, RLS moves ka and c
+// together, the clamp undoes ka's share of every correction, and the fit
+// is left wrong in one direction for good (the 75's controller,
+// 2026-10-12: ka pinned, Model Bias +2.5..+3.0 degF/h for days, health
+// ~73%). The ceiling is therefore per board -- max_time_constant in YAML,
+// held as ka_min_ -- and clamp_model_() substitutes -ka_min_ for this
+// entry. See theta_max_().
+//
+// A slower ka does not need a tighter guard on c. The equilibrium formula
+// above is commentary, not code: nothing in this file divides by ka except
+// get_time_constant(), and the control law and the 15 minute forecast use
+// ka * (T - TEMP_REF) + c, which stays the measured drift at the operating
+// point however small ka gets. c's +/-0.15 degC/min (+/-16 degF/h) bound is
+// a bound on that drift, which is what it was always protecting.
 static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.150f};
 static const float THETA_MAX[N_PARAMS] = {0.300f, -0.002f, -0.001f, 0.050f, 0.150f};
 
@@ -432,11 +453,30 @@ void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float
            this->model_.theta[4], this->get_confidence());
 }
 
+float TankController::theta_max_(uint8_t i) const {
+  // ka's floor is the board's max_time_constant; every other bound is fixed.
+  return i == 2 ? -this->ka_min_ : THETA_MAX[i];
+}
+
+void TankController::set_max_time_constant(float minutes) {
+  // __init__.py validates 100-20000 min. Re-checked here because ka_min_
+  // must stay strictly positive (get_time_constant divides by it) and must
+  // not exceed the prior's 0.015, or a reset would clamp the starting
+  // guess itself. 1000 min is the long-standing default.
+  if (!(minutes >= 100.0f))
+    minutes = 1000.0f;
+  this->ka_min_ = 1.0f / minutes;
+}
+
 void TankController::clamp_model_() {
+  // Every path that puts numbers into theta ends here: setup()'s restore
+  // from flash, import_model(), and each RLS step in learn_(). So a model
+  // saved with ka pinned at an older, tighter ceiling is simply inside the
+  // new range on the next boot and free to move -- nothing to migrate.
   for (uint8_t i = 0; i < N_PARAMS; i++) {
     if (std::isnan(this->model_.theta[i]))
       this->model_.theta[i] = THETA_PRIOR[i];
-    this->model_.theta[i] = clampf(this->model_.theta[i], THETA_MIN[i], THETA_MAX[i]);
+    this->model_.theta[i] = clampf(this->model_.theta[i], THETA_MIN[i], this->theta_max_(i));
     for (uint8_t j = 0; j < N_PARAMS; j++) {
       if (std::isnan(this->model_.p[i][j]))
         this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
@@ -986,8 +1026,12 @@ float TankController::get_swing() const {
 }
 
 float TankController::get_time_constant() const {
+  // clamp_model_() holds ka at or above ka_min_ (> 0), so this cannot divide
+  // by zero. The old `ka > 1e-4` test would have reported NaN for any
+  // learned time constant beyond 10000 min, which max_time_constant now
+  // permits; the guard is kept only against a corrupted model.
   const float ka = -this->model_.theta[2];
-  return ka > 1e-4f ? 1.0f / ka : NAN;  // minutes
+  return ka > 0.0f ? 1.0f / ka : NAN;  // minutes
 }
 
 float TankController::get_model_health() const {
@@ -1021,6 +1065,7 @@ void TankController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Setpoint: %.1f degF (limits %.1f - %.1f)", this->setpoint_ * 9.0f / 5.0f + 32.0f,
                 this->min_temp_ * 9.0f / 5.0f + 32.0f, this->max_temp_ * 9.0f / 5.0f + 32.0f);
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
+  ESP_LOGCONFIG(TAG, "  Max time constant: %.0f min", 1.0f / this->ka_min_);
   ESP_LOGCONFIG(TAG, "  Fan available: %s", YESNO(this->fan_available_));
   ESP_LOGCONFIG(TAG, "  Fan deadband: %.2f degF above setpoint", this->fan_deadband_ * 9.0f / 5.0f);
   ESP_LOGCONFIG(TAG, "  Cross-check probe: %s (disagreement band %.1f degF)", YESNO(this->cross_sensor_ != nullptr),

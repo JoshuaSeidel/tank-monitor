@@ -258,6 +258,32 @@ tank_controller:
   # troubles glass, silicone or a Jager; it is a backstop on the water,
   # not a limit on the target.
   max_temperature: 88.0
+  # Ceiling on the learned Tank Time Constant, raised from the component's
+  # 1000 min default (sized for the ~10 gal nano) on 2026-10-12.
+  #
+  # The evidence: Tank Time Constant read exactly 1000 min for days -- ka
+  # pinned on the old bound -- while Model Health sat at 72-78%, Model Bias
+  # held a steady +2.5 to +3.0 degF/h (tank warmer than predicted) and the
+  # 15 min Predicted Temperature read 76.33 degF against a tank holding
+  # 77.1 degF at its 77.0 setpoint with 0.11 degF of swing. Control was
+  # fine; the model was not. Here the tank sits ~1.9 degF above the model's
+  # 75.2 degF TEMP_REF and barely moves, so ka's regressor is close to a
+  # constant and RLS corrects ka and c together. With ka against the bound
+  # the clamp undid ka's share of every correction, the residual could
+  # never close, and health and feedforward trust stayed down.
+  #
+  # Why 6000 min: tau = m*c/UA. ~235 L of water is 235 kg * 4186 J/kg.K =
+  # ~0.98 MJ/K, so 6000 min (360000 s) corresponds to a loss slope UA of
+  # only 2.7 W/K. Natural convection alone off ~2.3 m^2 of glass and lid
+  # at a couple of W/m^2.K exceeds that, before evaporation's slope is
+  # added, so no real value of this tank can sit beyond 6000 -- unlike
+  # 1000 min (UA 16 W/K), which a lidded tank of this size can plausibly
+  # beat. The bound's job is to stop nonsense, not to encode a guess, so it
+  # goes where physics, not the nano, rules values out.
+  #
+  # A model saved with ka on the old bound needs no reset: the restore
+  # re-clamps against this ceiling and ka is simply free to move.
+  max_time_constant: 6000min
 
 
 sensor:
