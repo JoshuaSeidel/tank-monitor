@@ -29,6 +29,7 @@ calibration constant, because that is how the sensor datasheets state them.
 | `boards/esp32-lite.yaml` | AITRIP ESP32 Lite V1.0.0 (LOLIN32 Lite clone) -- **the default** |
 | `boards/xiao-esp32s3.yaml` | Seeed XIAO ESP32-S3 -- alternative |
 | `boards/xiao-esp32c3.yaml` | Seeed XIAO ESP32-C3 -- alternative, same pads as the S3 |
+| [`enclosure/`](enclosure/README.md) | 3D-printed PETG boxes for both units (OpenSCAD source + STLs): print settings, hardware, assembly |
 
 The repo's own `packages/base.yaml` supplies Wi-Fi, MQTT (with the
 non-blocking `idf_send_async` publish), SNTP, OTA, the web page and the
@@ -106,7 +107,7 @@ cable gland and nothing to plug in during use.
 | JST-PH 2.0 male/female extension lead (or one plug + one socket pigtail) | carries the switch, the divider tap and the boost feed, so the cell stays unpluggable and neither it nor the board's socket is modified. (Cutting the cell's own + lead works too, but then the cell can't be swapped) |
 | **12 mm IP67 metal latching (self-locking) push-button, WITHOUT LED** -- e.g. "Juasky 5pcs 12mm Latching Metal Switch, Waterproof Self-Locking Push Button, High Head" (Amazon B0DWHSG6YW) | the on/off switch, in series in the battery + lead. Get the **no-LED** version: the LED versions are rated 12-24 V and will not light at 3.7 V. Panel-mounts through a **12 mm (0.47") hole** in the enclosure wall, O-ring on the **outside** |
 | 100 kΩ + 100 kΩ resistors, 100 nF ceramic | battery-voltage divider and its filter cap |
-| **IP65 ABS enclosure, ~85 × 58 × 33 mm** | the board (~50 × 25 mm plus the USB-C plug), the cell (50 × 20 × 10), the boost module and the switch. A 65 × 58 × 35 mm box fits too, but tightly |
+| **Enclosure**: the printed sealed box in [`enclosure/`](enclosure/README.md) (~44 g PETG, O-ring cord gasket, 4 × M3 inserts) -- or an IP65 ABS box, ~85 × 58 × 33 mm | the board (~50 × 25 mm plus the USB-C plug), the cell (50 × 20 × 10), the boost module and the switch. A 65 × 58 × 35 mm ABS box fits too, but tightly |
 | PG7 cable gland | the sensor's three wires |
 | Optional: IP67 capped USB-C panel jack | to charge and flash without opening the lid. Otherwise open the lid to reach the board's USB-C |
 
