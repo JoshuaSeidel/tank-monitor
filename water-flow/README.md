@@ -26,8 +26,9 @@ calibration constant, because that is how the sensor datasheets state them.
 | `packages/battery.yaml` | LiPo voltage / percent / low-battery (change unit only) |
 | `packages/ro_fill.yaml` | RO unit logic |
 | `packages/water_change.yaml` | change unit logic |
-| `boards/xiao-esp32s3.yaml` | Seeed XIAO ESP32-S3 pins -- **the default** |
-| `boards/xiao-esp32c3.yaml` | Seeed XIAO ESP32-C3 pins -- optional, same pads |
+| `boards/esp32-lite.yaml` | AITRIP ESP32 Lite V1.0.0 (LOLIN32 Lite clone) -- **the default** |
+| `boards/xiao-esp32s3.yaml` | Seeed XIAO ESP32-S3 -- alternative |
+| `boards/xiao-esp32c3.yaml` | Seeed XIAO ESP32-C3 -- alternative, same pads as the S3 |
 
 The repo's own `packages/base.yaml` supplies Wi-Fi, MQTT (with the
 non-blocking `idf_send_async` publish), SNTP, OTA, the web page and the
@@ -35,10 +36,38 @@ diagnostics, so these boards use the same `secrets.yaml` keys as the tank
 boards. Nothing from the tank controller is pulled in.
 
 The remote wrappers build from GitHub `main` with `refresh: 0s`: a change
-reaches a board only after it is pushed. To move a unit to the XIAO
-ESP32-C3, change the last line of its wrapper's `files:` list to
-`water-flow/boards/xiao-esp32c3.yaml`; the wiring lands on the same
-D-numbered pads.
+reaches a board only after it is pushed. To build a unit for a XIAO
+instead, change the last line of its wrapper's `files:` list to
+`water-flow/boards/xiao-esp32s3.yaml` (or `xiao-esp32c3.yaml`) and wire
+per [Alternative board: Seeed XIAO](#alternative-board-seeed-xiao).
+
+---
+
+## The board: AITRIP ESP32 Lite V1.0.0
+
+A WEMOS LOLIN32 Lite clone: ESP32-D0WDQ6 rev1, 4 MB flash, CH340 USB
+serial on USB-C, ME6211 3.3 V LDO (500 mA), TP4054 LiPo charger (~500 mA)
+with a JST-PH 2.0 battery socket, blue LED on GPIO22 (lit when low).
+
+Two things it does **not** have, and the wiring is built around both:
+
+* **No 5 V header pin.** On the LOLIN32 Lite, USB 5 V goes to the charger
+  and the LDO and nowhere else -- there is no way to take 5 V off the
+  header for a peripheral. (Some clone listings draw a "5V" pin; the
+  design does not depend on one.) Both flow sensors need 5 V, so **both
+  units feed the sensor from a Pololu U1V11F5 step-up on the 3V3 pin.**
+  That works the same on USB and on battery, so the two units share one
+  sensor harness and nobody has to cut a USB cable.
+* **No battery sense.** Battery + is not on the header and is not divided
+  to any GPIO. The change unit taps its battery lead into an external
+  100k/100k divider on GPIO35.
+
+LDO budget with the boost on 3V3: the ESP32's Wi-Fi peaks at ~250-350 mA
+for microseconds; the U1V11F5 draws ~27 mA from 3.3 V to give the sensor
+15 mA at 5 V (85 % efficient). Both are inside the ME6211's 500 mA.
+
+Header pins are labelled with GPIO numbers. **3V, GND, 22, 27, 35** are the
+only five this project uses.
 
 ---
 
@@ -48,7 +77,8 @@ D-numbered pads.
 
 | Part | Notes |
 |---|---|
-| **Seeed XIAO ESP32-S3** (or XIAO ESP32-C3) | with its U.FL antenna attached -- there is no on-board antenna |
+| **AITRIP ESP32 Lite V1.0.0** (LOLIN32 Lite clone, USB-C) | |
+| **Pololu U1V11F5** 5 V step-up | 3V3 pin -> 5 V for the flow sensor. Fixed 5.0 V output, nothing to set. EN left unconnected (on-board pull-up) |
 | 10 kΩ + 20 kΩ resistors, ¼ W | pulse-line divider, 5 V -> 3.3 V |
 | 26-28 AWG silicone wire, heat shrink | |
 
@@ -57,12 +87,11 @@ D-numbered pads.
 | Part | Notes |
 |---|---|
 | **uxcell 1/4" quick-connect hall flow sensor**, DC 5 V, 0.05-0.8 L/min | in the RO product line. A 100 GPD membrane makes ~0.26 L/min |
-| USB-C 5 V wall adapter, ≥ 500 mA | preferred. The board and sensor draw ~60 mA |
-| *or* USB-C power bank **with an always-on / low-current mode** | portable alternative. Most banks switch themselves off below a 50-100 mA load, which this unit sits right at; without that mode it will die mid-fill |
+| USB-C 5 V wall adapter, ≥ 500 mA | preferred. The unit draws ~100-130 mA |
+| *or* USB-C power bank with an **always-on / low-current mode** | portable alternative. At ~100 mA this board stays above most banks' auto-off threshold, but the margin is small -- use the mode if the bank has one |
 
-No boost board and no battery: on USB the XIAO's 5V pad is live and feeds
-the sensor directly. This unit has no battery entities -- there is nothing
-for them to measure.
+No battery: leave the JST socket empty. This unit publishes no battery
+entities -- there is nothing for them to measure.
 
 ### Change unit -- `water-flow-change` (sealed)
 
@@ -72,22 +101,20 @@ cable gland and nothing to plug in during use.
 | Part | Notes |
 |---|---|
 | **YF-S201-class 1/2" hall flow sensor**, 1-30 L/min | in the change hose |
-| **MakerHawk 3.7 V 1000 mAh 1S LiPo, 102050** (10 × 20 × 50 mm) | dual protection board (PCM) on the cell -- **required**; never use an unprotected cell in a sealed box. JST-PH 2.0 plug |
-| JST-PH 2.0 pigtail, mating the cell's plug | soldered to the XIAO's BAT+/BAT- pads so the cell can be unplugged and swapped |
-| **Pololu U1V11F5** 5 V step-up | battery -> 5 V for the sensor. 0.5-5.5 V in, so it runs the whole LiPo range. EN left unconnected (on-board pull-up) |
-| Waterproof on/off switch (IP67 panel-mount rocker or push-button, ≥ 1 A) | in the battery + line |
+| **MakerHawk 3.7 V 1000 mAh 1S LiPo, 102050** (10 × 20 × 50 mm) | dual protection board (PCM) on the cell -- **required**, never an unprotected cell in a sealed box. JST-PH 2.0 plug, straight into the board's battery socket |
+| JST-PH 2.0 extension lead (plug + socket) | carries the switch and the divider tap, so neither the cell nor the board's socket is modified |
+| Waterproof on/off switch (IP67 panel-mount rocker or push-button, ≥ 1 A) | in the extension lead's + wire |
 | 100 kΩ + 100 kΩ resistors, 100 nF ceramic | battery-voltage divider and its filter cap |
-| **IP65 ABS enclosure, ~65 × 58 × 35 mm** | fits the cell (50 × 20 × 10), the XIAO (21 × 17.5), the U1V11F5 and the switch |
+| **IP65 ABS enclosure, ~85 × 58 × 33 mm** | the board (~50 × 25 mm plus the USB-C plug), the cell (50 × 20 × 10), the U1V11F5 and the switch. A 65 × 58 × 35 mm box fits too, but tightly |
 | PG7 cable gland | the sensor's three wires |
-| Optional: IP67 capped USB-C panel jack | to charge and flash without opening the lid. Otherwise open the lid to reach the XIAO's USB-C |
+| Optional: IP67 capped USB-C panel jack | to charge and flash without opening the lid. Otherwise open the lid to reach the board's USB-C |
 
 ---
 
 ## Wiring
 
 Wire colours on both sensors: **red = +5 V, black = GND, yellow = pulse**.
-GPIOs below are for the XIAO ESP32-S3; the XIAO ESP32-C3 uses the **same
-pads** (D3 = GPIO5, D1 = GPIO3 there).
+Pin names below are the ESP32 Lite's header labels.
 
 ### The pulse-line divider (both units)
 
@@ -95,7 +122,7 @@ The hall sensor's output is pulled up to its own 5 V supply inside the
 sensor. A 10 k (top) / 20 k (bottom) divider brings that to 3.3 V:
 
 ```
- sensor yellow ──[ 10 kΩ ]──┬── XIAO D3 (GPIO4)
+ sensor yellow ──[ 10 kΩ ]──┬── header 27 (GPIO27)
                             │
                          [ 20 kΩ ]
                             │
@@ -103,61 +130,73 @@ sensor. A 10 k (top) / 20 k (bottom) divider brings that to 3.3 V:
 ```
 
 **Check it once with a meter before trusting the counts.** Turn the rotor
-slowly by blowing through the sensor and read D3 to GND at the high level.
-It must sit between **2.6 V and 3.4 V**. If the sensor's internal pull-up is
-about 10 kΩ, the high level is only 5 × 20 / (10 + 10 + 20) = 2.5 V -- right
-on the ESP32's 2.48 V input threshold, which counts erratically. In that
-case replace the **10 kΩ top resistor with a wire**: the sensor's own
-pull-up becomes the top leg and the pin sees 5 × 20 / 30 = 3.3 V. Do not
-do that if the high level already reads above 3 V -- that sensor drives its
-output hard, and without the top resistor the pin would see 5 V.
+slowly by blowing through the sensor and read pin 27 to GND at the high
+level. It must sit between **2.6 V and 3.4 V**. If the sensor's internal
+pull-up is about 10 kΩ, the high level is only 5 × 20 / (10 + 10 + 20) =
+2.5 V -- right on the ESP32's 2.48 V input threshold, which counts
+erratically. In that case replace the **10 kΩ top resistor with a wire**:
+the sensor's own pull-up becomes the top leg and the pin sees 5 × 20 / 30
+= 3.3 V. Do not do that if the high level already reads above 3 V -- that
+sensor drives its output hard, and without the top resistor the pin would
+see 5 V.
 
 The 20 kΩ also holds the pin low with the sensor unplugged, so a missing
 sensor reads as no flow rather than as noise.
+
+### Sensor power (both units)
+
+```
+  header 3V ──────── U1V11F5 VIN
+  header GND ─────── U1V11F5 GND ──────── sensor black
+                     U1V11F5 VOUT (5.0 V) ── sensor red
+```
+
+The U1V11F5 is fixed at 5.0 V, so there is nothing to set. If an
+adjustable boost such as an MT3608 is ever substituted, set it to 5.0 V
+with no load **before** the sensor is connected.
 
 ### RO unit -- `water-flow-ro`
 
 ```
  POWER
-  USB-C 5 V (wall adapter, or power bank in always-on mode) ── XIAO USB-C
+  USB-C 5 V (wall adapter, or power bank in always-on mode) ── board USB-C
+  JST battery socket: empty
 
  SENSOR (uxcell 1/4")
-  XIAO 5V pad ────────────────── red      (VBUS: live because USB is plugged in)
-  XIAO GND ───────────────────── black
-  yellow ──[ 10 kΩ ]──┬───────── XIAO D3 (GPIO4)
+  3V ──── U1V11F5 VIN        U1V11F5 VOUT ── red
+  GND ─── U1V11F5 GND ────────────────────── black
+  yellow ──[ 10 kΩ ]──┬───── 27
                       └─[ 20 kΩ ]── GND
 
-  D1 unused -- no battery on this unit. Status LED: GPIO21, on the board.
+  35 unused (no battery on this unit). Status LED: 22, on the board.
 ```
 
 ### Change unit -- `water-flow-change`
 
 > **CHECK THE BATTERY PLUG POLARITY WITH A METER BEFORE CONNECTING IT.**
-> JST-PH battery polarity is **not standardised** -- cells and pigtails from
+> JST-PH battery polarity is **not standardised** -- cells and boards from
 > different makers are wired both ways round, and a reversed LiPo destroys
-> the XIAO's charger instantly. Meter the cell's plug, then meter the
-> pigtail once it is soldered: the cell's **red (+) must land on the XIAO's
-> BAT+ pad** (through the switch). If they disagree, swap the pins in the
-> pigtail's housing -- never the cell's.
+> the board's charger instantly. Meter the cell's plug and find which pin
+> is +; it must mate with the pin marked **+** beside the board's JST
+> socket. Check the extension lead the same way, end to end. If anything
+> disagrees, re-pin the extension lead's housing -- never the cell's.
 
 ```
- POWER
-  LiPo + (red) ── JST-PH ── [ ON/OFF switch ] ──┬──── XIAO BAT+ pad (underside)
-                                                 ├──── U1V11F5 VIN
-                                                 └──── battery divider top (below)
-  LiPo - (black) ─ JST-PH ───────────────────────┬──── XIAO BAT- pad = GND
-                                                 └──── U1V11F5 GND
+ POWER  (JST-PH extension lead between cell and board)
+  cell plug + (red) ──[ ON/OFF switch ]──┬─────── board JST socket +
+                                         └─────── battery divider top (below)
+  cell plug - (black) ─────────────────────────── board JST socket -
 
  SENSOR (YF-S201)
-  U1V11F5 VOUT (5.0 V) ───────── red
-  GND ────────────────────────── black
-  yellow ──[ 10 kΩ ]──┬───────── XIAO D3 (GPIO4)
+  3V ──── U1V11F5 VIN        U1V11F5 VOUT ── red
+  GND ─── U1V11F5 GND ────────────────────── black
+  yellow ──[ 10 kΩ ]──┬───── 27
                       └─[ 20 kΩ ]── GND
 
  BATTERY SENSE
-  switched BAT+ ──[ 100 kΩ ]──┬───────── XIAO D1 (GPIO2)
-                              ├─[ 100 kΩ ]── GND
-                              └─[ 100 nF ]── GND
+  switched + ──[ 100 kΩ ]──┬───────── 35
+                           ├─[ 100 kΩ ]── GND
+                           └─[ 100 nF ]── GND
 ```
 
 * The divider's top leg takes the **switched** battery line, so nothing
@@ -165,34 +204,38 @@ sensor reads as no flow rather than as noise.
 * **Charging needs the switch ON** -- the switch is between the cell and
   the charger. Charge from USB-C with the switch on; the board runs and
   reports while it charges.
-* The U1V11F5 is fixed at 5.0 V, so there is no output to set. (If an
-  adjustable boost such as an MT3608 is ever substituted: set it to 5.0 V
-  with no load **before** the sensor is connected.)
-* Status LED: GPIO21, on the board -- blinking until online, then dark.
+* Why the boost runs from 3V3 and not straight from the battery: battery
+  + is not on the header, so feeding the boost from the cell would mean a
+  second tap on the battery lead and a separate harness from the RO unit.
+  From 3V3 it costs ~10 % more battery (one extra conversion) and the two
+  units are wired identically. The U1V11F5 starts from 0.5 V, so it keeps
+  giving 5 V as the LDO output sags at the bottom of the cell.
+* Status LED: 22, on the board -- blinking until online, then dark.
 
 ---
 
 ## Battery (change unit)
 
-Estimated draw from the cell, XIAO ESP32-S3 on Wi-Fi with light modem
-sleep:
+Estimated draw from the cell. The LOLIN32 Lite is not a frugal board:
+its CH340 and LDO run from the battery too, and it measures ~45 mA with
+Wi-Fi off and ~130 mA with Wi-Fi on and no power saving.
 
 | Load | mA from the cell |
 |---|---|
-| XIAO ESP32-S3, Wi-Fi connected, MQTT, power-save light | ~45-60 |
-| YF-S201 (≤ 15 mA at 5 V) through the U1V11F5 (~85 %) | ~20-25 |
+| board + ESP32, Wi-Fi connected, MQTT, power-save light | ~70-90 |
+| YF-S201 (≤ 15 mA at 5 V) via U1V11F5 from 3V3 | ~27 |
 | dividers, status LED dark | < 0.1 |
-| **total** | **~70 typical, ~110 worst** |
+| **total** | **~100-120 typical, ~160 worst** |
 
-A 1000 mAh cell gives ~850 mAh before Low Battery (3.55 V), so roughly
-**11-12 h on, ~8 h worst case**. A water change with the box on for 30-45
-minutes (drain, refill, the waits between) uses 35-80 mAh: **about 10-15
-changes per charge** -- call it 10 and charge when "Low Battery" comes on
-or every couple of weeks, whichever is first.
+A 1000 mAh cell gives ~850 mAh before Low Battery (3.55 V): **about 7-8 h
+on, ~5 h worst case.** A water change with the box on for 30-45 minutes
+(drain, refill, the waits between) uses 50-120 mAh: **about 7-10 changes
+per charge** -- plan on 7, and charge when "Low Battery" comes on or after
+every few changes, whichever is first.
 
-The XIAO ESP32-S3's on-board charger runs at about **100 mA**, so a full
-charge from empty takes **10+ hours -- charge overnight**. A top-up after
-one change takes under an hour.
+The board's TP4054 charges at ~500 mA, so a full charge from empty takes
+**about 2.5-3 hours** (0.5 C, gentle for this cell). A top-up after one
+change takes well under an hour.
 
 Low Battery turns on below 3.55 V under load (30 s debounce, so a Wi-Fi
 transmit dip does not trip it). At that point there is enough left to
@@ -202,13 +245,31 @@ finish the change in progress, not to start another.
 
 ## Pin map
 
-| Signal | XIAO pad | ESP32-S3 GPIO | ESP32-C3 GPIO | Why this pin |
-|---|---|---|---|---|
-| Flow pulse (divided) | D3 | GPIO4 | GPIO5 | plain interrupt input; not a strapping pin on either chip |
-| Battery sense | D1 | GPIO2 | GPIO3 | ADC1 on both chips (ADC2 cannot read with Wi-Fi on) |
-| Status LED | on-board | GPIO21 | -- (none) | |
-| *never used* | D2 | GPIO3 (strap) | GPIO4 | S3 strapping pin |
-| *never used* | D0, D8, D9 | | GPIO2/8/9 (strap) | C3 strapping pins |
+| Signal | ESP32 Lite (default) | XIAO ESP32-S3 | XIAO ESP32-C3 |
+|---|---|---|---|
+| Flow pulse (divided) | GPIO27 | D3 = GPIO4 | D3 = GPIO5 |
+| Battery sense (ADC1) | GPIO35 | D1 = GPIO2 | D1 = GPIO3 |
+| Status LED | GPIO22 (on-board, active low) | GPIO21 (on-board) | none |
+| Sensor 5 V | U1V11F5 from 3V | see below | see below |
+
+ESP32 Lite pins avoided: 0, 2, 5, 12, 15 (strapping), 6-11 (flash), 36/39
+(spurious-interrupt erratum), and ADC2 (0, 2, 4, 12-15, 25-27) for
+anything analog -- ADC2 cannot read while Wi-Fi is on. Full reasoning in
+`boards/esp32-lite.yaml`.
+
+### Alternative board: Seeed XIAO
+
+Both XIAO board files work with the same packages. Wire by the D-labels
+in the table (they are not GPIO numbers). Differences from the ESP32 Lite:
+
+* The XIAO's 5V pad is VBUS -- live on USB. On the RO unit it can feed the
+  sensor directly with no boost. On battery it is dead, so the change unit
+  still needs the U1V11F5.
+* The battery goes on the BAT+/BAT- pads under the board (no socket):
+  solder a JST-PH pigtail there, with the same polarity check as above.
+* Lower draw (~70 mA total on the change unit, ~10-15 changes per 1000
+  mAh) but a ~100 mA charger: 10+ hours to charge from empty.
+* The XIAO needs its U.FL antenna attached.
 
 ---
 
@@ -216,7 +277,7 @@ finish the change in progress, not to start another.
 
 **RO fill**
 
-1. Plug the RO meter into USB-C. Wait for the status LED to stop blinking
+1. Plug the RO meter into USB-C. Wait for the blue LED to stop blinking
    (~10 s) -- or for "Water Flow RO Status" to show online.
 2. Set **Fill Target** in gallons if Home Assistant should stop the fill
    (0 = no target, measure only).
@@ -227,7 +288,7 @@ finish the change in progress, not to start another.
 
 **Water change**
 
-1. Switch the change meter on; wait for the LED to stop blinking.
+1. Switch the change meter on; wait for the blue LED to stop blinking.
 2. Press **New Water Change** (zeroes Removed / Added for this change).
 3. Set **Mode = Draining**, then drain. Every Brute-load is a step; "Step
    Volume" shows the current one, "Removed This Change" and "Percent

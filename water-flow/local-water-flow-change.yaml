@@ -15,4 +15,4 @@ packages:
   flow: !include packages/flow_meter.yaml
   battery: !include packages/battery.yaml
   unit: !include packages/water_change.yaml
-  board: !include boards/xiao-esp32s3.yaml
+  board: !include boards/esp32-lite.yaml

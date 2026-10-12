@@ -14,4 +14,4 @@ packages:
   base: !include ../packages/base.yaml
   flow: !include packages/flow_meter.yaml
   unit: !include packages/ro_fill.yaml
-  board: !include boards/xiao-esp32s3.yaml
+  board: !include boards/esp32-lite.yaml

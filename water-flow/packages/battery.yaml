@@ -2,8 +2,8 @@
 # water-change unit only: the RO unit runs from USB-C 5 V and has no battery,
 # and a battery entity on it would publish a number that means nothing.
 #
-# Hardware: a 100k / 100k divider from the switched battery line (BAT+ after
-# the on/off switch) to the board's battery_pin, bottom leg to GND, and a
+# Hardware: a 100k / 100k divider from the switched battery line (battery +
+# after the on/off switch) to the board's battery_pin, bottom leg to GND, and a
 # 100 nF ceramic across the bottom leg. The capacitor is what makes a
 # 100k-impedance source readable: the ADC's sample capacitor charges from it
 # in nanoseconds instead of from the resistors. The divider draws ~20 uA,
@@ -12,15 +12,15 @@ substitutions:
   # (top + bottom) / bottom. 100k / 100k -> 2.0.
   battery_divider_ratio: "2.0"
   # Under this the board calls the battery low. A 1S LiPo at 3.55 V under
-  # Wi-Fi load has roughly 10% left, and the XIAO's 3.3 V regulator starts
-  # dropping out a little below 3.4 V -- this leaves enough to finish the
-  # session in progress, not to start another one.
+  # Wi-Fi load has roughly 10% left, and the boards' 3.3 V LDOs (ME6211 on
+  # the ESP32 Lite) start dropping out a little below 3.4 V -- this leaves
+  # enough to finish the session in progress, not to start another one.
   battery_low_v: "3.55"
 
 sensor:
   # 4.2 V full reads 2.1 V at the pin, inside the ADC's calibrated range at
-  # 12 dB on both the S3 and the C3. Under 2.5 V after scaling means there
-  # is no battery to read (bottom resistor only, or the pack unplugged while
+  # 12 dB on every board file here (ESP32, S3, C3). Under 2.5 V after
+  # scaling means there is no battery to read (bottom resistor only, or the pack unplugged while
   # running from USB) and the board reports unknown rather than "empty".
   - platform: adc
     id: battery_voltage

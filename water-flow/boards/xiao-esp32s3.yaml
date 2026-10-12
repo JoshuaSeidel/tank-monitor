@@ -1,4 +1,5 @@
-# Seeed XIAO ESP32-S3 -- the default board for both water-flow meters.
+# Seeed XIAO ESP32-S3 -- alternative board for either water-flow meter (the
+# default is boards/esp32-lite.yaml).
 # Pads are labelled D0-D10 and those are NOT GPIO numbers: wire by the
 # silkscreen column below. (Same board as boards/xiao-esp32s3.yaml at the
 # repo root; its D-label table applies here too.)

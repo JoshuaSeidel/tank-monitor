@@ -1,0 +1,71 @@
+# AITRIP "ESP32 Lite V1.0.0" -- the default board for both water-flow meters.
+# A WEMOS LOLIN32 Lite clone: ESP32-D0WDQ6 (rev1), 4 MB flash, CH340 USB
+# serial on USB-C, ME6211 3.3 V LDO, TP4054 1S LiPo charger (~500 mA) with a
+# JST-PH 2.0 battery socket, blue LED on GPIO22.
+#
+# Header pins are labelled with their GPIO numbers -- what is printed is
+# what is meant, unlike the XIAO's D-labels.
+#
+# ---------------------------------------------------------------------
+# What this board does NOT have -- both shape the wiring
+# ---------------------------------------------------------------------
+#   - NO 5 V HEADER PIN on the original LOLIN32 Lite: USB 5 V goes to the
+#     charger and the LDO and nowhere else. Some clone listings show a "5V"
+#     pin; do not design around one that may not be there. The 5 V flow
+#     sensor is fed by a Pololu U1V11F5 step-up from the 3V3 pin instead --
+#     which works identically on USB and on battery, so both units share
+#     one sensor wiring.
+#   - NO BATTERY SENSE. The battery is not divided down to any GPIO, and
+#     BAT+ is not on the header. The change unit taps the battery lead
+#     (after its on/off switch) into an external 100k/100k divider.
+#
+# ---------------------------------------------------------------------
+# WHAT THIS FILE OWES water-flow/packages/flow_meter.yaml
+# ---------------------------------------------------------------------
+#   signal                 HEADER PIN   notes
+#   flow pulse (divided)   27           plain GPIO, interrupt input
+#   battery sense          35           ADC1_CH7, input-only -- change unit
+#   status LED (on-board)  22           active low
+#
+# Why these:
+#   GPIO6-11       flash. Not on the header, and never usable.
+#   GPIO0,2,5,12,15  strapping. The pulse divider holds its pin low at
+#                  boot; on GPIO12 that selects 1.8 V flash and the board
+#                  will not boot, on 0 it enters the bootloader.
+#   GPIO36/39      the ESP32's spurious-interrupt erratum (3.11): they
+#                  glitch when the ADC or Wi-Fi powers up. Fine for slow
+#                  analog, wrong for a pulse counter.
+#   ADC2 (0,2,4,12-15,25-27) cannot be read while Wi-Fi is on -- so the
+#                  battery goes on ADC1 (32-39). A digital pulse input on
+#                  27 does not care.
+#   GPIO35         ADC1 and input-only: exactly a divider input, and it
+#                  keeps output-capable pins free.
+#
+# The divider's 20k bottom leg holds GPIO27 low with the sensor unplugged,
+# so no internal pull is configured.
+substitutions:
+  flow_pin: GPIO27
+  battery_pin: GPIO35
+
+esp32:
+  board: lolin32_lite
+  variant: esp32
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+# ESPHome's default "legacy" unique_id generator omits the device name, so
+# two of these boards (or one of these and any tank-monitor board) would
+# generate identical unique_ids for "Wi-Fi Signal", "Uptime" and the rest,
+# and Home Assistant silently refuses the second. In the board file, not
+# the wrapper -- see boards/xiao-esp32s3.yaml for that history.
+mqtt:
+  discovery_unique_id_generator: mac
+
+# Blue LED, GPIO22 sinks it (on when low). Blinking = not yet on Wi-Fi /
+# MQTT; dark = online and counting. The "wait until it is online" cue in
+# the operating procedure -- no phone needed. Fast blink = an error.
+status_led:
+  pin:
+    number: GPIO22
+    inverted: true

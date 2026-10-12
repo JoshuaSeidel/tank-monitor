@@ -1,5 +1,5 @@
-# WATER FLOW -- RO. The 1/4" flow meter on the RO unit's product line, on a
-# Seeed XIAO ESP32-S3 powered from USB-C 5 V. Put THIS file in the ESPHome
+# WATER FLOW -- RO. The 1/4" flow meter on the RO unit's product line, on an
+# AITRIP ESP32 Lite (LOLIN32 Lite clone) powered from USB-C 5 V. Put THIS file in the ESPHome
 # dashboard; nothing else lives locally except secrets.yaml (the same one
 # the tank-monitor boards use -- it reuses their MQTT / OTA / AP secrets).
 #
@@ -7,9 +7,9 @@
 # the board, push it to main first. Development builds from the working
 # tree use water-flow/local-water-flow-ro.yaml instead.
 #
-# On an XIAO ESP32-C3 instead: replace the board line below with
-#   - water-flow/boards/xiao-esp32c3.yaml
-# The wiring lands on the same D-numbered pads.
+# On a Seeed XIAO instead: replace the board line below with
+#   - water-flow/boards/xiao-esp32s3.yaml   (or xiao-esp32c3.yaml)
+# and wire to that board file's pads -- see water-flow/README.md.
 #
 # No battery package: this unit runs from USB and has no battery to report.
 substitutions:
@@ -26,6 +26,6 @@ packages:
       - packages/base.yaml
       - water-flow/packages/flow_meter.yaml
       - water-flow/packages/ro_fill.yaml
-      - water-flow/boards/xiao-esp32s3.yaml
+      - water-flow/boards/esp32-lite.yaml
     # refresh defaults to 1d, which would silently build yesterday's config.
     refresh: 0s
