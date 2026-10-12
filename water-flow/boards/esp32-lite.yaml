@@ -12,9 +12,9 @@
 #   - NO 5 V HEADER PIN on the original LOLIN32 Lite: USB 5 V goes to the
 #     charger and the LDO and nowhere else. Some clone listings show a "5V"
 #     pin; do not design around one that may not be there. The 5 V flow
-#     sensor is fed by a Pololu U1V11F5 step-up from the 3V3 pin instead --
-#     which works identically on USB and on battery, so both units share
-#     one sensor wiring.
+#     sensor is fed by a fixed-5 V boost module instead: from the 3V3 pin
+#     on the USB-powered RO unit, from the switched battery line on the
+#     battery-powered change unit (water-flow/README.md, "Wiring").
 #   - NO BATTERY SENSE. The battery is not divided down to any GPIO, and
 #     BAT+ is not on the header. The change unit taps the battery lead
 #     (after its on/off switch) into an external 100k/100k divider.

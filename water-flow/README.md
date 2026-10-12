@@ -54,17 +54,18 @@ Two things it does **not** have, and the wiring is built around both:
 * **No 5 V header pin.** On the LOLIN32 Lite, USB 5 V goes to the charger
   and the LDO and nowhere else -- there is no way to take 5 V off the
   header for a peripheral. (Some clone listings draw a "5V" pin; the
-  design does not depend on one.) Both flow sensors need 5 V, so **both
-  units feed the sensor from a Pololu U1V11F5 step-up on the 3V3 pin.**
-  That works the same on USB and on battery, so the two units share one
-  sensor harness and nobody has to cut a USB cable.
+  design does not depend on one.) Both flow sensors need 5 V, so each
+  unit has a **fixed-5 V synchronous boost module** (see Parts): the RO
+  unit's runs from the **3V pin**, the change unit's straight from the
+  **switched battery line**. Nobody has to cut a USB cable.
 * **No battery sense.** Battery + is not on the header and is not divided
   to any GPIO. The change unit taps its battery lead into an external
   100k/100k divider on GPIO35.
 
-LDO budget with the boost on 3V3: the ESP32's Wi-Fi peaks at ~250-350 mA
-for microseconds; the U1V11F5 draws ~27 mA from 3.3 V to give the sensor
-15 mA at 5 V (85 % efficient). Both are inside the ME6211's 500 mA.
+LDO budget for the RO unit's boost on 3V3: the ESP32's Wi-Fi peaks at
+~250-350 mA for microseconds; the boost draws ~26 mA from 3.3 V to give the
+sensor 15 mA at 5 V (~88 % efficient) plus a few mA for its power LED.
+All inside the ME6211's 500 mA.
 
 Header pins are labelled with GPIO numbers. **3V, GND, 22, 27, 35** are the
 only five this project uses.
@@ -78,7 +79,7 @@ only five this project uses.
 | Part | Notes |
 |---|---|
 | **AITRIP ESP32 Lite V1.0.0** (LOLIN32 Lite clone, USB-C) | |
-| **Pololu U1V11F5** 5 V step-up | 3V3 pin -> 5 V for the flow sensor. Fixed 5.0 V output, nothing to set. EN left unconnected (on-board pull-up) |
+| **5 V synchronous boost module** -- the "DC-DC Step Up Board, 0.9/1.5/1.8/2.5/3/3.3/3.7/4.2 V to 5 V" 10-pack already on hand | powers the flow sensor. **Fixed 5 V output, 0.9-4.2 V input**, pads IN+ / IN- / OUT+ / OUT-; some have a USB-A socket and/or a power LED. No trim pot, nothing to set -- but **meter OUT+ to OUT- once: it must read 5.0 V (4.8-5.2) before the sensor is connected** |
 | 10 kΩ + 20 kΩ resistors, ¼ W | pulse-line divider, 5 V -> 3.3 V |
 | 26-28 AWG silicone wire, heat shrink | |
 
@@ -102,10 +103,10 @@ cable gland and nothing to plug in during use.
 |---|---|
 | **YF-S201-class 1/2" hall flow sensor**, 1-30 L/min | in the change hose |
 | **MakerHawk 3.7 V 1000 mAh 1S LiPo, 102050** (10 × 20 × 50 mm) | dual protection board (PCM) on the cell -- **required**, never an unprotected cell in a sealed box. JST-PH 2.0 plug, straight into the board's battery socket |
-| JST-PH 2.0 extension lead (plug + socket) | carries the switch and the divider tap, so neither the cell nor the board's socket is modified |
-| Waterproof on/off switch (IP67 panel-mount rocker or push-button, ≥ 1 A) | in the extension lead's + wire |
+| JST-PH 2.0 male/female extension lead (or one plug + one socket pigtail) | carries the switch, the divider tap and the boost feed, so the cell stays unpluggable and neither it nor the board's socket is modified. (Cutting the cell's own + lead works too, but then the cell can't be swapped) |
+| **12 mm IP67 metal latching (self-locking) push-button, WITHOUT LED** -- e.g. "Juasky 5pcs 12mm Latching Metal Switch, Waterproof Self-Locking Push Button, High Head" (Amazon B0DWHSG6YW) | the on/off switch, in series in the battery + lead. Get the **no-LED** version: the LED versions are rated 12-24 V and will not light at 3.7 V. Panel-mounts through a **12 mm (0.47") hole** in the enclosure wall, O-ring on the **outside** |
 | 100 kΩ + 100 kΩ resistors, 100 nF ceramic | battery-voltage divider and its filter cap |
-| **IP65 ABS enclosure, ~85 × 58 × 33 mm** | the board (~50 × 25 mm plus the USB-C plug), the cell (50 × 20 × 10), the U1V11F5 and the switch. A 65 × 58 × 35 mm box fits too, but tightly |
+| **IP65 ABS enclosure, ~85 × 58 × 33 mm** | the board (~50 × 25 mm plus the USB-C plug), the cell (50 × 20 × 10), the boost module and the switch. A 65 × 58 × 35 mm box fits too, but tightly |
 | PG7 cable gland | the sensor's three wires |
 | Optional: IP67 capped USB-C panel jack | to charge and flash without opening the lid. Otherwise open the lid to reach the board's USB-C |
 
@@ -145,15 +146,15 @@ sensor reads as no flow rather than as noise.
 
 ### Sensor power (both units)
 
-```
-  header 3V ──────── U1V11F5 VIN
-  header GND ─────── U1V11F5 GND ──────── sensor black
-                     U1V11F5 VOUT (5.0 V) ── sensor red
-```
+The boost module's output is fixed at 5 V -- there is no voltage to set.
+Still, **power the module once with nothing on OUT and meter OUT+ to OUT-:
+it must read 5.0 V (4.8-5.2 V)** before the sensor goes on. A module from
+a mixed batch, or one with a damaged regulator, can pass its input
+straight through or sit well off 5 V, and a pulse divider sized for 5 V
+then gives the wrong level at the pin.
 
-The U1V11F5 is fixed at 5.0 V, so there is nothing to set. If an
-adjustable boost such as an MT3608 is ever substituted, set it to 5.0 V
-with no load **before** the sensor is connected.
+IN- and OUT- are the same ground on these modules; the sensor's black
+goes to OUT-, which is also the board's GND through IN-.
 
 ### RO unit -- `water-flow-ro`
 
@@ -163,8 +164,8 @@ with no load **before** the sensor is connected.
   JST battery socket: empty
 
  SENSOR (uxcell 1/4")
-  3V ──── U1V11F5 VIN        U1V11F5 VOUT ── red
-  GND ─── U1V11F5 GND ────────────────────── black
+  3V ──── boost IN+          boost OUT+ (5.0 V) ── red
+  GND ─── boost IN-          boost OUT- ────────── black
   yellow ──[ 10 kΩ ]──┬───── 27
                       └─[ 20 kΩ ]── GND
 
@@ -183,13 +184,15 @@ with no load **before** the sensor is connected.
 
 ```
  POWER  (JST-PH extension lead between cell and board)
-  cell plug + (red) ──[ ON/OFF switch ]──┬─────── board JST socket +
-                                         └─────── battery divider top (below)
-  cell plug - (black) ─────────────────────────── board JST socket -
+  cell plug + (red) ──[ 12 mm latching switch ]──┬─────── board JST socket +
+                                                 ├─────── boost IN+
+                                                 └─────── battery divider top (below)
+  cell plug - (black) ─────────────────────────────┬───── board JST socket -
+                                                   └───── boost IN-
 
  SENSOR (YF-S201)
-  3V ──── U1V11F5 VIN        U1V11F5 VOUT ── red
-  GND ─── U1V11F5 GND ────────────────────── black
+  boost OUT+ (5.0 V) ── red
+  boost OUT- ────────── black
   yellow ──[ 10 kΩ ]──┬───── 27
                       └─[ 20 kΩ ]── GND
 
@@ -199,17 +202,25 @@ with no load **before** the sensor is connected.
                            └─[ 100 nF ]── GND
 ```
 
+* The switch is the 12 mm latching push-button, wired **in series in the +
+  wire** of a short JST-PH male/female extension: cell plug -> switch ->
+  board socket, with the boost IN+ and the divider tapped on the board side
+  of the switch. Mount it through a 12 mm hole in the box wall, O-ring
+  outside the wall so the seal is against the box. Press to latch on, press
+  again to release off.
 * The divider's top leg takes the **switched** battery line, so nothing
   drains the cell while the box is off (the divider is ~20 µA when on).
 * **Charging needs the switch ON** -- the switch is between the cell and
   the charger. Charge from USB-C with the switch on; the board runs and
   reports while it charges.
-* Why the boost runs from 3V3 and not straight from the battery: battery
-  + is not on the header, so feeding the boost from the cell would mean a
-  second tap on the battery lead and a separate harness from the RO unit.
-  From 3V3 it costs ~10 % more battery (one extra conversion) and the two
-  units are wired identically. The U1V11F5 starts from 0.5 V, so it keeps
-  giving 5 V as the LDO output sags at the bottom of the cell.
+* Why the change unit's boost runs from the battery and not from 3V: the
+  switched + wire in the extension lead is already there for the divider,
+  so it costs one more joint, and it skips a conversion -- the sensor's
+  current no longer passes through the LDO first. The cell never exceeds
+  the module's 4.2 V input limit (the charger stops at 4.2 V), and the
+  module keeps making 5 V down to 0.9 V, far below where the board quits.
+* The boost's own idle draw and power LED are behind the switch too: with
+  the box off, nothing draws from the cell.
 * Status LED: 22, on the board -- blinking until online, then dark.
 
 ---
@@ -223,11 +234,16 @@ Wi-Fi off and ~130 mA with Wi-Fi on and no power saving.
 | Load | mA from the cell |
 |---|---|
 | board + ESP32, Wi-Fi connected, MQTT, power-save light | ~70-90 |
-| YF-S201 (≤ 15 mA at 5 V) via U1V11F5 from 3V3 | ~27 |
+| YF-S201 (≤ 15 mA at 5 V) via the boost from the cell (~88 %) | ~23 |
+| boost module's own quiescent draw + its power LED, if fitted | ~1-3 |
 | dividers, status LED dark | < 0.1 |
-| **total** | **~100-120 typical, ~160 worst** |
+| **total** | **~95-115 typical, ~160 worst** |
 
-A 1000 mAh cell gives ~850 mAh before Low Battery (3.55 V): **about 7-8 h
+The module's power LED is the one load that buys nothing inside a sealed
+box; desoldering it (or cutting its trace) saves ~1-2 mA, worth about 2 %
+of the runtime -- optional.
+
+A 1000 mAh cell gives ~850 mAh before Low Battery (3.55 V): **about 7-9 h
 on, ~5 h worst case.** A water change with the box on for 30-45 minutes
 (drain, refill, the waits between) uses 50-120 mAh: **about 7-10 changes
 per charge** -- plan on 7, and charge when "Low Battery" comes on or after
@@ -250,7 +266,7 @@ finish the change in progress, not to start another.
 | Flow pulse (divided) | GPIO27 | D3 = GPIO4 | D3 = GPIO5 |
 | Battery sense (ADC1) | GPIO35 | D1 = GPIO2 | D1 = GPIO3 |
 | Status LED | GPIO22 (on-board, active low) | GPIO21 (on-board) | none |
-| Sensor 5 V | U1V11F5 from 3V | see below | see below |
+| Sensor 5 V | boost from 3V (RO) / switched battery (change) | see below | see below |
 
 ESP32 Lite pins avoided: 0, 2, 5, 12, 15 (strapping), 6-11 (flash), 36/39
 (spurious-interrupt erratum), and ADC2 (0, 2, 4, 12-15, 25-27) for
@@ -264,7 +280,7 @@ in the table (they are not GPIO numbers). Differences from the ESP32 Lite:
 
 * The XIAO's 5V pad is VBUS -- live on USB. On the RO unit it can feed the
   sensor directly with no boost. On battery it is dead, so the change unit
-  still needs the U1V11F5.
+  still needs the boost module, fed from the switched BAT+ line.
 * The battery goes on the BAT+/BAT- pads under the board (no socket):
   solder a JST-PH pigtail there, with the same polarity check as above.
 * Lower draw (~70 mA total on the change unit, ~10-15 changes per 1000
