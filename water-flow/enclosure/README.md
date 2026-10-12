@@ -4,6 +4,12 @@ Two PETG boxes, one per unit, designed to use as little filament as the job
 allows: thin walls (1.7-1.8 mm = 4 perimeters), no solid blocks, no
 supports, everything printed flat in the orientation the STL is exported in.
 
+![Change meter: assembled, parts inside, body, cut-away](images/change-meter.png)
+
+![RO meter: assembled, parts inside, body, cut-away](images/ro-meter.png)
+
+Rendered from the .scad sources in OpenSCAD preview (the "Parts inside" views use the stand-in parts from `part="fit"`).
+
 | Unit | Box | Outside size | Parts |
 |---|---|---|---|
 | `water-flow-ro` | splash-resistant, 2 screws | 59 × 49 × 15 mm (68 × 71 with screw ears and mounting tabs) | `ro-body`, `ro-lid` |
