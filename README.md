@@ -610,12 +610,28 @@ at its boundary; no Celsius value is published or configurable.
 - `kf` — how much your fan's evaporative cooling pulls out
 - `ka` — how fast the tank loses heat to the room per degree of difference
 - `kl` — heat the lights add at full brightness
-- `c`  — residual constant drift
+- `c`  — the drift at `ref` with nothing running
 
-Parameters are fit online with recursive least squares (forgetting factor
-0.9995 — it adapts over days, not minutes) and clamped to physically plausible
-ranges, which is what keeps closed-loop identification from wandering off
-during long stretches where nothing much is changing.
+`ref` is the model's operating point, not a constant: the active setpoint, or
+the room's air temperature when a room sensor is configured (the 75 uses its
+office Zigbee sensor via `packages/ambient_zigbee.yaml`; Home Assistant is not
+in that path). A fixed reference the tank sits away from makes `ka` and `c`
+indistinguishable — that is what pinned the 75's Tank Time Constant on its
+bound in October 2026. Moving `ref` re-expresses `c` so the prediction never
+steps, and a model saved by older firmware is migrated on first boot.
+
+Parameters are fit online with recursive least squares. `c` is modelled as a
+random walk (process noise sized to a two-hour tracking time), because the
+room it stands in for really does move — day and night, the heating season, the
+sun. Bounds are enforced by a covariance-aware projection, so a parameter held
+on its limit hands its share of a correction to the others instead of leaving
+the model biased. `Model Health` is judged against the residual's measured
+noise floor, and `Model Reference` shows what the model is centred on.
+
+`tools/thermal_model_sim.py` replays the model and control law, in float32,
+against a simulated tank (room swing, heating-season step, slow-PWM heater, two
+quantised probes) for the old and current firmware. Run it after changing any
+of the model's constants.
 
 **Learning runs on 5-minute windows, not every tick.** A DS18B20 quantizes to
 0.1125 °F; differentiating that every 30 s produces noise far larger than the

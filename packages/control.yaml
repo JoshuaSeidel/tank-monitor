@@ -322,6 +322,19 @@ text_sensor:
     update_interval: 30s
     lambda: "return {id(controller).get_state_text()};"
 
+  # Which temperature the thermal model measures the tank's heat loss
+  # against: "setpoint (no room sensor)" on a board with none configured,
+  # "room: <source>" while a room-air sensor is in use, "setpoint (room:
+  # none)" when one is configured but stale, missing or implausible and the
+  # model has fallen back. See "Where the model is centred" in
+  # components/tank_controller/tank_controller.cpp.
+  - platform: template
+    name: "Model Reference"
+    icon: "mdi:home-thermometer-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: "return {id(controller).get_reference_text()};"
+
 sensor:
   # NOTE: there is deliberately no "Target Temperature" sensor here. The
   # number entity above already publishes the setpoint in Fahrenheit and

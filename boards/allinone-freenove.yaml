@@ -281,8 +281,22 @@ tank_controller:
   # beat. The bound's job is to stop nonsense, not to encode a guess, so it
   # goes where physics, not the nano, rules values out.
   #
-  # A model saved with ka on the old bound needs no reset: the restore
-  # re-clamps against this ceiling and ka is simply free to move.
+  # 2026-10-14: the 6000 min ceiling was not the fix. Two days after it
+  # went in Tank Time Constant read exactly 6000, Model Bias +2.6 degF/h,
+  # health 78% -- ka had simply run to the new bound. The cause was in the
+  # model, not the bound: (T - 75.2 degF) was a near-constant ~1.9 degF
+  # here, so ka and the constant c were interchangeable and RLS sent ten
+  # times more of each correction to ka; the clamp then threw it away, and
+  # c's covariance was too small to ever take it up. The component now
+  # centres the model on the setpoint (or on the room, see the room_air
+  # package below), enforces bounds by covariance-aware projection, and
+  # tracks c as a random walk, so a bound can no longer leave a bias.
+  # tools/thermal_model_sim.py reproduces the old pin and shows the fix.
+  #
+  # 6000 stays because the physics above still holds: it is where m*c/UA
+  # rules values out for this tank. It now also sets ka's starting guess
+  # (a fifteenth of it, 400 min, instead of the nano's 67), and a ka the
+  # old firmware left pinned on it is reset to that guess on first boot.
   max_time_constant: 6000min
 
 
@@ -1015,3 +1029,20 @@ packages:
   # from ble_link_v3.yaml. Included here for the same reason: a wrapper
   # cannot leave it out.
   light: !include ../packages/light_wrgb2.yaml
+  # Room air for the thermal model, from the office's Zigbee multi-sensor
+  # (HOBEIAN mmWave, IEEE 0xa4c1384412f08149) via Zigbee2MQTT on the same
+  # broker -- no wiring, and HA is not in the path. Lets the model measure
+  # the tank's heat loss against the room, so Tank Time Constant is learned
+  # from the office's ~3.5 degF daily swing and a room change is predicted
+  # rather than discovered. Optional by construction: if the topic goes
+  # quiet for 3 h, Z2M marks the sensor offline, or a reading is not air
+  # (40-100 degF, not sat on the water temperature), the controller falls
+  # back to the setpoint-referenced model with no step. "Model Reference"
+  # shows which is in use. Delete these lines to run without it.
+  # See packages/ambient_zigbee.yaml for the full story and alternatives.
+  room_air: !include
+    file: ../packages/ambient_zigbee.yaml
+    vars:
+      ambient_mqtt_topic: "zigbee2mqtt/Office Multi-Sensor"
+      ambient_mqtt_field: temperature
+      ambient_timeout: 3h

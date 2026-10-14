@@ -78,11 +78,10 @@ static const float BIAS_EMA_W = 0.2f;
 // on predicting a falling tank, at 100% confidence, while it sat 0.9 degF
 // above setpoint with the integral capped too low to overrule it.
 //
-// STALE_DEADBAND is the residual below which a persistent error is just
-// sensor quantisation. One DS18B20 LSB over a 5 minute window is
-// 1.35 degF/h == 0.0125 degC/min, so anything under a few thousandths is
-// noise, not evidence -- the mistake an earlier version of this file made
-// by acting on a single drift sample.
+// The deadband is the residual below which a persistent error is just
+// sensor quantisation -- not evidence of anything, the mistake an earlier
+// version of this file made by acting on a single drift sample. It is now
+// computed, not fixed: health_deadband_().
 //
 // STALE_SCALE is how much sustained one-directional error it takes to
 // stop believing the model entirely. 0.02 degC/min is 2.2 degF/h, which
@@ -93,12 +92,12 @@ static const float BIAS_EMA_W = 0.2f;
 // RLS is converging, and the original 0.020 scale called that a worthless
 // model. Health floored at 0 and stayed there.
 //
-// Deadband is now the documented quantisation floor: one DS18B20 LSB over a
-// 5 minute window is 1.35 degF/h == 0.0125 degC/min, so nothing below that
-// is evidence of anything. Scale is 0.05 degC/min (5.4 degF/h) -- more than
-// twice the fan's entire authority, so health only reaches zero when the
-// model is wrong by more than the actuators could correct even in principle.
-static const float STALE_DEADBAND = 0.0125f;
+// The deadband was then the single-sample quantisation floor, 1.35 degF/h;
+// it is now measured against the EMA's own noise -- see "Health against
+// the measured noise floor" below. Scale is 0.05 degC/min (5.4 degF/h) --
+// more than twice the fan's entire authority, so health only reaches zero
+// when the model is wrong by more than the actuators could correct even in
+// principle.
 static const float STALE_SCALE = 0.050f;
 // A slow EMA, separate from bias_. bias_ uses BIAS_EMA_W = 0.2 -- about a
 // five sample memory -- which is right for a dashboard reading and far too
@@ -113,10 +112,17 @@ static const float STALE_EMA_W = 0.02f;
 // destabilise a model that is merely being rained on by noise.
 static const float P_REINFLATE = 1.02f;
 // Below this, phi' P phi says the step carries no usable information: the
-// actuators are idle and the tank is sitting where it was. Learning from
-// those steps is learning from noise. Sized against an idle regressor with
-// P at the prior, which lands near 1e-5, versus a step with the heater or
-// fan actually running, which is an order of magnitude above it.
+// actuators are idle and the tank is sitting where it was. Sized against an
+// idle regressor with P at the prior, which lands near 1e-5, versus a step
+// with the heater or fan actually running, which is an order of magnitude
+// above it. It used to gate the forgetting factor; with that gone it gates
+// only the stale re-inflation, so P is re-opened on steps that can actually
+// use the gain, not on idle ones.
+//
+// Measured over the EXCITATION regressors only -- heater, fan, loss, light
+// -- not the constant. c's variance is now deliberately large (it tracks
+// the room, see Q), and its regressor is 1 on every step, so counting it
+// would call every idle step informative.
 static const float INFO_MIN = 5e-5f;
 
 // Ceiling on what the integral term alone may command, as a fraction of
@@ -200,58 +206,272 @@ static const float MAX_STEP = MAX_STEP_F * 5.0f / 9.0f;
 static const float FAN_DEADBAND_MAX_F = 2.0f;
 static const float FAN_DEADBAND_MAX = FAN_DEADBAND_MAX_F * 5.0f / 9.0f;
 
-// RLS forgetting factor. Very close to 1: the tank changes character over
-// days (evaporation, a new heater, summer), not over minutes.
-static const float LAMBDA = 0.9995f;
+// There is no forgetting factor any more. It was 0.9995, applied on
+// informative steps only, and it was the crude, undirected form of what Q
+// (below) now does deliberately: lambda < 1 divides ALL of P by lambda,
+// including directions the step did not excite, which is windup. With c and
+// ka given explicit process noise there was nothing left for it to do but
+// that -- the simulation (tools/thermal_model_sim.py) showed it parking the
+// heater and fan variances at their P_PRIOR*10 cap whenever the ambient
+// probe made every step informative. A step change in the hardware (a
+// heater dying) is caught by the stale-model re-inflation instead, which
+// fires on evidence rather than on the clock.
 
 // Physically plausible bounds. Constraining the fit is what keeps the
 // closed-loop identification from running off into nonsense when the
 // controller isn't exciting the system much.
-// theta[4] (the constant) sets where the model thinks the tank settles:
-// equilibrium = TEMP_REF + theta[4]/ka (TEMP_REF is now the operating
-// point, so theta[4] is the drift AT that point rather than relative to a
-// distant 20 C). At +/-0.05 with a typical ka that
-// spans only ~17-23 C, so a 24 C room could not be represented at all and
-// even a trained model would stay biased toward cooling. +/-0.15 covers
-// roughly 10-30 C, which brackets any room this tank will sit in.
+//
+// theta[4] (c) is the drift at T_ref with nothing running. With T_ref at
+// the setpoint that is the drift the tank shows where it is held, and
+// +/-0.15 degC/min (+/-16 degF/h) brackets any room this tank will sit in.
+// With T_ref at the room (ambient probe) it is the tank's own heat --
+// pumps, ballast -- and the same bound is generous.
+//
 // theta[1] (fan) is bounded AWAY from zero for the same reason theta[0]
 // (heater) has a floor of 0.002: the control law divides by the gain, so a
 // gain free to approach zero turns any cooling demand into a saturated
-// output. It was allowed to reach -0.000 while the heater was not -- an
-// asymmetry with no physical justification, since a fan that does nothing
-// at all is not a fan.
+// output. A fan that does nothing at all is not a fan.
 //
 // theta[2]'s upper bound (-ka closest to zero, i.e. the SLOWEST tank) is
-// the one entry in THETA_MAX that is not used as written. -0.001 is a
-// 1000 minute time constant, which was sized for the ~10 gal nano and is
-// still the default -- but a 75 gal tank holding ~235 L under a lid can
-// plausibly be slower than that, and a bound the fit wants to cross does
-// not just cap a diagnostic: when the tank is regulated tightly away from
-// TEMP_REF, (T - TEMP_REF) is nearly constant, RLS moves ka and c
-// together, the clamp undoes ka's share of every correction, and the fit
-// is left wrong in one direction for good (the 75's controller,
-// 2026-10-12: ka pinned, Model Bias +2.5..+3.0 degF/h for days, health
-// ~73%). The ceiling is therefore per board -- max_time_constant in YAML,
-// held as ka_min_ -- and clamp_model_() substitutes -ka_min_ for this
-// entry. See theta_max_().
+// the one entry in THETA_MAX that is not used as written: it is the board's
+// max_time_constant, held as ka_min_ (see theta_max_()). -0.001 here is
+// the 1000 min default sized for the ~10 gal nano.
 //
-// A slower ka does not need a tighter guard on c. The equilibrium formula
-// above is commentary, not code: nothing in this file divides by ka except
-// get_time_constant(), and the control law and the 15 minute forecast use
-// ka * (T - TEMP_REF) + c, which stays the measured drift at the operating
-// point however small ka gets. c's +/-0.15 degC/min (+/-16 degF/h) bound is
-// a bound on that drift, which is what it was always protecting.
+// History, because it explains everything below: on 2026-10-12 the 75's
+// ka sat pinned on its bound for days with Model Bias +2.5..+3.0 degF/h and
+// health ~73%. Raising the bound to 6000 min (bbf4b6f) only moved the pin
+// -- Tank Time Constant read EXACTLY 6000 within two days, bias back at
+// +2.6 degF/h, health 78%. tools/thermal_model_sim.py reproduces that to
+// the decimal from the old code and shows the three faults that made it:
+//
+//   1. The loss regressor was (T - 24.0 C). The 75 is held at 77.0 degF
+//      (25.0 C) +/- 0.05, so that regressor was 1.05 +/- 0.03 -- a copy of
+//      the constant column. ka and c were interchangeable, and RLS split
+//      each correction between them by covariance: P[2][2]*1.05^2 against
+//      P[4][4] = 1e-4 against 1e-5, so ten times more of every correction
+//      went into ka than into c. The data wanted a NEGATIVE ka (it is the
+//      only way ka*1.05 can cancel the prior's 3 degF/h error in c), so ka
+//      ran to its bound, wherever the bound was.
+//   2. The bound was a plain clamp. It threw ka's share of each correction
+//      away, while the covariance went on "knowing" the combination was
+//      fitted, so the residual never closed.
+//   3. c's covariance was 1e-5 and never grew -- lambda is held at 1 on
+//      uninformative steps, correctly, to stop windup -- so c learned at
+//      ~1e-5 of the residual per step: a 2.6 degF/h error would take
+//      months. c could not track the room, ever.
+//
+// The fix is one for each: the reference is the operating point (fault 1,
+// see "Where the model is centred"); bounds are enforced by a covariance-
+// aware projection that moves the correction rather than discarding it
+// (fault 2, project_bounds_()); and c is modelled as what it physically is,
+// a quantity that drifts with an unmeasured room, by adding process noise
+// to its covariance every step (fault 3, Q below).
 static const float THETA_MIN[N_PARAMS] = {0.002f, -0.300f, -0.200f, 0.000f, -0.150f};
 static const float THETA_MAX[N_PARAMS] = {0.300f, -0.002f, -0.001f, 0.050f, 0.150f};
 
 // Starting guesses: a typical 100-200W heater in a tens-of-gallons tank.
-// theta[4] is no longer 0: with TEMP_REF at the operating point rather
-// than 20 C, the assumption that an unheated tank cools has to live here
-// instead of in the centring. -0.030 degC/min is the ~3.3 degF/h this
-// tank sheds unaided, measured.
+// theta[4] carries the assumption that an unheated tank cools: -0.030
+// degC/min is the ~3.3 degF/h the nano sheds unaided, measured. On a big
+// tank it is wrong by a couple of degF/h, and that no longer matters --
+// c now re-learns in hours (see Q), where it used to need months.
+//
+// theta[2] as written here is NOT used: ka's prior is fifteen times the
+// board's floor, ka_min_ = 1/max_time_constant (theta_prior_()). At the
+// 1000 min default that is exactly the -0.015 below (66.7 min) -- every
+// board that keeps the default starts where it always did -- and on the
+// 75's 6000 min it is 400 min instead of a nano's 67. A prior an order of
+// magnitude inside the physical ceiling, scaled by the same tank-size
+// judgement that set the ceiling.
 static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0.030f};
+
+// ---------------------------------------------------------------------
+// The drift: c as a random walk
+// ---------------------------------------------------------------------
+// Nothing in this model measures the room (unless an ambient probe is
+// fitted). The room is the tank's real "heat drift" -- day against night,
+// the house heating coming on in October, sun through the window behind
+// the 75 -- and a model with fixed parameters is biased whenever it moves.
+// At T_ref = setpoint, all of it lands in c. So c is not a constant to be
+// converged on; it is a slowly wandering state to be tracked, and the
+// textbook way to say that to RLS (a Kalman filter with a random-walk
+// parameter) is to add process noise Q to its variance every step.
+//
+// P is in units of the measurement noise (RLS with a unit noise variance),
+// and for a parameter observed every step the Riccati recursion
+// P <- P - P^2/(1+P) + Q settles where P^2/(1+P) = Q. The gain is then
+// K = P/(1+P). Choosing a tracking time of N steps (K = 1/N) gives
+//     P_ss = 1/(N-1)      Q = 1/(N(N-1)).
+// N = 24: two hours of 5 minute steps. Sizing it, both ways:
+//   * fast enough: the office the 75 sits in swings ~3.5 degF a day and
+//     rises 2.4 degF between 06:00 and 09:00. For a 1000 min tank that
+//     moves the drift by 0.0013 degC/min over three hours; a two hour lag
+//     on it is under 0.001 degC/min (0.1 degF/h), a fifth of one LSB of
+//     the 5 minute rate. A +3 degF step (the heating season starting) is
+//     tracked to 1/e in two hours and gone by the afternoon.
+//   * slow enough: a gain of 1/24 averages the 5 minute rate's ~0.005
+//     degC/min quantisation noise down to ~0.0007 degC/min (0.08 degF/h)
+//     of jitter in c -- 0.02 degF over the 15 minute forecast.
+// The same N with an ambient probe. A slower c was tried there (a day, so
+// it could not soak up the room's swing before ka did) and the simulation
+// said no: in closed loop the heater duty mirrors the room, so the room's
+// swing is split between ka and kh, not handed to ka, and a sluggish c only
+// left the error from that split in the residual (health ~88%, Tank Time
+// Constant off by 3-5x). With c kept agile and ka given room to move
+// (P_KA_AMBIENT), ka converged to within ~30% of the plant's time
+// constant and the forecast matched setpoint mode.
+//
+// Q on the other parameters: zero for kh, kf and kl -- a heater's wattage
+// does not drift, and when one fails the stale-model re-inflation below is
+// the mechanism for that step change. A small Q on ka so its variance
+// creeps back up between informative stretches: 1e-7 per step at the
+// setpoint (excursions are rare; to the P_PRIOR*10 cap in ~2 months), 1e-6
+// with an ambient probe (every day is informative there).
+//
+// How this sits with the anti-windup: Q inflates only the parameters it is
+// given, and c is excited on every step by construction (its regressor is
+// the literal 1), so the recursion above bounds it at P_ss; ka's variance
+// is bounded by the P_PRIOR*10 cap in clamp_model_(). Nothing else grows.
+// The informative-step test (which now only gates the stale re-inflation)
+// ignores the constant column, or c's deliberately large variance would
+// call every step informative.
+static const float C_TRACK_STEPS = 24.0f;  // 2 h
+static const float Q_C = 1.0f / (C_TRACK_STEPS * (C_TRACK_STEPS - 1.0f));
+static const float Q_KA_SETPOINT = 1e-7f;
+static const float Q_KA_AMBIENT = 1e-6f;
+
 // Prior covariance -- how wrong we think the prior is, per parameter.
-static const float P_PRIOR[N_PARAMS] = {1e-3f, 1e-3f, 1e-4f, 1e-5f, 1e-5f};
+// c starts at its steady state, so a fresh (or migrated) model tracks at
+// full speed from the first step. ka's 1e-4 is for setpoint mode, where it
+// is barely observable and a looser value only lets it wander onto a bound
+// (simulated on the nano: pinned at 1000 min half the time at 1e-2).
+static const float P_PRIOR[N_PARAMS] = {1e-3f, 1e-3f, 1e-4f, 1e-5f, 1.0f / (C_TRACK_STEPS - 1.0f)};
+// ka's variance in ambient mode, where the room's swing makes it
+// observable. Raised to this on entry and returned to P_PRIOR[2] on exit,
+// by scaling its row and column so P stays positive definite; see
+// set_ka_variance_().
+static const float P_KA_AMBIENT = 1e-2f;
+
+// ---------------------------------------------------------------------
+// Where the model is centred
+// ---------------------------------------------------------------------
+// The loss term is ka*(T - T_ref), and T_ref decides what c means and
+// which of ka and c the data can see. A FIXED T_ref is only harmless while
+// the tank lives on it: away from it, (T - T_ref) is a near-constant
+// offset sitting beside the constant column, and the two are not
+// separately identifiable (fault 1 above). So T_ref follows the operating
+// point:
+//
+//   setpoint mode (no ambient probe, or it is not reporting): T_ref is the
+//   ACTIVE setpoint -- the override while cycling, the owner's number
+//   otherwise -- because that is where the controller holds the water.
+//   (T - T_ref) is then just the control error: zero-mean, a tenth of a
+//   degree on a steady day, and only large during a real excursion (a
+//   setpoint move, a water change, a heater outage), which is precisely
+//   the data that measures ka. c is the drift at the held temperature,
+//   observed directly every five minutes.
+//
+//   Why the setpoint and not an EMA of the measured temperature: both
+//   centre the regressor, but the setpoint moves only when someone moves
+//   it, so c keeps one meaning between those moments and needs no
+//   per-tick re-expression; an EMA would follow a heater outage down and
+//   quietly re-define c in the middle of exactly the excursion ka should
+//   be learned from.
+//
+//   ambient mode (a room sensor configured and passing every check in
+//   ambient_usable_() for 10 minutes): T_ref is the room. The regressor is
+//   no longer a near-constant: it carries the room's daily swing, so ka
+//   becomes measurable from an ordinary day, and c shrinks to the tank's
+//   own heat. The room is NOT rebased on as it moves -- that would hand c
+//   the room's swing and starve ka of it; it is the regressor.
+//
+//   The room used is low-passed (AMBIENT_FILTER_MIN). The 75's source is
+//   a Zigbee multi-sensor: 0.2 degC steps, reported on change, an hour or
+//   two apart when the office is steady. Raw, every report is a 0.36 degF
+//   step in T_ref -- to the model, a sudden heat event. Filtered over 20
+//   minutes the staircase becomes the ramp the room actually made, and a
+//   lidded tank's air film does not respond faster than that anyway.
+//
+// Changing T_ref in either mode, or switching modes, re-expresses c at the
+// new reference so the prediction does not step:
+//     -ka*(T - r) + c  ==  -ka*(T - r') + c'   =>   c' = c - ka*(r' - r)
+// (theta[4] += theta[2]*(r' - r), theta[2] being -ka.) The covariance is
+// carried through the same linear map, P' = A P A', so the certainty of
+// the combination survives the move as well as its value. See rebase_().
+//
+// How long a reading stays good with no new one is per source --
+// ambient_timeout in YAML, ambient_timeout_ms_ here: 10 minutes for a probe
+// that reports every few seconds, hours for a report-on-change Zigbee
+// sensor. A source that knows it has gone away (Zigbee availability
+// "offline", MQTT disconnected) publishes NAN, which ends it at once.
+//
+// A source must pass every check continuously this long before the model
+// moves onto it, so a flapping connection costs a re-expression per
+// outage, not per tick. Leaving is immediate.
+static const uint32_t AMBIENT_SETTLE_MS = 600000;    // 10 minutes
+// Air in a room with an aquarium in it. Outside this it is a fault.
+static const float AMBIENT_MIN_F = 40.0f;
+static const float AMBIENT_MAX_F = 100.0f;
+static const float AMBIENT_MIN = (AMBIENT_MIN_F - 32.0f) * 5.0f / 9.0f;
+static const float AMBIENT_MAX = (AMBIENT_MAX_F - 32.0f) * 5.0f / 9.0f;
+// A "room" reading within 0.2 degF of the water for three hours running is
+// a probe that fell in the tank (or is taped to the glass), not air. Rooms
+// do sit at tank temperature sometimes; then the ambient term carries
+// nothing and the setpoint model loses nothing by taking over.
+static const float SUBMERGED_BAND_F = 0.2f;
+static const float SUBMERGED_BAND = SUBMERGED_BAND_F * 5.0f / 9.0f;
+static const uint32_t SUBMERGED_MS = 3UL * 3600UL * 1000UL;
+// Low-pass on the room reading before the model uses it; see above.
+static const float AMBIENT_FILTER_MIN = 20.0f;
+
+// ---------------------------------------------------------------------
+// Learning from both probes
+// ---------------------------------------------------------------------
+// The control and cross-check probes are two independent DS18B20s, each
+// quantised to 0.0625 degC. A 5 minute rate from one probe carries that
+// LSB as noise (sigma ~0.0051 degC/min); averaging the two probes' rates
+// halves its variance. Each probe's rate is taken against its own anchor,
+// so their fixed offset -- up to 1.8 degF uncalibrated, and a real
+// gradient on the 48" tank -- cancels and never reads as a rate.
+//
+// Averaged only when both readings are valid and inside the disagreement
+// band at both ends of the window, AND the two probes saw the same change
+// to within PAIR_RATE_TOL. That last test is what keeps a marginal cross-
+// check bus from poisoning a step: it is not vetted by the control
+// probe's rate guards, and a one-off half-degree glitch on it inside an
+// 8 degF band would otherwise be learned as 0.1 degC/min of drift. When
+// any test fails the step uses the control probe alone, as before.
+//
+// Learning only. The loop still regulates on the control probe: averaging
+// in a probe that is not rate-guarded would put its faults straight into
+// the heater, and on the 48" tank the average is a point between two
+// heaters that nobody chose as the target.
+static const float PAIR_RATE_TOL = 0.125f;  // degC over the window, 2 LSB
+
+// ---------------------------------------------------------------------
+// Health against the measured noise floor
+// ---------------------------------------------------------------------
+// The old fixed deadband (one LSB over a 5 minute window, 0.0125 degC/min
+// == 1.35 degF/h) was sized against a SINGLE sample. Health is judged on
+// a 50-step EMA of the signed residual, whose noise is far smaller: for a
+// residual with spread sigma, the EMA's spread is sigma*sqrt(w/(2-w)),
+// about 0.1*sigma at w = 0.02. Against that, 1.35 degF/h was a dozen
+// standard deviations -- a model could be 1.3 degF/h wrong for ever and
+// read 100%.
+//
+// So the deadband is HEALTH_Z standard deviations of the EMA, with sigma
+// measured live (resid_var_, the residual's spread about its own mean)
+// and floored at the quantisation limit, so a lucky quiet spell cannot
+// make it hair-trigger: one DS18B20's 5 minute rate has sigma = LSB/
+// sqrt(6)/5 min = 0.0051 degC/min, two probes averaged 0.0036. Ceiling at
+// the old 0.0125, so a residual made noisy by disturbances cannot buy a
+// biased model a clean bill of health. A healthy model's stale_ sits
+// within the band and reads 100%; a real mismatch of a few tenths of a
+// degF/h shows. STALE_SCALE is unchanged: health reaches zero only when the
+// model is wrong by more than twice the fan's whole authority.
+static const float HEALTH_Z = 4.0f;
+static const float QUANT_RATE_SIGMA = 0.0625f / 2.449490f / 5.0f;      // one probe
+static const float QUANT_RATE_SIGMA_PAIR = QUANT_RATE_SIGMA / 1.414214f;
+static const float STALE_DEADBAND_MAX = 0.0125f;
 
 static float clampf(float v, float lo, float hi) {
   if (std::isnan(v))
@@ -261,11 +481,16 @@ static float clampf(float v, float lo, float hi) {
 
 void TankController::load_prior_() {
   for (uint8_t i = 0; i < N_PARAMS; i++) {
-    this->model_.theta[i] = THETA_PRIOR[i];
+    this->model_.theta[i] = this->theta_prior_(i);
     for (uint8_t j = 0; j < N_PARAMS; j++)
       this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
   }
   this->model_.updates = 0;
+  // Centred on the first tick, wherever the operating point is then. The
+  // prior's c is already "drift where the tank is held", so adopting the
+  // reference needs no re-expression.
+  this->model_.t_ref = NAN;
+  this->model_.ref_mode = REF_SETPOINT;
   this->history_idx_ = 0;
   this->history_count_ = 0;
   for (uint8_t i = 0; i < N_SLOTS; i++) {
@@ -283,11 +508,46 @@ void TankController::setup() {
   this->fan_deadband_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_fan_deadband"));
   this->disagree_band_pref_ = global_preferences->make_preference<float>(fnv1_hash("tank_disagree_band"));
 
+  // v4 carries its reference temperature with it. v3 -- everything up to
+  // bbf4b6f -- was centred on the fixed LEGACY_TEMP_REF and is migrated:
+  //   * theta is kept and declared to be at 24.0 C; sync_reference_() below
+  //     then re-expresses c at today's setpoint (c' = c - ka*(sp - 24.0)),
+  //     so the first prediction on new firmware equals the last one on the
+  //     old -- no step in the feedforward.
+  //   * the covariance is NOT kept. It is the product of fault 1 and 2 (see
+  //     THETA_MAX): a ka/c correlation built on a near-constant regressor,
+  //     with the clamp having thrown away the corrections it "knew" about,
+  //     so it is confidently wrong about exactly the combination that is
+  //     biased. Back to the prior, as import_model() does for the same
+  //     reason: the values are a good start, the certainty is not earned.
+  //   * updates (and so Model Confidence) is kept -- the gains are real.
+  // On the 75 that means a ka still sitting on its 6000 min bound. It is
+  // left there rather than reset to the 67 min prior: with the reference at
+  // the operating point ka barely enters the prediction, and it will move
+  // the first time the tank makes a real excursion.
+  bool migrated = false;
   ThermalModel stored{};
   if (this->model_pref_.load(&stored) && !std::isnan(stored.theta[0])) {
     this->model_ = stored;
     this->clamp_model_();
     ESP_LOGI(TAG, "Restored thermal model after %" PRIu32 " learning steps", this->model_.updates);
+  } else {
+    auto legacy_pref = global_preferences->make_preference<ThermalModelV3>(fnv1_hash("tank_model_v3"));
+    ThermalModelV3 legacy{};
+    if (legacy_pref.load(&legacy) && !std::isnan(legacy.theta[0])) {
+      for (uint8_t i = 0; i < N_PARAMS; i++) {
+        this->model_.theta[i] = legacy.theta[i];
+        for (uint8_t j = 0; j < N_PARAMS; j++)
+          this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
+      }
+      this->model_.updates = legacy.updates;
+      this->model_.t_ref = LEGACY_TEMP_REF;
+      this->model_.ref_mode = REF_SETPOINT;
+      this->clamp_model_();
+      migrated = true;
+      ESP_LOGW(TAG, "Migrating thermal model from fixed %.1f degF reference (%" PRIu32 " learning steps kept)",
+               LEGACY_TEMP_REF * 9.0f / 5.0f + 32.0f, this->model_.updates);
+    }
   }
   LightProfile light{};
   if (this->light_pref_.load(&light) && !std::isnan(light.slot[0]))
@@ -304,6 +564,34 @@ void TankController::setup() {
   float dz = NAN;
   if (this->disagree_band_pref_.load(&dz) && !std::isnan(dz))
     this->disagree_band_ = clampf(dz, 0.0f, DISAGREE_BAND_MAX);
+
+  // The ambient probe's own update interval is unknown here, so freshness
+  // is judged by when it last published, not by polling its state.
+  if (this->ambient_sensor_ != nullptr)
+    this->ambient_sensor_->add_on_state_callback([this](float) { this->ambient_last_ms_ = millis(); });
+
+  this->resid_var_ = QUANT_RATE_SIGMA * QUANT_RATE_SIGMA;
+
+  // Setpoint is loaded, so the model can be centred on it now -- a migrated
+  // model is re-expressed here, before anything predicts with it -- and the
+  // result persisted at once rather than after the first 30 minutes.
+  this->sync_reference_(millis(), NAN);
+  if (migrated) {
+    // A ka sitting exactly on its bound in a v3 model is the bug's
+    // signature, not a measurement -- on the 75 it is the 6000 min pin. It
+    // goes back to the prior, AFTER the re-centring above so c was carried
+    // across with the ka it was fitted alongside. At the setpoint the
+    // prediction does not change (the regressor is zero there); away from
+    // it the prior is no worse a guess than a clamp artefact. Only ka: a
+    // fan gain on its floor, say, is real evidence of a fan not cooling.
+    const float ka = this->model_.theta[2];
+    if (ka <= THETA_MIN[2] || ka >= this->theta_max_(2)) {
+      ESP_LOGW(TAG, "Migrated loss coefficient was pinned at %.0f min - back to the %.0f min prior",
+               -1.0f / ka, -1.0f / this->theta_prior_(2));
+      this->model_.theta[2] = this->theta_prior_(2);
+    }
+    this->save_state_();
+  }
 
   // Start with everything off until the first real reading arrives.
   this->apply_outputs_(0.0f, 0.0f);
@@ -351,9 +639,7 @@ void TankController::set_hold(bool v) {
     this->disagree_since_ms_ = 0;
     this->probe_disagreement_ = false;
     // Whatever the learn window was measuring, the hold cuts across it.
-    this->learn_anchor_temp_ = NAN;
-    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-    this->acc_n_ = 0;
+    this->reset_learn_window_();
   } else {
     // Not a re-anchor. That cap exists for a GAP in readings, where the
     // first value back has nothing recent to be checked against; through a
@@ -401,11 +687,10 @@ void TankController::reset_learning() {
   this->integral_ = 0.0f;
   this->bias_ = 0.0f;
   this->stale_ = 0.0f;
+  this->resid_var_ = QUANT_RATE_SIGMA * QUANT_RATE_SIGMA;
   // Windows in flight were accumulated against the old model; carrying
   // them over would fold pre-reset data into the first new learning step.
-  this->learn_anchor_temp_ = NAN;
-  this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-  this->acc_n_ = 0;
+  this->reset_learn_window_();
   this->last_light_slot_ = -1;
   this->heat_stall_since_ms_ = 0;
   this->heater_stalled_ = false;
@@ -421,7 +706,7 @@ void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float
 
   this->model_.theta[0] = heater_f_per_h * to_c_min;
   this->model_.theta[1] = -fan_f_per_h * to_c_min;
-  this->model_.theta[2] = (time_constant_min > 1.0f) ? -(1.0f / time_constant_min) : THETA_PRIOR[2];
+  this->model_.theta[2] = (time_constant_min > 1.0f) ? -(1.0f / time_constant_min) : this->theta_prior_(2);
   this->model_.theta[3] = light_f_per_h * to_c_min;
   this->model_.theta[4] = bias_f_per_h * to_c_min;
 
@@ -441,14 +726,17 @@ void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float
   const float target = (24.0f * 60.0f) / (LEARN_WINDOW_MS / 60000.0f);
   this->model_.updates = (uint32_t) (clampf(confidence_pct, 0.0f, 90.0f) / 100.0f * target);
 
+  // The imported c is the old device's drift where IT held the tank, so it
+  // is declared to be at today's setpoint. If an ambient probe is in use,
+  // the next tick re-expresses it at the room like any mode change.
+  this->model_.t_ref = this->get_active_setpoint();
+  this->model_.ref_mode = REF_SETPOINT;
   this->clamp_model_();
   this->integral_ = 0.0f;
-  this->learn_anchor_temp_ = NAN;
-  this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-  this->acc_n_ = 0;
+  this->reset_learn_window_();
   this->save_state_();
 
-  ESP_LOGI(TAG, "Imported model: kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f, confidence %.0f%%",
+  ESP_LOGI(TAG, "Imported model: kh=%.4f kf=%.4f ka=%.5f kl=%.4f c=%.4f, confidence %.0f%%",
            this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
            this->model_.theta[4], this->get_confidence());
 }
@@ -460,33 +748,281 @@ float TankController::theta_max_(uint8_t i) const {
 
 void TankController::set_max_time_constant(float minutes) {
   // __init__.py validates 100-20000 min. Re-checked here because ka_min_
-  // must stay strictly positive (get_time_constant divides by it) and must
-  // not exceed the prior's 0.015, or a reset would clamp the starting
-  // guess itself. 1000 min is the long-standing default.
+  // must stay strictly positive (get_time_constant divides by it). ka's
+  // prior is 15*ka_min_ (theta_prior_()), so at the 100 min minimum it is
+  // 0.15 -- still inside THETA_MIN[2]'s 0.2. 1000 min is the default.
   if (!(minutes >= 100.0f))
     minutes = 1000.0f;
   this->ka_min_ = 1.0f / minutes;
 }
 
+float TankController::theta_prior_(uint8_t i) const {
+  // See THETA_PRIOR for why ka's prior follows the board's ceiling.
+  return i == 2 ? -15.0f * this->ka_min_ : THETA_PRIOR[i];
+}
+
+float TankController::p_prior_(uint8_t i) const {
+  // ka's variance is mode-dependent; see P_KA_AMBIENT.
+  if (i == 2 && this->model_.ref_mode == REF_AMBIENT)
+    return P_KA_AMBIENT;
+  return P_PRIOR[i];
+}
+
+void TankController::set_ka_variance_(float target) {
+  // Move ka's variance to `target` by scaling its row and column by
+  // sqrt(target/P22) -- a congruence transform (D P D with D diagonal), so
+  // P stays positive definite and ka's correlations with the rest keep
+  // their sign and strength. Used on ambient-mode entry and exit.
+  float(&p)[N_PARAMS][N_PARAMS] = this->model_.p;
+  if (!(p[2][2] > 0.0f)) {
+    p[2][2] = target;
+    return;
+  }
+  const float sc = std::sqrt(target / p[2][2]);
+  for (uint8_t j = 0; j < N_PARAMS; j++) {
+    if (j == 2)
+      continue;
+    p[2][j] *= sc;
+    p[j][2] = p[2][j];
+  }
+  p[2][2] = target;
+}
+
 void TankController::clamp_model_() {
   // Every path that puts numbers into theta ends here: setup()'s restore
-  // from flash, import_model(), and each RLS step in learn_(). So a model
+  // from flash, import_model(), rebase_(), and each RLS step in learn_()
+  // (after project_bounds_(), so in learn_ this is only a backstop). A model
   // saved with ka pinned at an older, tighter ceiling is simply inside the
-  // new range on the next boot and free to move -- nothing to migrate.
+  // new range on the next boot and free to move.
+  if (this->model_.ref_mode != REF_SETPOINT && this->model_.ref_mode != REF_AMBIENT)
+    this->model_.ref_mode = REF_SETPOINT;
   for (uint8_t i = 0; i < N_PARAMS; i++) {
     if (std::isnan(this->model_.theta[i]))
-      this->model_.theta[i] = THETA_PRIOR[i];
+      this->model_.theta[i] = this->theta_prior_(i);
     this->model_.theta[i] = clampf(this->model_.theta[i], THETA_MIN[i], this->theta_max_(i));
     for (uint8_t j = 0; j < N_PARAMS; j++) {
       if (std::isnan(this->model_.p[i][j]))
-        this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
+        this->model_.p[i][j] = (i == j) ? this->p_prior_(i) : 0.0f;
     }
     // Keep the covariance from blowing up during long unexcited stretches.
-    if (this->model_.p[i][i] > P_PRIOR[i] * 10.0f)
-      this->model_.p[i][i] = P_PRIOR[i] * 10.0f;
+    const float pp = this->p_prior_(i);
+    if (this->model_.p[i][i] > pp * 10.0f)
+      this->model_.p[i][i] = pp * 10.0f;
     if (this->model_.p[i][i] < 0.0f)
-      this->model_.p[i][i] = P_PRIOR[i] * 1e-3f;
+      this->model_.p[i][i] = pp * 1e-3f;
   }
+}
+
+bool TankController::project_bounds_() {
+  // Enforce the bounds on an RLS step without throwing the correction away.
+  //
+  // A plain clamp (all this file used to do) sets theta[i] back to its
+  // bound and leaves everything else where the unconstrained step put it.
+  // But that step split the correction across parameters according to P:
+  // whatever share went to theta[i] is simply deleted, while P goes on
+  // recording that the step was absorbed. On a correlated pair -- ka and c
+  // with a near-constant regressor -- that is a persistent one-signed
+  // residual the model is certain it has already fitted. Fault 2.
+  //
+  // Instead, for each parameter outside its bounds:
+  //   1. Project in the metric of P (the minimum-variance projection onto
+  //      theta[i] = bound, standard for inequality-constrained Kalman
+  //      estimates): every other parameter moves by its regression on
+  //      theta[i], P[j][i]/P[i][i] times the amount theta[i] is pulled
+  //      back. A correlated c takes over what ka was not allowed to.
+  //   2. Condition P on theta[i] being pinned -- subtract its column's
+  //      outer product -- then zero its cross-covariances while keeping
+  //      its own variance. The others' certainty now reflects the pin, and
+  //      theta[i] is decoupled: still free to leave the bound when the data
+  //      says so, with no stale correlation dragging c along when it does.
+  // learn_() then re-fits c on whatever this leaves unexplained (step 3).
+  // Returns whether any bound was active.
+  bool active = false;
+  for (uint8_t i = 0; i < N_PARAMS; i++) {
+    const float lo = THETA_MIN[i], hi = this->theta_max_(i);
+    const float ti = this->model_.theta[i];
+    if (std::isnan(ti)) {
+      this->model_.theta[i] = this->theta_prior_(i);
+      active = true;
+      continue;
+    }
+    if (ti >= lo && ti <= hi)
+      continue;
+    active = true;
+    const float bound = ti < lo ? lo : hi;
+    const float pii = this->model_.p[i][i];
+    if (pii > 1e-20f) {
+      const float d = bound - ti;
+      float col[N_PARAMS];
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        col[j] = this->model_.p[j][i];
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        if (j != i)
+          this->model_.theta[j] += col[j] / pii * d;
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        for (uint8_t k = 0; k < N_PARAMS; k++)
+          if (j != i && k != i)
+            this->model_.p[j][k] -= col[j] * col[k] / pii;
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        if (j != i)
+          this->model_.p[i][j] = this->model_.p[j][i] = 0.0f;
+    }
+    this->model_.theta[i] = bound;
+  }
+  return active;
+}
+
+void TankController::reset_learn_window_() {
+  this->learn_anchor_temp_ = NAN;
+  this->learn_anchor_cross_ = NAN;
+  this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_dev_ = 0.0f;
+  this->acc_n_ = 0;
+}
+
+bool TankController::ambient_usable_(uint32_t now, float water) {
+  // Every check, every tick. Failing any of them drops the model back to
+  // the setpoint at once -- a reference that is not being measured any
+  // more is the one thing the model must not keep using -- and resets the
+  // settle timer, so it comes back only after AMBIENT_SETTLE_MS clean.
+  //   configured; reported within ambient_timeout_ms_; a number; air
+  //   temperature (40-100 degF); and not sat on the water temperature for
+  //   SUBMERGED_MS (a probe in the tank, not in the room).
+  bool ok = this->ambient_sensor_ != nullptr && this->ambient_last_ms_ != 0 &&
+            now - this->ambient_last_ms_ <= this->ambient_timeout_ms_;
+  float a = NAN;
+  if (ok) {
+    a = this->ambient_sensor_->state;
+    ok = !std::isnan(a) && a >= AMBIENT_MIN && a <= AMBIENT_MAX;
+  }
+  if (ok && !std::isnan(water)) {
+    if (fabsf(water - a) <= SUBMERGED_BAND) {
+      if (this->ambient_close_since_ms_ == 0)
+        this->ambient_close_since_ms_ = now == 0 ? 1 : now;
+      if (now - this->ambient_close_since_ms_ >= SUBMERGED_MS) {
+        if (this->ambient_ok_since_ms_ != 0)
+          ESP_LOGW(TAG, "Room reading has matched the water within %.1f degF for %" PRIu32 " h - ignoring it",
+                   SUBMERGED_BAND_F, SUBMERGED_MS / 3600000UL);
+        ok = false;
+      }
+    } else {
+      this->ambient_close_since_ms_ = 0;
+    }
+  }
+  if (!ok) {
+    this->ambient_ok_since_ms_ = 0;
+    this->ambient_filt_ = NAN;
+    return false;
+  }
+  // The low-pass the model reads; see AMBIENT_FILTER_MIN. Seeded with the
+  // first good reading, then first-order with the tick's own dt.
+  if (std::isnan(this->ambient_filt_) || this->ambient_filt_ms_ == 0) {
+    this->ambient_filt_ = a;
+  } else {
+    const float dt = (now - this->ambient_filt_ms_) / 60000.0f;
+    this->ambient_filt_ += (a - this->ambient_filt_) * (dt / (AMBIENT_FILTER_MIN + dt));
+  }
+  this->ambient_filt_ms_ = now;
+  if (this->ambient_ok_since_ms_ == 0)
+    this->ambient_ok_since_ms_ = now == 0 ? 1 : now;
+  // Already in ambient mode (e.g. restored from flash with the source
+  // reporting): no need to sit out the settle time again.
+  if (this->model_.ref_mode == REF_AMBIENT)
+    return true;
+  return now - this->ambient_ok_since_ms_ >= AMBIENT_SETTLE_MS;
+}
+
+void TankController::rebase_(float new_ref) {
+  // Re-express the model at a new reference without changing what it
+  // predicts at any temperature:
+  //   -ka*(T - r) + c == -ka*(T - r') + c'   =>   c' = c - ka*(r' - r)
+  // i.e. theta' = A*theta with A = I + d*e4*e2', d = r' - r. The covariance
+  // goes through the same map, P' = A P A', which touches only row/column 4:
+  //   P'44 = P44 + 2d*P42 + d^2*P22,   P'4j = P4j + d*P2j  (j != 4).
+  // The window being accumulated is re-expressed too: its sum of (T - r)
+  // over n samples becomes a sum of (T - r') by subtracting n*d.
+  const float old_ref = this->model_.t_ref;
+  if (std::isnan(new_ref))
+    return;
+  if (std::isnan(old_ref)) {
+    this->model_.t_ref = new_ref;
+    return;
+  }
+  const float d = new_ref - old_ref;
+  if (d == 0.0f)
+    return;
+  float(&p)[N_PARAMS][N_PARAMS] = this->model_.p;
+  this->model_.theta[4] += this->model_.theta[2] * d;
+  const float p42 = p[4][2], p22 = p[2][2];
+  p[4][4] = p[4][4] + 2.0f * d * p42 + d * d * p22;
+  for (uint8_t j = 0; j < N_PARAMS; j++) {
+    if (j == 4)
+      continue;
+    p[4][j] = p[4][j] + d * p[2][j];
+    p[j][4] = p[4][j];
+  }
+  this->acc_dev_ -= this->acc_n_ * d;
+  this->model_.t_ref = new_ref;
+  this->clamp_model_();
+}
+
+void TankController::sync_reference_(uint32_t now, float water) {
+  // Keep the model centred where "Where the model is centred" says. Runs
+  // every tick, before anything predicts or learns; costs a comparison
+  // unless something actually moved.
+  if (this->ambient_usable_(now, water)) {
+    const float a = this->ambient_filt_;
+    if (this->model_.ref_mode != REF_AMBIENT) {
+      this->rebase_(a);
+      this->model_.ref_mode = REF_AMBIENT;
+      if (this->model_.p[2][2] < P_KA_AMBIENT)
+        this->set_ka_variance_(P_KA_AMBIENT);
+      ESP_LOGI(TAG, "Thermal model now measured against room air (%s, %.1f degF)", this->ambient_source_,
+               a * 9.0f / 5.0f + 32.0f);
+    } else {
+      // The room is the regressor here, not a reference to re-express
+      // against: c keeps its meaning (the tank's own heat) and the swing
+      // goes to ka. The window's deviations are accumulated per tick
+      // against the room as it was then, so nothing needs shifting.
+      this->model_.t_ref = a;
+    }
+    return;
+  }
+  const float sp = this->get_active_setpoint();
+  if (this->model_.ref_mode == REF_AMBIENT) {
+    // Back from the last room value the model used to the setpoint.
+    this->model_.ref_mode = REF_SETPOINT;
+    if (this->model_.p[2][2] > P_PRIOR[2])
+      this->set_ka_variance_(P_PRIOR[2]);
+    this->rebase_(sp);
+    ESP_LOGW(TAG, "Room air (%s) not usable - thermal model back on the %.1f degF setpoint", this->ambient_source_,
+             sp * 9.0f / 5.0f + 32.0f);
+    return;
+  }
+  if (std::isnan(this->model_.t_ref) || this->model_.t_ref != sp) {
+    const bool first = std::isnan(this->model_.t_ref);
+    const float was = this->model_.t_ref;
+    this->rebase_(sp);
+    if (!first)
+      ESP_LOGI(TAG, "Thermal model re-centred %.1f -> %.1f degF (prediction unchanged)", was * 9.0f / 5.0f + 32.0f,
+               sp * 9.0f / 5.0f + 32.0f);
+  }
+}
+
+const char *TankController::get_reference_text() const {
+  if (this->model_.ref_mode == REF_AMBIENT)
+    return this->ambient_text_;
+  return this->ambient_sensor_ == nullptr ? "setpoint (no room sensor)" : "setpoint (room: none)";
+}
+
+float TankController::health_deadband_() const {
+  // HEALTH_Z standard deviations of stale_'s own noise; see "Health against
+  // the measured noise floor". sigma is the residual's measured spread,
+  // never below what two DS18B20s quantising could produce.
+  float sigma = std::sqrt(std::fmax(this->resid_var_, 0.0f));
+  if (sigma < QUANT_RATE_SIGMA_PAIR)
+    sigma = QUANT_RATE_SIGMA_PAIR;
+  const float ema_sigma = sigma * std::sqrt(STALE_EMA_W / (2.0f - STALE_EMA_W));
+  return std::fmin(HEALTH_Z * ema_sigma, STALE_DEADBAND_MAX);
 }
 
 void TankController::save_state_() {
@@ -540,8 +1076,8 @@ float TankController::predicted_light_for_(int minutes_ahead) const {
 }
 
 void TankController::learn_(float dt_min, float measured_rate) {
-  // phi = [heater, fan, (T - TREF), light, 1]
-  float phi[N_PARAMS] = {this->acc_heater_, this->acc_fan_, this->acc_temp_ - TEMP_REF, this->acc_light_, 1.0f};
+  // phi = [heater, fan, (T - T_ref), light, 1], all window averages.
+  float phi[N_PARAMS] = {this->acc_heater_, this->acc_fan_, this->acc_dev_, this->acc_light_, 1.0f};
 
   float pred = 0.0f;
   for (uint8_t i = 0; i < N_PARAMS; i++)
@@ -561,26 +1097,24 @@ void TankController::learn_(float dt_min, float measured_rate) {
     for (uint8_t j = 0; j < N_PARAMS; j++)
       p_phi[i] += this->model_.p[i][j] * phi[j];
 
-  // phi' P phi -- how much this step actually tells us. Near zero when the
-  // actuators are idle and the tank is sitting still, which is most of the
-  // time on a well-controlled tank.
+  // phi' P phi -- the full quadratic form, which the gain needs.
   float info = 0.0f;
   for (uint8_t i = 0; i < N_PARAMS; i++)
     info += phi[i] * p_phi[i];
+  // ...and the same over the excitation regressors alone, which is what
+  // says whether the step tells us anything. See INFO_MIN for why the
+  // constant column is left out.
+  float info_x = 0.0f;
+  for (uint8_t i = 0; i < 4; i++)
+    for (uint8_t j = 0; j < 4; j++)
+      info_x += phi[i] * this->model_.p[i][j] * phi[j];
 
-  // Forget ONLY on informative steps. This is covariance windup, and it is
-  // the defect that made the model wander: with lambda < 1 applied every
-  // step, P grows by 1/lambda whenever there is nothing to learn. At 0.9995
-  // and a step every 5 minutes that is 2.7x per week, unbounded -- the clamp
-  // at P_PRIOR*10 stops it diverging but parks it at maximum gain, so the
-  // estimate tracks sensor noise instead of the tank. Holding lambda at 1
-  // when a step carries no information leaves P where it is.
-  //
-  // It is also self-limiting in the other direction: info scales with P, so
-  // as the model converges and P shrinks, steps stop qualifying and P stops
-  // shrinking further. The model cannot become so certain that it ignores
-  // new evidence.
-  const float lambda = info > INFO_MIN ? LAMBDA : 1.0f;
+  // No forgetting factor (lambda = 1); see the note where LAMBDA used to
+  // be. What keeps the model able to follow a changing tank is Q on the
+  // parameters that physically drift, added below, and the stale-model
+  // re-inflation, which is what `informative` still gates.
+  const bool informative = info_x > INFO_MIN;
+  const float lambda = 1.0f;
 
   const float denom = lambda + info;
   if (!(denom > 1e-9f))
@@ -602,6 +1136,27 @@ void TankController::learn_(float dt_min, float measured_rate) {
       this->model_.p[i][j] = this->model_.p[j][i] = avg;
     }
 
+  // Bounds, by projection rather than clamp (fault 2) -- then step 3 of
+  // project_bounds_()'s recipe: what the unconstrained step explained of
+  // this window and the projected one does not, c takes. The posterior
+  // residual of the unconstrained step is err*lambda/denom (standard RLS).
+  if (this->project_bounds_()) {
+    float post = 0.0f;
+    for (uint8_t i = 0; i < N_PARAMS; i++)
+      post += this->model_.theta[i] * phi[i];
+    const float want = err * lambda / denom;
+    const float refit = (measured_rate - post) - want;
+    const float c = this->model_.theta[4] + refit;
+    if (c >= THETA_MIN[4] && c <= THETA_MAX[4])
+      this->model_.theta[4] = c;
+  }
+
+  // Process noise: the parameters that drift, drift (see Q). Added on every
+  // step, informative or not -- the room moves whether or not the heater
+  // happens to be running.
+  this->model_.p[4][4] += Q_C;
+  this->model_.p[2][2] += this->model_.ref_mode == REF_AMBIENT ? Q_KA_AMBIENT : Q_KA_SETPOINT;
+
   this->clamp_model_();
   this->model_.updates++;
 
@@ -617,22 +1172,30 @@ void TankController::learn_(float dt_min, float measured_rate) {
   // more than one sample justifies it.
   this->bias_ = (1.0f - BIAS_EMA_W) * this->bias_ + BIAS_EMA_W * err;
   this->stale_ = (1.0f - STALE_EMA_W) * this->stale_ + STALE_EMA_W * err;
+  // The residual's spread about its own running mean -- the noise floor
+  // health is measured against. About the mean, not about zero, so a
+  // biased model cannot widen its own deadband by being biased.
+  const float dev = err - this->stale_;
+  this->resid_var_ = (1.0f - STALE_EMA_W) * this->resid_var_ + STALE_EMA_W * dev * dev;
 
   // A model that is wrong in one direction, step after step, is stale --
   // random noise averages to zero here, a changed tank does not. While
   // that holds, re-inflate the covariance so RLS corrects at the speed it
-  // had when it was new, capped at the prior so it cannot run away.
-  if (info > INFO_MIN && this->get_model_health() < 1.0f) {
+  // had when it was new, capped at the prior so it cannot run away. c no
+  // longer depends on this (Q keeps it live); it is what lets kh, kf and kl
+  // follow a step change in the hardware.
+  if (informative && this->get_model_health() < 1.0f) {
     for (uint8_t i = 0; i < N_PARAMS; i++) {
-      const float lim = P_PRIOR[i];
+      const float lim = this->p_prior_(i);
       if (this->model_.p[i][i] < lim)
         this->model_.p[i][i] = std::fmin(this->model_.p[i][i] * P_REINFLATE, lim);
     }
   }
 
-  ESP_LOGD(TAG, "learn: rate=%.4f pred=%.4f err=%.4f kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", measured_rate, pred, err,
-           this->model_.theta[0], -this->model_.theta[1], -this->model_.theta[2], this->model_.theta[3],
-           this->model_.theta[4]);
+  ESP_LOGD(TAG, "learn: rate=%.2f pred=%.2f err=%.2f degF/h kh=%.4f kf=%.4f ka=%.5f kl=%.4f c=%.4f ref=%.2f degF",
+           measured_rate * 108.0f, pred * 108.0f, err * 108.0f, this->model_.theta[0], -this->model_.theta[1],
+           -this->model_.theta[2], this->model_.theta[3], this->model_.theta[4],
+           this->model_.t_ref * 9.0f / 5.0f + 32.0f);
   (void) dt_min;
 }
 
@@ -649,6 +1212,10 @@ void TankController::update() {
   const uint32_t now = millis();
   const float dt_min = (now - this->last_update_ms_) / 60000.0f;
   this->last_update_ms_ = now;
+
+  // Centre the model before anything reads it: a setpoint, override or
+  // ambient-probe change since the last tick is re-expressed here.
+  this->sync_reference_(now, this->temp_sensor_ == nullptr ? NAN : this->temp_sensor_->state);
 
   float t = this->temp_sensor_ == nullptr ? NAN : this->temp_sensor_->state;
 
@@ -693,9 +1260,7 @@ void TankController::update() {
     this->history_count_ = 0;
   }
   if (since_valid > DISCONTINUITY_MS) {
-    this->learn_anchor_temp_ = NAN;
-    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-    this->acc_n_ = 0;
+    this->reset_learn_window_();
     this->heat_stall_since_ms_ = 0;
     this->fan_stall_since_ms_ = 0;
     // This reading was accepted without a recent one to check it against.
@@ -803,31 +1368,51 @@ void TankController::update() {
   this->update_light_profile_(lux_norm);
 
   // --- accumulate averages for the next learning step -------------------
+  // The regressor is the CONTROL probe's deviation from the reference --
+  // the same quantity the prediction below uses, so learning and
+  // forecasting never disagree about which water they mean.
   this->acc_heater_ += this->heater_duty_;
   this->acc_fan_ += this->fan_duty_;
   this->acc_light_ += lux_norm;
-  this->acc_temp_ += t;
+  this->acc_dev_ += t - this->model_.t_ref;
   this->acc_n_++;
 
+  // The cross-check probe, if it is usable for the rate this tick: valid,
+  // a water temperature, and inside the disagreement band. See "Learning
+  // from both probes".
+  float cross = NAN;
+  if (this->cross_sensor_ != nullptr) {
+    const float b = this->cross_sensor_->state;
+    if (!std::isnan(b) && b >= PLAUSIBLE_MIN && b <= PLAUSIBLE_MAX && fabsf(t - b) <= this->disagree_band_)
+      cross = b;
+  }
+
   if (std::isnan(this->learn_anchor_temp_)) {
+    this->reset_learn_window_();
     this->learn_anchor_temp_ = t;
+    this->learn_anchor_cross_ = cross;
     this->learn_anchor_ms_ = now;
-    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-    this->acc_n_ = 0;
   } else if (now - this->learn_anchor_ms_ >= LEARN_WINDOW_MS && this->acc_n_ > 0) {
     const float window_min = (now - this->learn_anchor_ms_) / 60000.0f;
-    const float rate = (t - this->learn_anchor_temp_) / window_min;
+    const float d_a = t - this->learn_anchor_temp_;
+    float delta = d_a;
+    if (!std::isnan(cross) && !std::isnan(this->learn_anchor_cross_)) {
+      const float d_b = cross - this->learn_anchor_cross_;
+      if (fabsf(d_b - d_a) <= PAIR_RATE_TOL)
+        delta = 0.5f * (d_a + d_b);
+    }
+    const float rate = delta / window_min;
     this->drift_rate_ = rate;
     this->acc_heater_ /= this->acc_n_;
     this->acc_fan_ /= this->acc_n_;
     this->acc_light_ /= this->acc_n_;
-    this->acc_temp_ /= this->acc_n_;
+    this->acc_dev_ /= this->acc_n_;
     if (this->learning_enabled_)
       this->learn_(window_min, rate);
+    this->reset_learn_window_();
     this->learn_anchor_temp_ = t;
+    this->learn_anchor_cross_ = cross;
     this->learn_anchor_ms_ = now;
-    this->acc_heater_ = this->acc_fan_ = this->acc_light_ = this->acc_temp_ = 0.0f;
-    this->acc_n_ = 0;
   }
 
   // --- hard safety limits ------------------------------------------------
@@ -853,7 +1438,7 @@ void TankController::update() {
   this->predicted_light_ = this->predicted_light_for_((int) this->response_time_);
 
   // What the tank will do on its own, with no heater and no fan.
-  const float passive_raw = this->model_.theta[2] * (t - TEMP_REF) +
+  const float passive_raw = this->model_.theta[2] * (t - this->model_.t_ref) +
                             this->model_.theta[3] * this->predicted_light_ + this->model_.theta[4];
 
   // Weight the feedforward by how much the model has actually learned.
@@ -1035,15 +1620,18 @@ float TankController::get_time_constant() const {
 }
 
 float TankController::get_model_health() const {
-  // 1.0 while the residual is indistinguishable from sensor noise, falling
-  // to 0.0 as a persistent one-directional error grows to the size of the
-  // fan's whole authority. Uses the SIGNED error EMA, not the magnitude:
-  // noise cancels in the EMA and a genuinely wrong model does not, so this
-  // measures staleness rather than noisiness.
+  // 1.0 while the residual's running mean is indistinguishable from noise,
+  // falling to 0.0 as a persistent one-directional error grows to the size
+  // of the fan's whole authority. Uses the SIGNED error EMA, not the
+  // magnitude: noise cancels in the EMA and a genuinely wrong model does
+  // not, so this measures staleness rather than noisiness. The deadband is
+  // that EMA's own measured noise, not a fixed number; see
+  // health_deadband_().
   const float e = std::fabs(this->stale_);
-  if (e <= STALE_DEADBAND)
+  const float db = this->health_deadband_();
+  if (e <= db)
     return 1.0f;
-  return clampf(1.0f - (e - STALE_DEADBAND) / STALE_SCALE, 0.0f, 1.0f);
+  return clampf(1.0f - (e - db) / STALE_SCALE, 0.0f, 1.0f);
 }
 
 float TankController::get_confidence() const {
@@ -1066,13 +1654,25 @@ void TankController::dump_config() {
                 this->min_temp_ * 9.0f / 5.0f + 32.0f, this->max_temp_ * 9.0f / 5.0f + 32.0f);
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
   ESP_LOGCONFIG(TAG, "  Max time constant: %.0f min", 1.0f / this->ka_min_);
+  if (this->ambient_sensor_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Room air: %s (valid for %" PRIu32 " min after each report)", this->ambient_source_,
+                  this->ambient_timeout_ms_ / 60000UL);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Room air: none");
+  }
+  if (std::isnan(this->model_.t_ref)) {
+    ESP_LOGCONFIG(TAG, "  Model reference: not yet centred");
+  } else {
+    ESP_LOGCONFIG(TAG, "  Model reference: %.2f degF (%s)", this->model_.t_ref * 9.0f / 5.0f + 32.0f,
+                  this->model_.ref_mode == REF_AMBIENT ? "room air" : "setpoint");
+  }
   ESP_LOGCONFIG(TAG, "  Fan available: %s", YESNO(this->fan_available_));
   ESP_LOGCONFIG(TAG, "  Fan deadband: %.2f degF above setpoint", this->fan_deadband_ * 9.0f / 5.0f);
   ESP_LOGCONFIG(TAG, "  Cross-check probe: %s (disagreement band %.1f degF)", YESNO(this->cross_sensor_ != nullptr),
                 this->disagree_band_ * 9.0f / 5.0f);
   ESP_LOGCONFIG(TAG, "  Learning: %s (%" PRIu32 " steps, %.0f%% confidence)", ONOFF(this->learning_enabled_),
                 this->model_.updates, this->get_confidence());
-  ESP_LOGCONFIG(TAG, "  Model: kh=%.4f kf=%.4f ka=%.4f kl=%.4f c=%.4f", this->model_.theta[0], -this->model_.theta[1],
+  ESP_LOGCONFIG(TAG, "  Model: kh=%.4f kf=%.4f ka=%.5f kl=%.4f c=%.4f", this->model_.theta[0], -this->model_.theta[1],
                 -this->model_.theta[2], this->model_.theta[3], this->model_.theta[4]);
 }
 

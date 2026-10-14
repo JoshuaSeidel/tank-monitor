@@ -26,6 +26,9 @@ CONF_LEARNING = "learning"
 CONF_FAN_DEADBAND = "fan_deadband"
 CONF_CROSS_CHECK = "cross_check"
 CONF_DISAGREEMENT_BAND = "disagreement_band"
+CONF_AMBIENT = "ambient"
+CONF_AMBIENT_TIMEOUT = "ambient_timeout"
+CONF_AMBIENT_SOURCE = "ambient_source"
 
 tank_controller_ns = cg.esphome_ns.namespace("tank_controller")
 TankController = tank_controller_ns.class_("TankController", cg.PollingComponent)
@@ -106,9 +109,11 @@ CONFIG_SCHEMA = cv.All(
             # Ceiling on the learned passive time constant (Tank Time
             # Constant), i.e. the floor on the model's loss coefficient ka.
             # 1000 min suits the ~10 gal nano and stays the default; a large
-            # lidded tank can be slower than that, and a bound the fit wants
-            # to cross pins ka and leaves the model biased for good (see
-            # THETA_MAX in tank_controller.cpp). Set it where m*c/UA rules
+            # lidded tank can be slower than that. Since the model is centred
+            # on its operating point and bounds are enforced by projection, a
+            # bound the fit leans on no longer leaves the model biased (see
+            # THETA_MAX in tank_controller.cpp) -- but it should still sit
+            # where physics, not a smaller tank, rules values out. Set it where m*c/UA rules
             # values out: tau = m*c / (smallest loss slope the tank could
             # physically have). 100 min keeps the RLS prior (67 min)
             # learnable from either side; 20000 min is two weeks, beyond any
@@ -132,6 +137,31 @@ CONFIG_SCHEMA = cv.All(
             # First-boot default; the "Probe Disagreement Band" number
             # changes it live. 15.0 matches DISAGREE_BAND_MAX_F.
             cv.Optional(CONF_DISAGREEMENT_BAND, default=2.0): cv.float_range(min=0.0, max=15.0),
+            # Optional room-air temperature sensor (Celsius state, like every
+            # sensor this component reads). Never controlled on. While it
+            # reports a plausible value, the model measures the tank's heat
+            # loss against the room instead of against the setpoint, so the
+            # room's daily swing identifies the loss coefficient (Tank Time
+            # Constant) and the constant term only has to model the tank's
+            # own heat. If it goes missing, stale (5 min) or implausible the
+            # model falls back to the setpoint reference on the next tick,
+            # with no step in the prediction. See "Where the model is
+            # centred" in tank_controller.cpp.
+            cv.Optional(CONF_AMBIENT): cv.use_id(sensor.Sensor),
+            # How long one room reading stays good with no newer one. 10 min
+            # suits a probe that reports every few seconds; a report-on-
+            # change Zigbee sensor needs hours (packages/ambient_zigbee.yaml
+            # sets 3h). A source that knows it is gone should publish NAN,
+            # which ends it immediately regardless of this.
+            cv.Optional(CONF_AMBIENT_TIMEOUT, default="10min"): cv.All(
+                cv.positive_time_period_minutes,
+                cv.Range(min=cv.TimePeriod(minutes=1), max=cv.TimePeriod(hours=12)),
+            ),
+            # Short label for logs and the "Model Reference" entity, which
+            # reads "room: <this>" while the room is in use.
+            cv.Optional(CONF_AMBIENT_SOURCE, default="room probe"): cv.All(
+                cv.string_strict, cv.Length(min=1, max=20)
+            ),
         }
     ).extend(cv.polling_component_schema("30s")),
     _validate,
@@ -168,6 +198,10 @@ async def to_code(config):
     cg.add(var.set_disagreement_band(_f_delta_to_c(config[CONF_DISAGREEMENT_BAND])))
     if CONF_CROSS_CHECK in config:
         cg.add(var.set_cross_check_sensor(await cg.get_variable(config[CONF_CROSS_CHECK])))
+    if CONF_AMBIENT in config:
+        cg.add(var.set_ambient_sensor(await cg.get_variable(config[CONF_AMBIENT])))
+        cg.add(var.set_ambient_timeout(config[CONF_AMBIENT_TIMEOUT].total_minutes))
+        cg.add(var.set_ambient_source(config[CONF_AMBIENT_SOURCE]))
 
 
 CONTROLLER_ACTION_SCHEMA = cv.Schema({cv.GenerateID(): cv.use_id(TankController)})

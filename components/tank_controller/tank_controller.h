@@ -5,6 +5,7 @@
 #include "esphome/core/preferences.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/output/float_output.h"
+#include <cstdio>
 
 #ifdef USE_TIME
 #include "esphome/core/time.h"
@@ -20,56 +21,65 @@ namespace tank_controller {
 static const uint8_t N_HISTORY = 120;
 
 // Number of parameters in the thermal model:
-//   dT/dt = kh*H - kf*F - ka*(T - TREF) + kl*L + c        [degC per minute]
+//   dT/dt = kh*H - kf*F - ka*(T - T_ref) + kl*L + c        [degC per minute]
 // estimated as theta = [kh, -kf, -ka, kl, c]
 static const uint8_t N_PARAMS = 5;
 
 // Light profile resolution: 96 slots of 15 minutes covers one day.
 static const uint8_t N_SLOTS = 96;
 
-// Reference temperature the ambient term is measured against. It is a
-// centring constant, and the value matters far more than it looks.
+// The reference temperature the loss term is measured against is no longer
+// a constant. It is the model's own operating point, held in the model
+// (ThermalModel::t_ref) and moved with it -- see tank_controller.cpp,
+// "Where the model is centred", for the full argument. In short:
 //
-// The regressors are [heater, fan, (T - TEMP_REF), light, 1]. With
-// TEMP_REF = 20 and a tank living at 24.1 +/- 0.2 C, the third regressor
-// was 4.1 +/- 0.2 -- a large mean with a tiny variance, sitting next to a
-// literal constant. Those two columns are then almost perfectly collinear,
-// and RLS cannot separate ka from c: only their combination is identified,
-// and how it splits between them is decided by noise.
+//   * no ambient sensor (every board today): T_ref is the active setpoint.
+//     c is then exactly "the drift the tank shows at the temperature it is
+//     held at", which is the one quantity the data measures every five
+//     minutes, and ka is learned only from real excursions away from it.
+//   * an ambient air probe configured and reporting: T_ref is the room.
+//     (T - T_amb) then varies with the room's daily swing, which is what
+//     finally makes ka identifiable, and c shrinks to the tank's own heat
+//     (pumps, light ballast).
 //
-// The numbers say it is not close. The identifiable signal for ka is its
-// coefficient times the variation in T -- 0.015 * 0.2 = 0.003 degC/min --
-// against a quantisation floor of one DS18B20 LSB over a 5 minute window,
-// 0.0125 degC/min. The information is four times smaller than one bit of
-// the sensor. That is why Tank Time Constant wandered 206 -> 366 -> 93
-// minutes across a day: it was not learning, it was random-walking, with c
-// absorbing whatever ka did.
+// Moving T_ref re-expresses c so the prediction does not step; see
+// rebase_(). The model is persisted together with its T_ref, so a stored
+// c is never read against the wrong reference.
 //
-// Centring on the operating point makes (T - TEMP_REF) about 0.1 +/- 0.2 --
-// small, zero-mean, and no longer a near-duplicate of the constant column.
-// c then carries the well-identified equilibrium term cleanly, and ka
-// degrades to a small correction on deviations, which is all the data can
-// support.
-//
-// The old comment here argued for 20 C on the grounds that an untrained
-// model must assume the tank loses heat -- setting it to 25 once predicted
-// a 22.6 C tank would warm on its own and held the heater at 0%. That
-// reasoning was right and the fix is kept, but it belongs in the prior, not
-// the centring: THETA_PRIOR[4] now carries the cooling assumption
-// (-0.030 degC/min, the ~3.3 degF/h this tank sheds unaided). The sign of
-// the untrained prediction is therefore unchanged, and it is doubly
-// covered now that the feedforward is gated by confidence AND health, both
-// of which are zero on an untrained model.
-static const float TEMP_REF = 24.0f;
+// LEGACY_TEMP_REF is the fixed 24.0 C (75.2 degF) every model saved by
+// firmware up to bbf4b6f was centred on. It exists for exactly one
+// purpose: to read such a model out of flash (tank_model_v3) and re-centre
+// it on first boot. Nothing else may use it. It is the constant that broke
+// the 75 gal: a tank held ~1.9 degF above it with ~0.1 degF of swing makes
+// (T - 24.0) a near-constant ~1.05, ka and c interchangeable, and the clamp
+// on ka the place every correction went to die.
+static const float LEGACY_TEMP_REF = 24.0f;
+
+// Which temperature the model is currently centred on.
+static const uint8_t REF_SETPOINT = 0;
+static const uint8_t REF_AMBIENT = 1;
 
 struct ThermalModel {
   // theta[0] = kh   heater gain, degC/min at 100% duty        (>0)
   // theta[1] = -kf  fan gain, degC/min at 100% duty           (<0)
-  // theta[2] = -ka  passive loss per degC above ambient       (<0)
+  // theta[2] = -ka  passive loss per degC above T_ref         (<0)
   // theta[3] = kl   light gain, degC/min at full scale lux    (>=0)
-  // theta[4] = c    constant drift                            (any)
+  // theta[4] = c    drift at T_ref with nothing running       (any)
   float theta[N_PARAMS];
   // Upper triangle of the RLS covariance, stored dense for simplicity.
+  float p[N_PARAMS][N_PARAMS];
+  uint32_t updates;
+  // The temperature theta[4] is expressed at, degC. NAN = not yet centred
+  // (fresh prior): adopted as-is on the first tick, no re-expression.
+  float t_ref;
+  // REF_SETPOINT or REF_AMBIENT.
+  uint8_t ref_mode;
+};
+
+// Layout of the model as firmware up to bbf4b6f saved it, under the key
+// "tank_model_v3". Only read, once, to migrate; see setup().
+struct ThermalModelV3 {
+  float theta[N_PARAMS];
   float p[N_PARAMS][N_PARAMS];
   uint32_t updates;
 };
@@ -93,6 +103,17 @@ class TankController : public PollingComponent {
   // to veto the control probe when the two disagree.
   void set_cross_check_sensor(sensor::Sensor *s) { this->cross_sensor_ = s; }
   void set_illuminance_sensor(sensor::Sensor *s) { this->lux_sensor_ = s; }
+  // Optional room-air probe. Never controlled on; when it is reporting, the
+  // model's loss term is measured against it instead of the setpoint. See
+  // "Where the model is centred" in tank_controller.cpp.
+  void set_ambient_sensor(sensor::Sensor *s) { this->ambient_sensor_ = s; }
+  // How long one room reading stays good with no newer one, minutes.
+  void set_ambient_timeout(float minutes) { this->ambient_timeout_ms_ = (uint32_t) (minutes * 60000.0f); }
+  // Short name of the room source for logs and the Model Reference entity.
+  void set_ambient_source(const char *name) {
+    this->ambient_source_ = name;
+    snprintf(this->ambient_text_, sizeof(this->ambient_text_), "room: %s", name);
+  }
   void set_heater(output::FloatOutput *o) { this->heater_ = o; }
   void set_fan(output::FloatOutput *o) { this->fan_ = o; }
 #ifdef USE_TIME
@@ -159,6 +180,12 @@ class TankController : public PollingComponent {
   // only -- it does not gate anything.
   float get_model_bias() const { return this->bias_; }
   float get_predicted_temperature() const { return this->predicted_temp_; }
+  // The temperature the model is currently centred on, degC (setpoint, or
+  // the room when an ambient probe is in use). NAN before the first tick.
+  float get_reference_temperature() const { return this->model_.t_ref; }
+  bool is_ambient_reference() const { return this->model_.ref_mode == REF_AMBIENT; }
+  // "room: <source>" in ambient mode, otherwise which setpoint fallback.
+  const char *get_reference_text() const;
   float get_predicted_light_load() const { return this->predicted_light_; }
   bool is_safety_tripped() const { return this->safety_tripped_; }
   // Heater commanded near full for a long stretch with no temperature
@@ -196,6 +223,15 @@ class TankController : public PollingComponent {
   float predicted_light_for_(int minutes_ahead) const;
   int current_slot_(int minutes_ahead = 0) const;
   void clamp_model_();
+  bool project_bounds_();
+  void sync_reference_(uint32_t now, float water);
+  void rebase_(float new_ref);
+  bool ambient_usable_(uint32_t now, float water);
+  float theta_prior_(uint8_t i) const;
+  float p_prior_(uint8_t i) const;
+  void set_ka_variance_(float target);
+  void reset_learn_window_();
+  float health_deadband_() const;
   float theta_max_(uint8_t i) const;
   void load_prior_();
   void save_state_();
@@ -203,6 +239,7 @@ class TankController : public PollingComponent {
   sensor::Sensor *temp_sensor_{nullptr};
   sensor::Sensor *cross_sensor_{nullptr};
   sensor::Sensor *lux_sensor_{nullptr};
+  sensor::Sensor *ambient_sensor_{nullptr};
   output::FloatOutput *heater_{nullptr};
   output::FloatOutput *fan_{nullptr};
 #ifdef USE_TIME
@@ -250,15 +287,39 @@ class TankController : public PollingComponent {
   // from bias_ because that one is tuned for a dashboard, not for deciding
   // how much to believe the model.
   float stale_{0.0f};
+  // EMA of the residual's spread about stale_, (degC/min)^2. The noise
+  // floor health is judged against; see get_model_health(). Starts at the
+  // quantisation floor rather than zero so a fresh boot is not hair-trigger.
+  float resid_var_{0.0f};
+
+  // Ambient probe bookkeeping: when it last delivered a reading, and since
+  // when it has been continuously usable (0 = not usable now).
+  uint32_t ambient_last_ms_{0};
+  uint32_t ambient_ok_since_ms_{0};
+  // Since when the room reading has sat on the water temperature.
+  uint32_t ambient_close_since_ms_{0};
+  // Low-passed room temperature the model reads, and when it was updated.
+  float ambient_filt_{NAN};
+  uint32_t ambient_filt_ms_{0};
+  uint32_t ambient_timeout_ms_{600000};
+  const char *ambient_source_{"room probe"};
+  char ambient_text_[32]{"room: room probe"};
 
   // Learning is done over a slow window: a DS18B20 quantises to 0.0625 degC,
   // which swamps the real drift rate if you differentiate every control tick.
   float learn_anchor_temp_{NAN};
+  // The cross-check probe's reading at the same anchor, NAN if it was not
+  // usable then. Each probe's rate is taken against its OWN anchor, so the
+  // fixed offset between two DS18B20s never appears as a rate.
+  float learn_anchor_cross_{NAN};
   uint32_t learn_anchor_ms_{0};
   float acc_heater_{0.0f};
   float acc_fan_{0.0f};
   float acc_light_{0.0f};
-  float acc_temp_{0.0f};
+  // Sum of (T - T_ref) over the window, the loss regressor. Accumulated as
+  // a deviation, not as T, so a reference that moves mid-window (a setpoint
+  // change, or the room in ambient mode) is accounted for exactly.
+  float acc_dev_{0.0f};
   uint32_t acc_n_{0};
 
   float history_[N_HISTORY];

@@ -1,0 +1,132 @@
+# Room air temperature for the thermal model, from a Zigbee2MQTT sensor.
+#
+# OPT-IN. Nothing includes this by default; a board that wants it includes
+# it from its board file with the topic as a var (allinone-freenove.yaml
+# does, for the 75's "Office Multi-Sensor"):
+#
+#   packages:
+#     room_air: !include
+#       file: ../packages/ambient_zigbee.yaml
+#       vars:
+#         ambient_mqtt_topic: "zigbee2mqtt/Office Multi-Sensor"
+#         ambient_mqtt_field: temperature   # JSON key, degC
+#         ambient_timeout: 3h               # how long one report stays good
+#
+# What it buys: tank_controller measures the tank's heat loss against the
+# room instead of against the setpoint ("Where the model is centred" in
+# components/tank_controller/tank_controller.cpp). The room's daily swing
+# then identifies the loss coefficient -- Tank Time Constant becomes a
+# measurement instead of a prior -- and a change in the room is predicted
+# from the room rather than discovered from the water two hours later.
+# Without it the model is still right, by tracking the drift (c) as a
+# random walk; this makes it right sooner and explains why.
+#
+# Why Zigbee and not a probe: the sensor already sits beside the tank and
+# reports to the same Mosquitto broker this board already uses. No wiring,
+# no opening the case, no new failure mode on the controller's 1-Wire buses.
+#
+# HOME ASSISTANT IS NOT IN THE PATH. Zigbee2MQTT publishes straight to the
+# broker and this board subscribes straight from it, so the room input
+# keeps working with HA down, as long as Mosquitto and Z2M run. If the
+# topic goes quiet, the sensor reports offline, or a value is implausible,
+# the controller drops back to the setpoint-referenced model on the next
+# tick, with no step in its prediction -- the room is an improvement, never
+# a dependency. "Model Reference" (diagnostic) says which is in use:
+# "room: zigbee" or "setpoint (room: none)".
+#
+# Report-on-change, and why the timeout is hours: the HOBEIAN multi-sensor
+# sends temperature in 0.2 degC steps only when it changes, so a steady
+# office can go ~2 h without a temperature report. Z2M republishes the
+# device's whole JSON state on ANY attribute change (presence, light), and
+# every one of those carries the temperature and refreshes it here. A
+# reading is therefore a good description of the room until something says
+# otherwise; ambient_timeout (3 h) is the backstop, and availability
+# "offline" ends it at once. The 0.36 degF staircase itself is smoothed by
+# the controller (20 min low-pass) so a step is not read as a heat event.
+#
+# An MQTT disconnect on THIS side deliberately does not invalidate the last
+# reading: the room did not change because our link dropped, and after a
+# Wi-Fi blip the next Z2M message refreshes it within minutes. The timeout
+# bounds how stale it can get.
+#
+# Other sources. tank_controller's `ambient:` takes ANY ESPHome sensor in
+# degC, so a board without a Zigbee room sensor can bind a local one --
+# e.g. a DS18B20 in room air on its own GPIO bus, with:
+#     tank_controller:
+#       ambient: <sensor id, degC>
+#       ambient_source: probe     # ambient_timeout default 10min suits it
+# Do NOT hang it on a water probe's bus: a flooded or failed probe can hold
+# a 1-Wire bus low and take the water probe down with it, and on the 75 that
+# is the heater's control or veto probe. A room probe on the panel, sent over
+# the BLE link, would also work but is NOT implemented -- the link carries
+# no panel-to-controller sensor frame today.
+
+text_sensor:
+  # The full JSON state Z2M publishes for the device. Internal: it is large,
+  # changes with every presence flicker, and is not something to record.
+  # Parsed with strstr/strtof rather than a JSON parser -- one field, no
+  # allocator, same reasoning as the model seed's CSV in control.yaml.
+  - platform: mqtt_subscribe
+    id: room_air_payload
+    internal: true
+    topic: ${ambient_mqtt_topic}
+    on_value:
+      - lambda: |-
+          // The key with its quotes, so "device_temperature" cannot match.
+          static const char KEY[] = "\"${ambient_mqtt_field}\"";
+          const char *p = strstr(x.c_str(), KEY);
+          if (p == nullptr) return;          // message without the field
+          p += sizeof(KEY) - 1;
+          while (*p == ' ') p++;
+          if (*p != ':') return;
+          p++;
+          char *end = nullptr;
+          const float c = strtof(p, &end);
+          if (end == p) return;              // null, or not a number
+          id(room_air_c).publish_state(c);
+
+  # Z2M availability: "online"/"offline" in older releases, a JSON
+  # {"state":"offline"} in newer ones. Both contain the word. Offline ends
+  # the room reading immediately (NAN); online does nothing -- the next real
+  # temperature report is what brings it back.
+  - platform: mqtt_subscribe
+    id: room_air_availability
+    internal: true
+    topic: ${ambient_mqtt_topic}/availability
+    on_value:
+      - lambda: |-
+          if (x.find("offline") != std::string::npos) {
+            ESP_LOGW("room_air", "Room sensor reports offline - model falls back to the setpoint");
+            id(room_air_c).publish_state(NAN);
+          }
+
+sensor:
+  # degC, as received. What tank_controller reads, and what its staleness
+  # clock is keyed on (every publish counts as a report).
+  - platform: template
+    id: room_air_c
+    internal: true
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    update_interval: never
+
+  # The same in Fahrenheit for Home Assistant: what the controller is
+  # actually receiving, as opposed to what Z2M last showed HA.
+  - platform: template
+    name: "Room Temperature"
+    id: room_air_f
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    icon: "mdi:home-thermometer"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      const float c = id(room_air_c).state;
+      if (isnan(c)) return NAN;
+      return c * 9.0f / 5.0f + 32.0f;
+
+tank_controller:
+  ambient: room_air_c
+  ambient_timeout: ${ambient_timeout}
+  ambient_source: zigbee
