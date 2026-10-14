@@ -620,6 +620,11 @@ indistinguishable — that is what pinned the 75's Tank Time Constant on its
 bound in October 2026. Moving `ref` re-expresses `c` so the prediction never
 steps, and a model saved by older firmware is migrated on first boot.
 
+The Zigbee room sensor must have **retain** enabled in Zigbee2MQTT (device >
+Settings > retain). Without it the broker holds no last value, so after any
+reboot the board waits up to ~2 h for the sensor's next report before it can
+use the room. See the header of `packages/ambient_zigbee.yaml`.
+
 Parameters are fit online with recursive least squares. `c` is modelled as a
 random walk (process noise sized to a two-hour tracking time), because the
 room it stands in for really does move — day and night, the heating season, the

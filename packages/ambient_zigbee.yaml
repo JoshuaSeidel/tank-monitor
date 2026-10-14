@@ -44,6 +44,18 @@
 # "offline" ends it at once. The 0.36 degF staircase itself is smoothed by
 # the controller (20 min low-pass) so a step is not read as a heat event.
 #
+# SET THE Z2M DEVICE TO RETAIN. By default Z2M publishes device state
+# without the MQTT retain flag, so a board that boots (or a flash, or a
+# broker restart) receives nothing until the sensor's next report -- up to
+# ~2 h of "Room Temperature: unknown" / "setpoint (room: none)" after every
+# restart. Seen on the first flash, 2026-10-14. With retain on, the broker
+# hands the last state over the moment this board subscribes. Set it once
+# per device (Z2M frontend: device > Settings > retain; or publish to
+# zigbee2mqtt/bridge/request/device/options:
+#   {"id": "Office Multi-Sensor", "options": {"retain": true}}
+# -- done for the 75's sensor on 2026-10-14). Re-check it if the sensor is
+# ever re-paired or renamed: device options belong to the device entry.
+#
 # An MQTT disconnect on THIS side deliberately does not invalidate the last
 # reading: the room did not change because our link dropped, and after a
 # Wi-Fi blip the next Z2M message refreshes it within minutes. The timeout
