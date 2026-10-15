@@ -25,8 +25,8 @@
 #   - it is far less config, and less to drift out of sync.
 #
 # FIELD 11 AND 12 ARE DEMAND, NOT RELAY STATE. The controller exposes duty,
-# not contact position -- the relays are driven by slow_pwm and only that
-# component knows when the contacts actually move. So these say "the
+# not contact position -- the relays are driven by time_proportioning and
+# only that component knows when the contacts actually move. So these say "the
 # controller is calling for heat/cooling this window", which is the steadier
 # thing to show anyway: at 14% duty the contacts are open for 13 of every 15
 # minutes, and a panel mirroring that would read as chaos.

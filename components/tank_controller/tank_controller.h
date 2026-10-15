@@ -132,10 +132,11 @@ class TankController : public PollingComponent {
   // model's loss term is measured against it instead of the setpoint. See
   // "Where the model is centred" in tank_controller.cpp.
   void set_ambient_sensor(sensor::Sensor *s) { this->ambient_sensor_ = s; }
-  // The heater and fan relays as switched (slow_pwm's state_change_action).
-  // When given, the model learns from the fraction of each window the
-  // contacts were actually closed, not from the duty it asked for -- on the
-  // 75 the two differ by 1.7x; see "Delivered, not commanded".
+  // The heater and fan relays as switched (time_proportioning's
+  // state_change_action). When given, the model learns from the fraction of
+  // each window the contacts were actually closed, not from the duty it
+  // asked for -- before components/time_proportioning the 75's differed by
+  // 1.7x; see "Delivered, not commanded".
   void set_heater_relay(binary_sensor::BinarySensor *b) { this->heater_relay_ = b; }
   void set_fan_relay(binary_sensor::BinarySensor *b) { this->fan_relay_ = b; }
   // How long one room reading stays good with no newer one, minutes.
@@ -385,6 +386,14 @@ class TankController : public PollingComponent {
   float heater_duty_{0.0f};
   float fan_duty_{0.0f};
   float integral_{0.0f};
+  // "One probe step cannot toggle the demand": the proportional term's
+  // debounced temperature (NAN = take the next reading) and the latched
+  // rules -- heat forbidden above setpoint, cooling below it, the fan
+  // inside its deadband.
+  float t_play_{NAN};
+  bool heat_blocked_{false};
+  bool cool_blocked_{false};
+  bool fan_banded_{true};
   float drift_rate_{0.0f};
   float predicted_temp_{NAN};
   float predicted_light_{0.0f};

@@ -9,10 +9,13 @@ and drives them with a simulated tank:
     where c0 is the tank's own heat (pumps) minus open-surface evaporation,
     which depends on the cover, and T_air is the room -- or, for a tank in a
     closed stand, a cabinet air node between the tank and the room
-  * heater and fan through 900 s slow_pwm windows, as on the boards. The 75's
-    board (allinone-freenove) restarts the window on every 0 -> >0 edge of
-    the heater demand, so the relay delivers far more than the commanded duty
-    while the loop is toggling; the nano's (xiao-esp32s3) does not
+  * heater and fan relays through components/time_proportioning (TimeProp:
+    delivered on-time = commanded duty x elapsed time, 900 s period, 30 s
+    minimum on/off), as on every board now -- or, for the before/after
+    table (--relay), the slow_pwm windows the boards used to run: the 75's
+    (allinone-freenove) restarted the window on every 0 -> >0 edge of the
+    heater demand, so the relays delivered far more than commanded while the
+    loop toggled; the nano's (xiao-esp32s3) ran a plain free-running window
   * two DS18B20s (control + cross-check) with offsets, noise and 0.0625 degC
     quantisation
   * room: the REAL office the 75 sits in, 17 days of Home Assistant 5 minute
@@ -27,12 +30,15 @@ Three firmwares:
                    ka, ka variance 1e-2 with a room sensor, commanded duty)
   NEW  = this component (tank physics -> ka/kh priors and bounds, delivered
          relay duty as the regressor, ka centred so it only learns from
-         excitation, Q on ka = 0)
+         excitation, Q on ka = 0, and the demand debounced so one probe
+         step cannot toggle it: latched sign guard / fan deadband and a
+         play operator on the proportional term; debounce=False is ca952fb)
 
     python3 tools/thermal_model_sim.py              # full table, a few minutes
     python3 tools/thermal_model_sim.py --quick      # shorter runs
     python3 tools/thermal_model_sim.py --measure    # tau from the real history
     python3 tools/thermal_model_sim.py --replay     # real history through NEW
+    python3 tools/thermal_model_sim.py --relay      # relay drive before/after: delivered vs commanded
 
 Needs numpy. Nothing here is imported by the firmware.
 """
@@ -58,6 +64,13 @@ STALE_EMA_W = f32(0.02)
 STALE_SCALE = f32(0.050)
 INTEGRAL_AUTHORITY = f32(0.5)
 GUARD_DEADBAND = f32(0.1 * 5 / 9)
+DS18B20_LSB = f32(0.0625)
+# update()'s "One probe step cannot toggle the demand": wider than one
+# DS18B20 step, so a reading flipping between two adjacent steps can cross
+# at most one edge
+DEBOUNCE_W = f32(1.5) * DS18B20_LSB
+GUARD_ENGAGE = f32(GUARD_DEADBAND + DEBOUNCE_W / 2)
+GUARD_RELEASE = f32(GUARD_DEADBAND - DEBOUNCE_W / 2)
 THETA_MIN = [f32(v) for v in (0.002, -0.300, -0.200, 0.000, -0.150)]
 THETA_MAX = [f32(v) for v in (0.300, -0.002, -0.001, 0.050, 0.150)]
 THETA_PRIOR = [f32(v) for v in (0.030, -0.020, -0.015, 0.003, -0.030)]
@@ -149,9 +162,16 @@ class Controller:
 
     def __init__(self, variant, setpoint_f, max_tau=None, phys=None, fan_available=True, cross=True,
                  ambient=False, ambient_timeout_min=180, full_scale_lux=3000.0, response_time=20.0,
-                 fan_deadband_f=0.25, disagree_band_f=8.0, relay=True, centre=True):
+                 fan_deadband_f=0.25, disagree_band_f=8.0, relay=True, centre=True, debounce=True):
         self.v = variant
         self.new = variant == 'new'
+        # debounce: hysteresis on the rules that forbid an actuator (sign
+        # guard, fan deadband) and a play operator on the proportional
+        # term's temperature, both DEBOUNCE_W wide. False = ca952fb and
+        # before: a single threshold each, the raw reading everywhere.
+        self.debounce = debounce and self.new
+        self.heat_block = False; self.cool_block = False; self.fan_block = True
+        self.t_play = float('nan')
         self.max_tau_cfg = max_tau
         self.phys_in = phys
         self.relay = relay and self.new
@@ -647,7 +667,13 @@ class Controller:
         trust = f32(clampf(self.confidence() / 100, 0, 1) * self.health())
         passive = f32(passive_raw * trust)
         error = f32(self.setpoint - t)
-        desired = f32(clampf(float(error / self.rt), -0.15, 0.15))
+        error_p = error
+        if self.debounce:
+            if math.isnan(self.t_play):
+                self.t_play = t
+            self.t_play = f32(clampf(float(self.t_play), float(t - DEBOUNCE_W / 2), float(t + DEBOUNCE_W / 2)))
+            error_p = f32(self.setpoint - self.t_play)
+        desired = f32(clampf(float(error_p / self.rt), -0.15, 0.15))
         ki = f32(1) / (self.rt * self.rt)
         self.integral = f32(self.integral + error * dt * ki)
         imh = INTEGRAL_AUTHORITY * (kh if kh > 1e-4 else THETA_PRIOR[0])
@@ -660,17 +686,34 @@ class Controller:
         elif net < 0:
             if self.fan_available and kf > 1e-4:
                 f = -net / kf
-        if error < -GUARD_DEADBAND and h > 0:
+        if self.debounce:
+            if error < -GUARD_ENGAGE:
+                self.heat_block = True
+            elif error > -GUARD_RELEASE:
+                self.heat_block = False
+            if error > GUARD_ENGAGE:
+                self.cool_block = True
+            elif error < GUARD_RELEASE:
+                self.cool_block = False
+            if error < -self.fan_db:
+                self.fan_block = False
+            elif error > -(self.fan_db - DEBOUNCE_W):
+                self.fan_block = True
+        else:
+            self.heat_block = bool(error < -GUARD_DEADBAND)
+            self.cool_block = bool(error > GUARD_DEADBAND)
+            self.fan_block = bool(error > -self.fan_db)
+        if self.heat_block and h > 0:
             h = f32(0)
-        elif error > GUARD_DEADBAND and f > 0:
+        elif self.cool_block and f > 0:
             f = f32(0)
-        elif f > 0 and error > -self.fan_db:
+        elif f > 0 and self.fan_block:
             f = f32(0)
         if (h >= 1 and error > 0) or (f >= 1 and error < 0):
             self.integral = f32(self.integral - error * dt * ki)
-        if self.fan_available and error > -self.fan_db and self.integral < 0:
+        if self.fan_available and self.fan_block and self.integral < 0:
             self.integral = f32(0)
-        if error < -GUARD_DEADBAND and self.integral > 0:
+        if self.heat_block and self.integral > 0:
             self.integral = f32(0)
         self.heater = f32(clampf(float(h), 0, 1))
         self.fan = f32(clampf(float(f), 0, 1)) if self.fan_available else f32(0)
@@ -681,6 +724,31 @@ class Controller:
         self.predicted = float(t + rate_now * 15)
 
 
+# --- actuators ---------------------------------------------------------------
+class TimeProp:
+    """components/time_proportioning, step for step: delivered on-time tracks
+    the integral of the commanded level (a credit that carries across
+    windows -- nothing restarts on a new demand), a run ends once the credit
+    is period*d*(1-d) in debt so a steady duty gives one cycle per period,
+    and minimum on/off times bound relay wear. Seconds."""
+
+    def __init__(self, period=900.0, min_on=30.0, min_off=30.0):
+        self.P = period; self.min_on = min_on; self.min_off = min_off
+        self.on = False; self.credit = 0.0; self.held = 1e9; self.closures = 0
+
+    def step(self, level, dt):
+        level = clampf(float(level), 0.0, 1.0)
+        self.credit = clampf(self.credit + level * dt - (dt if self.on else 0.0), -self.P, self.P)
+        self.held += dt
+        if self.on:
+            band = self.P * level * (1.0 - level)
+            if (level <= 0.0 or (level < 1.0 and self.credit <= -band)) and self.held >= self.min_on:
+                self.on = False; self.held = 0.0
+        elif (level >= 1.0 or (level > 0.0 and self.credit >= 0.0)) and self.held >= self.min_off:
+            self.on = True; self.held = 0.0; self.closures += 1
+        return 1.0 if self.on else 0.0
+
+
 # --- plants ------------------------------------------------------------------
 EVAP_FH = {COVER_OPEN: -0.21, COVER_LID: -0.08, COVER_EVAP: -0.03, COVER_UNKNOWN: -0.08}
 PUMP_FH = 0.05
@@ -688,17 +756,20 @@ PUMP_FH = 0.05
 
 def plant_for(kind, tau, cover=None, cabinet=None):
     """True tank. 75: 300 W into 226 kg (the 2026-09-29 and 10-07 full-power
-    steps, 1.9-2.1 degF/h), restart-on-edge slow_pwm. nano: 150 W into
-    ~51 kg, plain slow_pwm, cabinet."""
+    steps, 1.9-2.1 degF/h). nano: 150 W into ~51 kg, cabinet. Both drive
+    their relays through time_proportioning (window='tp'); simulate() takes
+    window='restart' for the 75's board before this fix (slow_pwm, window
+    restarted on every 0 -> >0 edge of the demand) and window='free' for
+    plain slow_pwm (the nano's board before this fix)."""
     if kind == '75':
         cover = COVER_OPEN if cover is None else cover
         return dict(tau=tau, kh=300 / (226 * CP_WATER) * 60, kf=2.0 / CMIN_TO_FH, kl=0.25 / CMIN_TO_FH,
                     c0=(EVAP_FH[cover] + PUMP_FH) / CMIN_TO_FH, setpoint_f=77.0, offset_b=0.15,
-                    edge_restart=True, cabinet=None, cover=cover)
+                    window='tp', cabinet=None, cover=cover)
     cover = COVER_LID if cover is None else cover
     return dict(tau=tau, kh=150 / (51 * CP_WATER) * 60, kf=3.0 / CMIN_TO_FH, kl=0.6 / CMIN_TO_FH,
                 c0=(EVAP_FH[cover] + PUMP_FH) / CMIN_TO_FH, setpoint_f=74.5, offset_b=0.3,
-                edge_restart=False, cabinet=cabinet, cover=cover)
+                window='tp', cabinet=cabinet, cover=cover)
 
 
 PHYS_75 = (75.0, 62.0, 300.0, COVER_OPEN, PLACE_ROOM)
@@ -749,7 +820,7 @@ def real_room_f(tmin):
 
 
 def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_probe=False,
-             sp_changes=(), room='real', room_step_day=None, start_day_metrics=2.0, events=()):
+             sp_changes=(), room='real', room_step_day=None, start_day_metrics=2.0, events=(), window=None):
     rng = random.Random(seed)
     T = C(plant['setpoint_f'])
     cab = None
@@ -767,6 +838,9 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
     tau = plant['tau']
     c0 = plant['c0']
     h_eff = 0.0         # heat actually reaching the water near the probes: 1 min lag behind the relay
+    window = window or plant['window']
+    tp_h, tp_f = TimeProp(), TimeProp()
+    act = dict(cmd=0.0, on=0.0, n=0, closures=0, edges=0, last_on=0.0, over=[], sp=[])
     for k in range(nticks):
         now = (k + 1) * tick_ms
         tmin = now / 60000.0
@@ -792,21 +866,33 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
         if cab is None:
             cab = room_c + (C(32 + 2.0) - C(32) if plant['cabinet'] else 0.0)
         light = 1.0 if 540 <= mod < 960 else 0.0
-        # the board's heater_output: restart both windows on a 0 -> >0 edge
         hd = float(ctrl.heater)
         ts0 = (now - tick_ms) / 1000.0
-        if plant['edge_restart'] and prev_hd <= 0.0 < hd:
+        # 'restart': the 75's heater_output before this fix -- slow_pwm with
+        # restart_cycle() on every 0 -> >0 edge of the demand
+        if window == 'restart' and prev_hd <= 0.0 < hd:
             hp_start = ts0
+        if day >= start_day_metrics and prev_hd <= 0.0 < hd:
+            act['edges'] += 1
         prev_hd = hd
         h_on_s = f_on_s = 0.0
         for s in range(6):
             ts = ts0 + s * 5
-            while ts - hp_start >= 900:
-                hp_start += 900
-            while ts - fp_start >= 900:
-                fp_start += 900
-            h_on = 1.0 if hd * 900 > ts - hp_start else 0.0
-            f_on = 1.0 if float(ctrl.fan) * 900 > ts - fp_start else 0.0
+            if window == 'tp':
+                h_on = tp_h.step(hd, 5.0)
+                f_on = tp_f.step(float(ctrl.fan), 5.0)
+            else:
+                while ts - hp_start >= 900:
+                    hp_start += 900
+                while ts - fp_start >= 900:
+                    fp_start += 900
+                h_on = 1.0 if hd * 900 > ts - hp_start else 0.0
+                f_on = 1.0 if float(ctrl.fan) * 900 > ts - fp_start else 0.0
+            if day >= start_day_metrics:
+                act['cmd'] += hd * 5; act['on'] += h_on * 5; act['n'] += 5
+                if h_on > act['last_on']:
+                    act['closures'] += 1
+            act['last_on'] = h_on
             h_on_s += 5 * h_on; f_on_s += 5 * f_on
             if plant['cabinet']:
                 # cabinet air: small heat capacity between tank and room.
@@ -843,6 +929,9 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
             rec['T'].append((day, F(T) - F(sp))); rec['heater'].append(h_on_s / 30.0)
             rec['at_bound'].append(ctrl.at_bound()[2])
             rec['c'].append(float(ctrl.theta[4])); rec['kh'].append(float(ctrl.theta[0]))
+        if day >= start_day_metrics:
+            act['over'].append(F(T) - F(sp))
+    rec['act'] = act
     return ctrl, rec
 
 
@@ -913,6 +1002,54 @@ def print_bands():
                 print(f"  {name:30s} {cn:15s} {pn:8s} tau {1 / p['ka_max']:5.0f}-{1 / p['ka_min']:5.0f} min,"
                       f" prior {1 / p['ka_prior']:5.0f}  (UA {p['ua_lo']:.1f}-{p['ua_hi']:.1f} W/K)"
                       f"  kh {p['kh'] * CMIN_TO_FH:.2f} degF/h")
+
+
+# --- the relay drive: window logic before and after -------------------------
+def actuators(days):
+    """Delivered vs commanded heater duty, relay wear and control quality for
+    the window logic the boards ran before this fix and time_proportioning
+    after it, with and without the debounce. Each case runs at four
+    setpoints a fraction of a DS18B20 step apart, because where the setpoint
+    falls on the probe's 0.1125 degF grid decides how often a one-step flip
+    crosses a threshold: ratio, RMS and closures are means over the four,
+    overshoot the worst."""
+    print("Relay drive (after day 2; setpoint +0/+0.03/+0.06/+0.09 degF): commanded vs delivered heater, relay, control")
+    print("  tank / window / debounce                  cmd%   deliv%  deliv/cmd  closures/d  demand 0->on/d"
+          "  ctrlRMS  overshoot  hMin%  kh_end")
+    print("                                                                                                   "
+          "degF     max degF          degF/h")
+    cases = [("restart", False, "before (ca952fb)"), ("restart", True, "restart + debounce"),
+             ("free", False, "free-running slow_pwm"), ("tp", False, "time_proportioning"),
+             ("tp", True, "after (this fix)")]
+    out = {}
+    for kind, tau, amb in (("75", 800, True), ("75", 800, False), ("nano", 900, False)):
+        cab = dict(ua_ratio=1.5, cap_ratio=0.05) if kind == 'nano' else None
+        phys = PHYS_75 if kind == '75' else PHYS_NANO
+        for window, deb, lab in cases:
+            if kind == 'nano' and window == 'restart':
+                continue
+            if kind == 'nano' and window == 'free' and not deb:
+                lab = "before (ca952fb)"
+            res = []
+            for off in (0.0, 0.03, 0.06, 0.09):
+                p = plant_for(kind, tau, cabinet=cab)
+                p['setpoint_f'] += off
+                ctrl = Controller('new', p['setpoint_f'], phys=phys, ambient=amb, cross=kind == '75', debounce=deb)
+                _, rec = simulate(ctrl, p, days, ambient_probe=amb, window=window)
+                a = rec['act']
+                sm = summarize(rec, days)
+                per_day = days - 2.0
+                res.append((100 * a['cmd'] / a['n'], 100 * a['on'] / a['n'], a['closures'] / per_day,
+                            a['edges'] / per_day, sm['ctrl_rms'], max(a['over']), sm['health_min'], sm['kh_end']))
+            mean = lambda i: sum(r[i] for r in res) / len(res)
+            cmd, on = mean(0), mean(1)
+            r = dict(cmd=cmd, on=on, ratio=on / cmd, closures=mean(2), edges=mean(3), rms=mean(4),
+                     over=max(x[5] for x in res), hmin=min(x[6] for x in res), kh=mean(7))
+            out[(kind, amb, window, deb)] = r
+            name = f"{kind}{'+zig' if amb else ''} {lab}"
+            print(f"  {name:40s} {cmd:5.1f}  {on:6.1f}  {r['ratio']:8.2f}  {r['closures']:10.1f}  {r['edges']:14.1f}"
+                  f"  {r['rms']:7.3f}  {r['over']:+9.3f}  {r['hmin']:5.0f}  {r['kh']:6.2f}")
+    return out
 
 
 # --- measurement from the real history ------------------------------------
@@ -1041,6 +1178,7 @@ def main():
     ap.add_argument('--days', type=float, default=14.0)
     ap.add_argument('--measure', action='store_true')
     ap.add_argument('--replay', action='store_true')
+    ap.add_argument('--relay', action='store_true', help='only the relay-drive before/after table')
     a = ap.parse_args()
     if a.measure:
         measure()
@@ -1049,6 +1187,9 @@ def main():
         replay()
         return
     days = 6.0 if a.quick else a.days
+    if a.relay:
+        actuators(days)
+        return
     selftest()
     print_bands()
     print(HEADER)
@@ -1114,6 +1255,7 @@ def main():
     p = plant_for("75", 800)
     _, rec = simulate(Controller('new', 77.0, phys=PHYS_75), p, days, sp_changes=((3.0, 79.0), (4.5, 77.0)))
     row("75 tau=800 NEW sp 77/79/77", summarize(rec, days, true_tau=800))
+    actuators(days)
     replay()
 
 

@@ -30,35 +30,36 @@ one_wire:
 # Heater and fan, driven through a CZH-Labs D-1584TL 2-channel relay
 # outlet module (optocoupled inputs, active high -- no `inverted:` needed).
 #
-# Time-proportional rather than on/off: over each 15 minute window the
-# heater is on for `duty` of the window. This is what removes the 3 degF
+# Time-proportional rather than on/off: at a steady duty the heater is on
+# for `duty` of every 15 minutes. This is what removes the 3 degF
 # hysteresis swing -- the heater delivers 30% power instead of slamming
-# between 0% and 100%.
+# between 0% and 100%. components/time_proportioning, not slow_pwm: its
+# on-time is the commanded duty times elapsed time however the duty moves
+# (slow_pwm's depends on where in its window the duty changed), so Heater
+# Output is what the heater actually delivered.
 #
 # 15 min rather than 5 is set by relay wear, not by control quality: these
 # are mechanical contacts, and 5 min windows would burn ~288 cycles/day.
 # Swap in an SSR and this can drop back to 300s.
 # ---------------------------------------------------------------
 output:
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: heater_output
     # GPIO2/GPIO3 are adjacent on the 5-4-3-2-1-0 header, so both relay
     # wires land side by side. Neither is reserved for anything.
     pin: GPIO2
     period: 900s
-    restart_cycle_on_state_change: false
     state_change_action:
       - binary_sensor.template.publish:
           id: heater_relay
           state: !lambda "return state;"
 
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: fan_output
     # Not GPIO10 (not broken out) and not GPIO12/13 (USB-Serial-JTAG --
     # claiming those costs USB logging and USB flashing).
     pin: GPIO3
     period: 900s
-    restart_cycle_on_state_change: false
     state_change_action:
       - binary_sensor.template.publish:
           id: fan_relay

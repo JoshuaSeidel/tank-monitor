@@ -163,21 +163,19 @@ one_wire:
 # why the window is 900s rather than 300s -- it is mechanical relay wear,
 # not control quality.
 output:
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: heater_output
     pin: GPIO8
     period: 900s
-    restart_cycle_on_state_change: false
     state_change_action:
       - binary_sensor.template.publish:
           id: heater_relay
           state: !lambda "return state;"
 
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: fan_output
     pin: GPIO9
     period: 900s
-    restart_cycle_on_state_change: false
     state_change_action:
       - binary_sensor.template.publish:
           id: fan_relay

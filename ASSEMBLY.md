@@ -452,8 +452,8 @@ follows the Wi-Fi association, so a marginal link degrades the panel and
 MQTT together. The control loop itself is unaffected — it runs on-device
 and keeps regulating with the network down. Brownout *reboots* are the
 real cost: the model, light profile and setpoint all persist, but each
-reboot restarts the 900 s heater window mid-cycle and blanks the hourly
-swing history for ten minutes.
+reboot drops the heater's carried on-time credit (a few minutes at most)
+and blanks the hourly swing history for ten minutes.
 
 So: fit the caps always, and check RSSI once the board is where the tank
 is. Below about −70 dBm, do the wire mod — a 5 mm loop at the bottom of a

@@ -256,16 +256,18 @@ number:
       - component.update: cal_temp_offset_b_num
 
 output:
-  # Time-proportional over a 15 minute window. These are mechanical relay
-  # contacts: a shorter window would give finer control at the cost of
-  # burning through switching cycles. Pinned full-on or full-off costs
-  # nothing, so the wear only happens at partial duty.
+  # Time-proportional over a 15 minute period (components/time_proportioning;
+  # see boards/lafvin-esp32c6.yaml for why not slow_pwm). These are
+  # mechanical relay contacts: a shorter period would give finer control at
+  # the cost of burning through switching cycles. Pinned full-on or full-off
+  # costs nothing, so the wear only happens at partial duty.
   #
   # BUG FIX 2026-09-11: these two outputs were missing state_change_action,
   # and this board is the live controller. packages/control.yaml DEFINES
   # heater_relay and fan_relay but deliberately does not publish them -- its
-  # own comment says they are "published from slow_pwm's state_change_action
-  # in the board file". It seeds both false in on_boot and then waits.
+  # own comment says they are "published from the relay output's
+  # state_change_action in the board file". It seeds both false in on_boot
+  # and then waits.
   #
   # So the "Heater" and "Fan" entities read off permanently: the tank
   # regulated correctly the whole time while Home Assistant showed a heater
@@ -278,7 +280,7 @@ output:
   #
   # Purely additive: nothing about the switching, the duty or the control
   # loop changes. Two entities that were frozen start telling the truth.
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: heater_output
     # Silkscreen D8.
     pin: GPIO7
@@ -288,7 +290,7 @@ output:
           id: heater_relay
           state: !lambda "return state;"
 
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: fan_output
     # Silkscreen D9.
     pin: GPIO8

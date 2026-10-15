@@ -3,7 +3,8 @@
 #
 # Pin-free on purpose. It refers to ids the board package must provide:
 #   water_temp (sensor)  tank_lux (sensor)
-#   heater_output, fan_output (slow_pwm outputs)
+#   heater_output, fan_output (float outputs; every board drives its relays
+#     through components/time_proportioning)
 external_components:
   # Pulled from git so this builds in the Home Assistant ESPHome add-on
   # with no local files. refresh: 0s because the ref is a moving branch --
@@ -12,7 +13,9 @@ external_components:
       type: git
       url: https://github.com/JoshuaSeidel/tank-monitor
       ref: main
-    components: [tank_controller]
+    # time_proportioning is the relay drive the board files use for
+    # heater_output and fan_output; listed here so every controller has it.
+    components: [tank_controller, time_proportioning]
     refresh: 0s
 
 tank_controller:
@@ -54,11 +57,12 @@ tank_controller:
   # sit 1.8 degF apart -- tighten only after both are offset-calibrated
   # in the same cup.
   disagreement_band: 2.0
-  # The relays as switched, from slow_pwm's state_change_action in every
-  # board file (see heater_relay / fan_relay below). The model learns from
-  # how long the contacts were actually closed, not from the duty it asked
-  # for: on the 75 the two differ by 1.7x, because its board restarts the
-  # 900 s window on each new call for heat.
+  # The relays as switched, from the relay outputs' state_change_action in
+  # every board file (see heater_relay / fan_relay below). The model learns
+  # from how long the contacts were actually closed, not from the duty it
+  # asked for. On the 75 the two differed by 1.7x while its board restarted
+  # the 900 s slow_pwm window on each new call for heat; time_proportioning
+  # makes them agree, and the model keeps learning from the measurement.
   heater_relay: heater_relay
   fan_relay: fan_relay
   # The tank's physics (tank_volume, water_volume, heater_power, tank_cover,
@@ -274,8 +278,8 @@ button:
 
 # Both relay sensors publish only on a transition, so without this they sit
 # at "unknown" from boot until the first time that relay closes -- which for
-# the fan could be never. Seed them off at startup; slow_pwm's own state at
-# boot is off, so this is the truth, not an assumption.
+# the fan could be never. Seed them off at startup; time_proportioning's own
+# state at boot is off, so this is the truth, not an assumption.
 #
 # List form, not a bare mapping, on purpose: ESPHome merges package lists by
 # concatenation and mappings by key, so a board file that adds its own
@@ -295,15 +299,17 @@ esphome:
 
 binary_sensor:
   # The relays themselves. Controller State says what the controller is
-  # DRIVING this window; these say whether the contacts are closed right
-  # now. They differ on purpose: holding a tank at temperature means
-  # delivering a fraction of full power, and the only way a switch can do
-  # that is by being closed part of the time. At 14% duty on a 15 minute
-  # window that is roughly 2 minutes closed and 13 open, all while
-  # Controller State reads "heating" -- because it is.
+  # DRIVING; these say whether the contacts are closed right now. They
+  # differ on purpose: holding a tank at temperature means delivering a
+  # fraction of full power, and the only way a switch can do that is by
+  # being closed part of the time. At 14% duty on a 15 minute period that
+  # is roughly 2 minutes closed and 13 open, all while Controller State
+  # reads "heating" -- because it is.
   #
-  # Published from slow_pwm's state_change_action in the board file, so
-  # this is the actual switching, not an inference from duty.
+  # Published from the relay output's state_change_action in the board
+  # file, so this is the actual switching, not an inference from duty.
+  # Averaged over an hour or more, the time this is on equals Heater Output
+  # averaged over the same span (components/time_proportioning).
   - platform: template
     trigger_on_initial_state: true
     id: heater_relay
@@ -456,8 +462,11 @@ sensor:
     id: heater_duty
     unit_of_measurement: "%"
     # Commanded duty, not relay state -- the binary Heater above is the
-    # contacts. Diagnostic: useful in Grafana and when working out why the
-    # controller did something, not something to watch day to day.
+    # contacts. time_proportioning delivers exactly this on average: over
+    # any span of an hour or more, the share of time Heater is on matches
+    # the mean of this to within a few minutes of on-time. Diagnostic:
+    # useful in Grafana and when working out why the controller did
+    # something, not something to watch day to day.
     entity_category: diagnostic
     icon: "mdi:radiator"
     state_class: measurement

@@ -77,7 +77,8 @@ globals:
     restore_value: true
     initial_value: '0'
   # Demand, not contact position: the controller drives the relays through
-  # slow_pwm and only that component knows when the contacts actually move.
+  # time_proportioning and only that component knows when the contacts
+  # actually move.
   # At 14% duty the contacts are open for 13 of every 15 minutes, and a
   # panel mirroring that would read as chaos.
   - id: r_heat_on

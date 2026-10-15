@@ -473,9 +473,11 @@ sensor:
       - filter_out: nan
 
 binary_sensor:
-  # Per-element contact state. control.yaml's "Heater" is the pair; these
-  # are the individual relays, and seeing them out of lockstep means a relay
-  # is not following its drive.
+  # Per-element drive state. control.yaml's "Heater" is the pair; these are
+  # the individual relays' drive pins. One time_proportioning switches both
+  # (relay B follows A in the same instant), so they always agree -- a
+  # relay that is not following its drive shows as Gradient While Heating,
+  # not here.
   - platform: template
     trigger_on_initial_state: true
     id: heater_a_relay
@@ -559,60 +561,63 @@ binary_sensor:
 # The two relays stay separate rather than being ganged onto one GPIO: it
 # costs a pin this board has spare, and it keeps the ability to cut one
 # element independently if a relay welds or an element fails.
+#
+# One time_proportioning drives both relays: relay B follows relay A in
+# the same instant (state_change_action below), so the two elements are
+# energised over exactly the same seconds -- the lockstep two slow_pwm
+# outputs used to get by starting together and never being restarted apart.
+#
+# Why not slow_pwm (see components/time_proportioning): this board used to
+# restart both windows on every new call for heat, so a demand arriving
+# mid-window closed the relays at once instead of waiting up to fifteen
+# minutes. Each restart granted a fresh duty*900 s, and with the demand
+# toggling ~49% / 0 as the probe flipped one step the relays were closed
+# 1.7x the commanded duty (the 75, 17 days of history): Heater Output
+# understated the heat by that much and the tank overshot. Here the relays
+# close the moment heat is called for unless heat is owed back, and
+# delivered on-time is the commanded duty times elapsed time.
 output:
-  - platform: slow_pwm
-    id: heater_a_pwm
+  - platform: time_proportioning
+    id: heater_pwm
     pin: GPIO7        # D8
     period: 900s
-    # False is already the ESPHome default (verified in slow_pwm/output.py,
-    # 2026.8.2) -- stated explicitly because it matters more here than
-    # anywhere else in this repo: it keeps the two windows PHASE-LOCKED. They start together at boot and
-    # are always written in the same lambda below, so equal duty means both
-    # elements are energised over the same part of each window. Letting the
-    # cycles restart independently would drift them apart and, at partial
-    # duty, alternate the halves -- reintroducing precisely the side-to-side
-    # asymmetry this design exists to avoid.
-    restart_cycle_on_state_change: false
     # packages/control.yaml defines heater_relay and fan_relay but does NOT
     # publish them -- its comment says outright they are "published from
-    # slow_pwm's state_change_action in the board file". Without these the
-    # entities sit at the false seeded on_boot forever, and Home Assistant
-    # shows a heater that never runs while the tank regulates perfectly.
+    # the relay output's state_change_action in the board file". Without
+    # these the entities sit at the false seeded on_boot forever, and Home
+    # Assistant shows a heater that never runs while the tank regulates
+    # perfectly.
     state_change_action:
-      - lambda: id(heater_a_closed) = state;
+      - lambda: |-
+          if (state)
+            id(heater_b_gpio).turn_on();
+          else
+            id(heater_b_gpio).turn_off();
       - binary_sensor.template.publish:
           id: heater_relay
-          # OR, not AND: this entity answers "is heat being delivered". A
-          # failed element is not its job -- Gradient While Heating covers
-          # that, and the per-side sensors below show the pair in lockstep.
-          state: !lambda "return id(heater_a_closed) || id(heater_b_closed);"
+          state: !lambda "return state;"
+      # Per side: what each relay's drive pin was just set to.
       - binary_sensor.template.publish:
           id: heater_a_relay
           state: !lambda "return state;"
-
-  - platform: slow_pwm
-    id: heater_b_pwm
-    pin: GPIO5        # D4
-    period: 900s
-    restart_cycle_on_state_change: false
-    state_change_action:
-      - lambda: id(heater_b_closed) = state;
-      - binary_sensor.template.publish:
-          id: heater_relay
-          state: !lambda "return id(heater_a_closed) || id(heater_b_closed);"
       - binary_sensor.template.publish:
           id: heater_b_relay
           state: !lambda "return state;"
+
+  # Relay B's drive pin. Its own GPIO so one element can be cut on its own
+  # if a relay welds or an element fails; switched only by heater_pwm.
+  - platform: gpio
+    id: heater_b_gpio
+    pin: GPIO5        # D4
 
   # NOT inverted. The D-1585TL relay outlet module is active-high -- apply
   # voltage to the control terminal and the relay closes. The cheap bare
   # boards are active-low; this is not one of those, and `inverted: true`
   # here would run every duty cycle exactly backwards.
-  - platform: slow_pwm
+  - platform: time_proportioning
     id: fan_output
     pin: GPIO8        # D9
     period: 900s
-    restart_cycle_on_state_change: false
     state_change_action:
       - binary_sensor.template.publish:
           id: fan_relay
@@ -624,24 +629,10 @@ output:
     write_action:
       - lambda: |-
           const float d = clamp(state, 0.0f, 1.0f);
-          // From nothing to something -- Filling released, or a call for
-          // heat after coasting -- closes the relays NOW. slow_pwm decides
-          // at the start of each 900 s window whether the contacts close,
-          // so a demand that arrives mid-window would otherwise wait out
-          // the rest of it: up to fifteen minutes of "heating" with both
-          // relays open. Only this edge restarts the window. A duty that
-          // merely changes mid-window keeps its place in it, because
-          // restarting on every 30 s adjustment would hold the contacts
-          // closed for as long as the duty kept creeping up.
-          if (id(heater_demand) <= 0.0f && d > 0.0f) {
-            id(heater_a_pwm).restart_cycle();
-            id(heater_b_pwm).restart_cycle();
-          }
+          // Recorded for the gradient metrics below, which bin heating
+          // from idle on the demand.
           id(heater_demand) = d;
-          // Same duty, same instant, both halves of the tank. If these ever
-          // diverge in effect, the gradient sensors above are what tell you.
-          id(heater_a_pwm).set_level(d);
-          id(heater_b_pwm).set_level(d);
+          id(heater_pwm).set_level(d);
 
 interval:
   # Gradient accumulation. 30s matches the probes' publish cadence; k=0.01
@@ -759,16 +750,6 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
-
-  # Live contact state, so either relay's action can publish the pair's OR.
-  - id: heater_a_closed
-    type: bool
-    restore_value: false
-    initial_value: 'false'
-  - id: heater_b_closed
-    type: bool
-    restore_value: false
-    initial_value: 'false'
 
   - id: cal_temp_offset_b_c
     type: float

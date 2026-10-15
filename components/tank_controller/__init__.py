@@ -161,7 +161,7 @@ CONFIG_SCHEMA = cv.All(
             # time constant, and a room sensor that does not measure it).
             cv.Optional(CONF_TANK_PLACEMENT, default="open_room"): cv.enum(TANK_PLACEMENTS, lower=True),
             # The relays as switched (binary sensors published from the
-            # slow_pwm outputs). When given the model learns from delivered
+            # time_proportioning outputs). When given the model learns from delivered
             # on-time, not commanded duty. control.yaml wires both.
             cv.Optional(CONF_HEATER_RELAY): cv.use_id(binary_sensor.BinarySensor),
             cv.Optional(CONF_FAN_RELAY): cv.use_id(binary_sensor.BinarySensor),

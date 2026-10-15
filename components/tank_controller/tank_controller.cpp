@@ -130,8 +130,9 @@ static const float INFO_MIN = 5e-5f;
 //
 // 0.3 -> 0.5 on 2026-09-14. The 0.3 was sized against an overshoot that
 // happened when a flat clamp let the integral outvote the measurement;
-// since then the sign guard forbids heat above setpoint+0.1 F and the
-// clearing below zeroes any positive integral the moment it does, so the
+// since then the sign guard forbids heat above setpoint (latched about
+// +0.1 F; see GUARD_ENGAGE) and the clearing below zeroes any positive
+// integral while it does, so the
 // integral cannot carry heat through setpoint any more and the overshoot
 // that 0.3 guarded against is bounded by those instead (~0.2 F). What 0.3
 // could NOT do was hold a steady load the model has not learned yet: the
@@ -151,6 +152,35 @@ static const float INTEGRAL_AUTHORITY = 0.5f;
 // or a screen.
 static const float GUARD_DEADBAND_F = 0.1f;
 static const float GUARD_DEADBAND = GUARD_DEADBAND_F * 5.0f / 9.0f;
+
+// One probe step cannot toggle the demand.
+//
+// A DS18B20 reads in steps of 0.0625 degC (0.1125 degF). Water sitting near
+// a step boundary reads one value, then the next, then back -- and any
+// threshold between the two is crossed on every flip. Near setpoint that
+// is every rule here: the sign guard at 0.1 degF, the fan deadband, and the
+// proportional term, where one step is error/response_time, 17% heater
+// duty on the 75. The 75's history is full of it: the demand toggling
+// ~49% / 0 as the probe flipped, each new call for heat restarting the
+// relay window, the relays closed 1.7x the commanded duty (see
+// components/time_proportioning).
+//
+// So every decision gets a width of 1.5 steps, wider than one flip:
+//   * the sign guard and the fan deadband are latches, centred on their
+//     old thresholds (the fan's keeps its entry point, so it does not run
+//     later than it did), that only release a full DEBOUNCE_W from where
+//     they engaged;
+//   * the proportional term sees the reading through a play (backlash)
+//     operator: it follows the probe, but only once the probe has moved
+//     more than DEBOUNCE_W/2 away from it, so a flip between two adjacent
+//     steps leaves it still. It lags a real move by at most 0.08 degF.
+// The integral keeps the raw reading: it averages a flipping probe, which
+// is what makes the tank settle between two steps rather than on one.
+// tools/thermal_model_sim.py --relay measures what each part buys.
+static const float DS18B20_LSB = 0.0625f;
+static const float DEBOUNCE_W = 1.5f * DS18B20_LSB;
+static const float GUARD_ENGAGE = GUARD_DEADBAND + 0.5f * DEBOUNCE_W;   // 0.18 degF
+static const float GUARD_RELEASE = GUARD_DEADBAND - 0.5f * DEBOUNCE_W;  // 0.02 degF
 
 // Readings outside this window are not temperatures, they are faults, and
 // they take the no-probe path (heater off after SENSOR_TIMEOUT_MS) rather
@@ -468,9 +498,9 @@ static const float KA_CENTRE_MIN = 720.0f;
 // ---------------------------------------------------------------------
 // Delivered, not commanded
 // ---------------------------------------------------------------------
-// The model learned kh against the duty it commanded. On the 75 that is
-// not what the heaters do: the board restarts the 900 s window on every
-// 0 -> >0 demand edge (so a call for heat closes the relays now), and with
+// The model learned kh against the duty it commanded. On the 75 that was
+// not what the heaters did: the board restarted the 900 s window on every
+// 0 -> >0 demand edge (so a call for heat closed the relays at once), and with
 // the loop toggling between ~49% and 0 as the probe flips one LSB, the
 // relays were closed 21.7% of the time against 12.7% commanded over 17
 // days -- 1.7x. kh came out 4.97 degF/h against the 1.98 that 300 W into
@@ -480,6 +510,14 @@ static const float KA_CENTRE_MIN = 720.0f;
 // timed from the relay's own state changes, and the 15 minute forecast uses
 // the last 15 minutes of the same. Boards whose relay entity has not
 // reported yet fall back to the commanded duty.
+//
+// The cause itself is gone: every board now drives its relays through
+// components/time_proportioning, whose delivered on-time equals the
+// commanded duty times elapsed time to within a few minutes over any span,
+// and the demand no longer toggles on a one-step probe flip ("One probe
+// step cannot toggle the demand"). Commanded and delivered should now
+// agree; learning from the contacts stays, because it is the measurement
+// and the commanded duty is only the intent.
 
 // ---------------------------------------------------------------------
 // Where the model is centred
@@ -1786,6 +1824,8 @@ void TankController::update() {
     this->reset_learn_window_();
     this->heat_stall_since_ms_ = 0;
     this->fan_stall_since_ms_ = 0;
+    // The debounce's memory is of readings that no longer connect to this one.
+    this->t_play_ = NAN;
     // This reading was accepted without a recent one to check it against.
     this->reanchor_ms_ = now;
   }
@@ -2000,9 +2040,16 @@ void TankController::update() {
 
   const float error = this->get_active_setpoint() - t;
 
+  // The proportional term's view of the water: the reading through a play
+  // operator DEBOUNCE_W wide. See "One probe step cannot toggle the demand".
+  if (std::isnan(this->t_play_))
+    this->t_play_ = t;
+  this->t_play_ = clampf(this->t_play_, t - 0.5f * DEBOUNCE_W, t + 0.5f * DEBOUNCE_W);
+  const float error_p = this->get_active_setpoint() - this->t_play_;
+
   // Aim to close the error over response_time_ minutes, capped so a big step
   // change doesn't demand a thermally impossible ramp.
-  float desired = clampf(error / this->response_time_, -0.15f, 0.15f);
+  float desired = clampf(error_p / this->response_time_, -0.15f, 0.15f);
 
   // Integral term: mops up whatever the model still gets wrong. Sized so a
   // 1 degC error saturates it in roughly one response time -- the old
@@ -2061,17 +2108,36 @@ void TankController::update() {
   // about the sign whatever the model does. The deadband leaves the
   // genuinely useful case -- pre-empting the lights near setpoint --
   // fully intact.
-  if (error < -GUARD_DEADBAND && heater > 0.0f) {
+  //
+  // Latched, not a single threshold: engaged GUARD_ENGAGE above (below)
+  // setpoint, released once the water is back within GUARD_RELEASE, so one
+  // probe step cannot switch the heater between 0 and its feedforward.
+  // The fan's deadband likewise: the fan may start at fan_deadband_ above
+  // setpoint, as before, and is stopped DEBOUNCE_W below that.
+  if (error < -GUARD_ENGAGE)
+    this->heat_blocked_ = true;
+  else if (error > -GUARD_RELEASE)
+    this->heat_blocked_ = false;
+  if (error > GUARD_ENGAGE)
+    this->cool_blocked_ = true;
+  else if (error < GUARD_RELEASE)
+    this->cool_blocked_ = false;
+  if (error < -this->fan_deadband_)
+    this->fan_banded_ = false;
+  else if (error > -(this->fan_deadband_ - DEBOUNCE_W))
+    this->fan_banded_ = true;
+
+  if (this->heat_blocked_ && heater > 0.0f) {
     ESP_LOGW(TAG, "Sign guard: model asked for %.0f%% heat at %.2f degF above setpoint", heater * 100.0f,
              -error * 9.0f / 5.0f);
     heater = 0.0f;
     this->state_text_ = "coasting (overruled)";
-  } else if (error > GUARD_DEADBAND && fan > 0.0f) {
+  } else if (this->cool_blocked_ && fan > 0.0f) {
     ESP_LOGW(TAG, "Sign guard: model asked for %.0f%% cooling at %.2f degF below setpoint", fan * 100.0f,
              error * 9.0f / 5.0f);
     fan = 0.0f;
     this->state_text_ = "coasting (overruled)";
-  } else if (fan > 0.0f && error > -this->fan_deadband_) {
+  } else if (fan > 0.0f && this->fan_banded_) {
     // Warm, but not by enough to be worth evaporating water over. Ordered
     // AFTER the sign guard on purpose: this branch is wide enough to
     // swallow the pathological below-setpoint case, and that one has to
@@ -2107,9 +2173,9 @@ void TankController::update() {
   // Gated on a fan existing. Without one the negative side is the only
   // thing that can trim an over-confident heater model, and clearing it
   // would hand a fan-less tank a permanent warm offset.
-  if (this->fan_available_ && error > -this->fan_deadband_ && this->integral_ < 0.0f)
+  if (this->fan_available_ && this->fan_banded_ && this->integral_ < 0.0f)
     this->integral_ = 0.0f;
-  if (error < -GUARD_DEADBAND && this->integral_ > 0.0f)
+  if (this->heat_blocked_ && this->integral_ > 0.0f)
     this->integral_ = 0.0f;
 
   if (settling && heater > REANCHOR_HEAT_CAP) {

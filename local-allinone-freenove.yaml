@@ -24,4 +24,4 @@ external_components:
   - source:
       type: local
       path: components
-    components: [tank_controller, ble_link_guard, crash_report]
+    components: [tank_controller, time_proportioning, ble_link_guard, crash_report]

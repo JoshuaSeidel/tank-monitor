@@ -20,10 +20,13 @@ and you get the 3 °F band you're seeing.
 Two things here fix that:
 
 1. **Time-proportional output.** Instead of on/off, the heater is switched on
-   for a fraction of each 15-minute window. 30% duty is 30% of full heater
-   power, so the tank can sit *at* the setpoint instead of oscillating around
-   it. (Set the heater's own thermostat dial to its maximum and let this
-   control it — the heater becomes a dumb resistor.)
+   for a fraction of the time — at a steady duty, that fraction of every 15
+   minutes. 30% duty is 30% of full heater power, so the tank can sit *at*
+   the setpoint instead of oscillating around it. The relay's on-time equals
+   the commanded duty times elapsed time however the duty moves (see
+   [The relay drive](#the-relay-drive)). (Set the heater's own thermostat
+   dial to its maximum and let this control it — the heater becomes a dumb
+   resistor.)
 
 2. **Feed-forward from a learned model.** The controller knows how fast your
    specific tank heats, cools, and gains heat from the lights, so it backs the
@@ -223,14 +226,15 @@ Two caveats:
   should latch fine, but there's little margin. If a channel chatters, drive
   the input from the ESP32's 5 V pin through a small NPN transistor instead of
   straight off the GPIO.
-- **These are mechanical relays**, which is why the window is 900 s and not
-  300 s. At 5-minute windows you'd spend ~288 contact cycles a day and wear
-  them out in about a year; at 15 minutes it's ~96/day, so several years. The
-  controller doesn't cycle at all when duty is pinned at 0% or 100%.
+- **These are mechanical relays**, which is why the period is 900 s and not
+  300 s. At 5-minute periods you'd spend ~288 contact cycles a day and wear
+  them out in about a year; at 15 minutes it's at most ~96/day, so several
+  years, and every run is at least 30 s. The controller doesn't cycle at all
+  when duty is pinned at 0% or 100%.
 
 **If you want the tighter ±0.2 °F band later:** move the heater to a
 zero-crossing SSR (SSR-25DA class, 3–32 VDC control, ~$12) in a project box,
-and set `heater_output`'s `period` back to `300s`. An SSR is silent, has no
+and set the heater relay output's `period` (in the board file) to `300s`. An SSR is silent, has no
 contacts, and cycles indefinitely — but it's real mains wiring, so only take
 that on if you're comfortable with it and feeding it from a GFCI outlet. You
 want the tank on a GFCI regardless.
@@ -642,11 +646,63 @@ room plus a 12-hour average of how far above it the water sits, so the room's
 hour on the 75 on 2026-10-14, with the room moving 0.2 °F.)
 
 The heater and fan terms learn from how long the relays were actually closed
-(`heater_relay` / `fan_relay`, wired in `control.yaml`), not from the duty the
-controller asked for. On the 75 those differ by 1.7× — its board restarts the
-15-minute PWM window on every new call for heat — and learning from commanded
-duty is what made its `Learned Heater Power` read 4.97 °F/h for heaters that
-can physically give 1.98.
+(`heater_relay` / `fan_relay`, wired in `control.yaml`), timed from the relay
+entities' own transitions over each 5-minute step, not from the duty the
+controller asked for. Until the relay drive below was fixed, on the 75 those
+differed by 1.7× — its board restarted the 15-minute PWM window on every new
+call for heat — and learning from commanded duty is what made its `Learned
+Heater Power` read 4.97 °F/h for heaters that can physically give 1.98. They
+now agree, and the model still learns from the measurement.
+
+### The relay drive
+
+Every controller board drives its heater and fan relays through
+`components/time_proportioning`, not ESPHome's `slow_pwm`. The rule: a credit
+accumulates commanded duty × elapsed time and pays out the time the relay is
+closed. The relay closes when no heat is owed back and opens once it is
+`period·d·(1−d)` in debt — one cycle per period at a steady duty `d`, closed
+`d·900 s` and open `(1−d)·900 s`, same as before, but nothing ever restarts,
+so **delivered on-time equals commanded duty × elapsed time** to within a few
+minutes over any span. A new call for heat closes the relay at once unless heat
+is owed back. `min_on_time` / `min_off_time` (default 30 s) floor each run for
+relay life; what they stretch is carried in the credit, not lost.
+
+Why: the 75's board restarted its 900 s `slow_pwm` window on every 0 → >0 edge
+of the demand (so a call for heat closed the relays now rather than at the next
+window), and near setpoint the demand toggled ~49% / 0 as the probe flipped one
+0.1125 °F step across the sign guard. Each restart granted a fresh duty × 900 s:
+over 17 days of Home Assistant history the relays were closed **21.7%** of the
+time against **12.7%** commanded. `Heater Output` understated the heat by 1.7×,
+the tank overshot, and learning from commanded duty learned a heater 1.7× too
+strong.
+
+The demand itself no longer toggles on a single probe step either. A DS18B20
+reads in 0.1125 °F steps, and water sitting at a step boundary flips between
+two of them; any threshold in between was crossed on every flip. So every
+decision now has 1.5 steps of width: the sign guard is a latch centred on its
+old 0.1 °F (heat forbidden from 0.18 °F above setpoint until back within
+0.02 °F), the fan may start at `Fan Deadband` as before but stops only 0.17 °F
+below it, and the proportional term sees the reading through a play operator
+that ignores a one-step flip (it lags a real move by at most 0.08 °F). The
+integral keeps the raw reading, which averages the flips.
+
+`tools/thermal_model_sim.py --relay` runs the window logic before and after
+(14 days, real office temperature, four setpoints a fraction of a probe step
+apart, means; overshoot is the worst):
+
+| Tank, drive | Commanded | Delivered | Delivered / commanded | Relay closures/day | Demand 0→on/day | Control RMS | Max overshoot | Model Health min |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 75 + room sensor, before (restart-on-demand `slow_pwm`) | 8.3% | 19.4% | 2.33× | 332 | 301 | 0.082 °F | +0.28 °F | 100% |
+| 75 + room sensor, after | 19.2% | 19.2% | 1.00× | 77 | 3 | 0.040 °F | +0.25 °F | 100% |
+| 75, before | 5.9% | 19.5% | 3.33× | 370 | 357 | 0.097 °F | +0.29 °F | 100% |
+| 75, after | 19.2% | 19.2% | 1.00× | 76 | 4 | 0.040 °F | +0.22 °F | 100% |
+| nano, before (free-running `slow_pwm`) | 1.2% | 1.7% | 1.41× | 47 | 146 | 0.136 °F | +0.35 °F | 100% |
+| nano, after | 1.8% | 1.8% | 1.00× | 38 | 3 | 0.102 °F | +0.33 °F | 100% |
+
+The simulated "before" overstates the real 1.7× (it depends on where the
+setpoint falls on the probe's step grid), but the mechanism is the same. After
+flashing, `Heater Output` averaged over an hour or more matches the share of
+that time the `Heater` entity is on.
 
 ### Tank size, heater, cover and placement
 
@@ -703,11 +759,12 @@ The nano is in a cabinet and has no room sensor, so it centres on its setpoint.
 
 `tools/thermal_model_sim.py` replays the model and control law, in float32,
 against a simulated tank (the 75's real office temperature from Home Assistant,
-slow-PWM heaters including the 75's restart-on-demand window, a minute of
-heater lag, two quantised probes, a Zigbee room sensor, lids going on, the nano
-in a cabinet) for the previous and current firmware, and replays 17 days of the
-75's real history (`tools/data/`) through the estimator. Run it after changing
-any of the model's constants.
+heaters through `time_proportioning` — or the old `slow_pwm` windows,
+including the 75's restart-on-demand one, for the before/after table — a minute
+of heater lag, two quantised probes, a Zigbee room sensor, lids going on, the
+nano in a cabinet) for the previous and current firmware, and replays 17 days
+of the 75's real history (`tools/data/`) through the estimator. Run it after
+changing any of the model's constants or the relay drive.
 
 **Learning runs on 5-minute windows, not every tick.** A DS18B20 quantizes to
 0.1125 °F; differentiating that every 30 s produces noise far larger than the
@@ -869,8 +926,11 @@ steady partial value, not flip between 0 and 100.
 
 Both are the controller reading back its own decision. There is no current
 sensing on either channel and nothing confirms the relay closed, or that
-anything is plugged into that outlet. `Fan Output: 100%` means "over the next
-900 seconds I intend to hold Ch2 closed the whole time", nothing more. They
+anything is plugged into that outlet. `Fan Output: 100%` means "I intend to
+hold Ch2 closed", nothing more. (What they *do* now match is the drive: over
+an hour or more, the share of time the `Heater` / `Fan` entities are on equals
+the mean of these — see [The relay drive](#the-relay-drive). That says the
+relay was driven, not that heat arrived.) They
 are standard controller-output terms, but they carry a `%` and a
 `state_class: measurement`, so it is easy to read them as evidence.
 
