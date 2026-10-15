@@ -4,6 +4,7 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/preferences.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/output/float_output.h"
 #include <cstdio>
 
@@ -59,6 +60,30 @@ static const float LEGACY_TEMP_REF = 24.0f;
 static const uint8_t REF_SETPOINT = 0;
 static const uint8_t REF_AMBIENT = 1;
 
+// What is over the water. Chooses the top surface's heat-loss band; see
+// "What the tank's size says" in tank_controller.cpp. Values are persisted.
+static const uint8_t COVER_OPEN_TOP = 0;
+static const uint8_t COVER_LID = 1;
+static const uint8_t COVER_EVAPORATION = 2;
+static const uint8_t COVER_UNKNOWN = 3;
+static const uint8_t N_COVERS = 4;
+// What is around the tank. A closed stand puts a pocket of warm air between
+// the tank and the room.
+static const uint8_t PLACEMENT_ROOM = 0;
+static const uint8_t PLACEMENT_CABINET = 1;
+static const uint8_t N_PLACEMENTS = 2;
+
+// The tank's physical description, as Home Assistant last set it (or the
+// YAML defaults on the first boot that has none). Persisted on its own key,
+// so the thermal model's layout is unchanged.
+struct TankPhysics {
+  float tank_gal;   // nominal volume, US gal; 0 = not set (no physics)
+  float water_gal;  // actual water, US gal; 0 = FILL_DEFAULT of tank_gal
+  float heater_w;   // total heater power at 100% duty, W; 0 = unknown
+  uint8_t cover;
+  uint8_t placement;
+};
+
 struct ThermalModel {
   // theta[0] = kh   heater gain, degC/min at 100% duty        (>0)
   // theta[1] = -kf  fan gain, degC/min at 100% duty           (<0)
@@ -107,6 +132,12 @@ class TankController : public PollingComponent {
   // model's loss term is measured against it instead of the setpoint. See
   // "Where the model is centred" in tank_controller.cpp.
   void set_ambient_sensor(sensor::Sensor *s) { this->ambient_sensor_ = s; }
+  // The heater and fan relays as switched (slow_pwm's state_change_action).
+  // When given, the model learns from the fraction of each window the
+  // contacts were actually closed, not from the duty it asked for -- on the
+  // 75 the two differ by 1.7x; see "Delivered, not commanded".
+  void set_heater_relay(binary_sensor::BinarySensor *b) { this->heater_relay_ = b; }
+  void set_fan_relay(binary_sensor::BinarySensor *b) { this->fan_relay_ = b; }
   // How long one room reading stays good with no newer one, minutes.
   void set_ambient_timeout(float minutes) { this->ambient_timeout_ms_ = (uint32_t) (minutes * 60000.0f); }
   // Short name of the room source for logs and the Model Reference entity.
@@ -154,9 +185,37 @@ class TankController : public PollingComponent {
   void set_max_temperature(float v) { this->max_temp_ = v; }
   void set_full_scale_lux(float v) { this->full_scale_lux_ = v; }
   void set_response_time(float minutes) { this->response_time_ = minutes; }
-  // Ceiling on the learned passive time constant (1/ka), minutes. Sets the
-  // floor on ka; see THETA_MAX in tank_controller.cpp.
+  // Explicit ceiling on the learned passive time constant (1/ka), minutes.
+  // Overrides the physics band's ceiling when one is configured; without one
+  // it is the floor on ka as before (1000 min if never set).
   void set_max_time_constant(float minutes);
+
+  // --- The tank's physics ---------------------------------------------------
+  // YAML defaults, applied on the first boot that has nothing persisted.
+  void set_physics_default(float tank_gal, float water_gal, float heater_w, uint8_t cover, uint8_t placement) {
+    this->physics_ = {tank_gal, water_gal, heater_w, cover, placement};
+  }
+  // Runtime setters (Home Assistant). Each persists, recomputes the band,
+  // resets the parameters it determines to their new physics prior with the
+  // covariance re-opened, and re-expresses c so the forecast does not step.
+  void set_tank_volume(float gal);
+  void set_water_volume(float gal);
+  void set_heater_power(float watts);
+  void set_tank_cover(uint8_t cover);
+  void set_tank_placement(uint8_t placement);
+  float get_tank_volume() const { return this->physics_.tank_gal; }
+  float get_water_volume() const { return this->physics_.water_gal; }
+  float get_heater_power() const { return this->physics_.heater_w; }
+  uint8_t get_tank_cover() const { return this->physics_.cover; }
+  uint8_t get_tank_placement() const { return this->physics_.placement; }
+  static const char *cover_text(uint8_t c);
+  static const char *placement_text(uint8_t p);
+  static uint8_t cover_from_text(const std::string &s);
+  static uint8_t placement_from_text(const std::string &s);
+  // The physics prior for Tank Time Constant, minutes (NAN without physics),
+  // and the band it is allowed to move in, as text for Home Assistant.
+  float get_expected_time_constant() const;
+  const char *get_time_constant_band_text() const { return this->band_text_; }
   void set_learning_enabled(bool v) { this->learning_enabled_ = v; }
   bool get_learning_enabled() const { return this->learning_enabled_; }
   void set_fan_available(bool v) { this->fan_available_ = v; }
@@ -230,6 +289,14 @@ class TankController : public PollingComponent {
   float theta_prior_(uint8_t i) const;
   float p_prior_(uint8_t i) const;
   void set_ka_variance_(float target);
+  void compute_band_();
+  void apply_physics_(bool reset_ka, bool reset_kh, const char *why);
+  void reset_param_(uint8_t i, float t_now, float u_now);
+  void save_physics_();
+  void update_centre_(float dev_avg, float window_min);
+  uint64_t relay_on_ms_(bool heater, uint32_t now) const;
+  float recent_fraction_(bool heater) const;
+  float theta_min_(uint8_t i) const;
   void reset_learn_window_();
   float health_deadband_() const;
   float theta_max_(uint8_t i) const;
@@ -240,6 +307,8 @@ class TankController : public PollingComponent {
   sensor::Sensor *cross_sensor_{nullptr};
   sensor::Sensor *lux_sensor_{nullptr};
   sensor::Sensor *ambient_sensor_{nullptr};
+  binary_sensor::BinarySensor *heater_relay_{nullptr};
+  binary_sensor::BinarySensor *fan_relay_{nullptr};
   output::FloatOutput *heater_{nullptr};
   output::FloatOutput *fan_{nullptr};
 #ifdef USE_TIME
@@ -253,6 +322,7 @@ class TankController : public PollingComponent {
   ESPPreferenceObject setpoint_pref_;
   ESPPreferenceObject fan_deadband_pref_;
   ESPPreferenceObject disagree_band_pref_;
+  ESPPreferenceObject physics_pref_;
 
   float setpoint_{25.0f};
   // Overwritten from config before setup() and from flash during it; the
@@ -266,9 +336,47 @@ class TankController : public PollingComponent {
   float max_temp_{30.0f};
   float full_scale_lux_{2000.0f};
   float response_time_{20.0f};
-  // 1 / max_time_constant. 0.001 = 1000 min, the bound every board had
-  // before it became configurable.
+  // The explicit max_time_constant, minutes; NAN = not configured.
+  float max_tc_override_{NAN};
+  // The physics, and the band computed from it (compute_band_()). Without
+  // physics these are the legacy values: ka floor 1/1000 min (or the
+  // override), prior 15x the floor, legacy kh prior and bounds.
+  TankPhysics physics_{0.0f, 0.0f, 0.0f, COVER_UNKNOWN, PLACEMENT_ROOM};
+  bool physics_active_{false};
+  bool physics_pending_{false};
   float ka_min_{0.001f};
+  float ka_max_{0.2f};
+  float ka_prior_{0.015f};
+  float p_ka_{1e-4f};
+  float kh_prior_{0.030f};
+  float kh_min_{0.002f};
+  float kh_max_{0.300f};
+  float p_kh_{1e-3f};
+  float p_kl_{1e-5f};
+  char band_text_[48]{"not configured"};
+  // Ambient mode only: the slow offset of the water above the room that the
+  // loss term is centred on, so ka sees the room's movement, not its level.
+  // See "Only excitation moves ka".
+  float centre_off_{0.0f};
+  bool centre_init_{false};
+  // Delivered on-time bookkeeping, from the relay callbacks.
+  uint64_t heater_on_acc_ms_{0};
+  uint64_t fan_on_acc_ms_{0};
+  uint32_t heater_on_since_ms_{0};
+  uint32_t fan_on_since_ms_{0};
+  bool heater_on_{false};
+  bool fan_on_{false};
+  uint64_t anchor_heater_on_ms_{0};
+  uint64_t anchor_fan_on_ms_{0};
+  // The last 15 minutes of delivered on-time, per tick, for the forecast.
+  static const uint8_t N_RECENT = 30;
+  uint16_t recent_heater_ms_[N_RECENT]{};
+  uint16_t recent_fan_ms_[N_RECENT]{};
+  uint16_t recent_dt_ms_[N_RECENT]{};
+  uint8_t recent_idx_{0};
+  uint8_t recent_n_{0};
+  uint64_t last_heater_total_ms_{0};
+  uint64_t last_fan_total_ms_{0};
   bool learning_enabled_{true};
   bool fan_available_{true};
   bool hold_{false};

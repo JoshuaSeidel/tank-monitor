@@ -54,6 +54,17 @@ tank_controller:
   # sit 1.8 degF apart -- tighten only after both are offset-calibrated
   # in the same cup.
   disagreement_band: 2.0
+  # The relays as switched, from slow_pwm's state_change_action in every
+  # board file (see heater_relay / fan_relay below). The model learns from
+  # how long the contacts were actually closed, not from the duty it asked
+  # for: on the 75 the two differ by 1.7x, because its board restarts the
+  # 900 s window on each new call for heat.
+  heater_relay: heater_relay
+  fan_relay: fan_relay
+  # The tank's physics (tank_volume, water_volume, heater_power, tank_cover,
+  # tank_placement) is per tank, so each board file sets its own defaults.
+  # Unset, the entities below read 0 / Unknown and the model keeps its old
+  # priors until someone fills them in from Home Assistant.
   update_interval: 30s
 
 number:
@@ -140,6 +151,95 @@ number:
           id: controller
           disagreement_band: !lambda "return x * 5.0f / 9.0f;"
       - component.update: probe_disagreement_band
+
+  # The tank's physics, for the thermal model's priors and bounds. Same
+  # shape as Fan Deadband: the YAML value (board file) is the first-boot
+  # default, the controller persists what is set here, and each change
+  # resets the parameters it determines to their new physics prior and lets
+  # them relearn (logged). US gallons, watts.
+  - platform: template
+    name: "Tank Volume"
+    id: tank_volume_number
+    icon: "mdi:fishbowl-outline"
+    unit_of_measurement: "gal"
+    min_value: 0
+    max_value: 300
+    step: 1
+    mode: box
+    entity_category: config
+    lambda: "return id(controller).get_tank_volume();"
+    update_interval: 60s
+    set_action:
+      - lambda: "id(controller).set_tank_volume(x);"
+      - component.update: tank_volume_number
+
+  # 0 = 85% of Tank Volume (substrate and hardscape take the rest).
+  - platform: template
+    name: "Water Volume"
+    id: water_volume_number
+    icon: "mdi:water"
+    unit_of_measurement: "gal"
+    min_value: 0
+    max_value: 300
+    step: 0.5
+    mode: box
+    entity_category: config
+    lambda: "return id(controller).get_water_volume();"
+    update_interval: 60s
+    set_action:
+      - lambda: "id(controller).set_water_volume(x);"
+      - component.update: water_volume_number
+
+  # All heaters together at 100% duty. 0 = unknown: the heater gain is then
+  # learned from a generic prior rather than taken from the wattage.
+  - platform: template
+    name: "Heater Power"
+    id: heater_power_number
+    icon: "mdi:radiator"
+    unit_of_measurement: "W"
+    min_value: 0
+    max_value: 2000
+    step: 5
+    mode: box
+    entity_category: config
+    lambda: "return id(controller).get_heater_power();"
+    update_interval: 60s
+    set_action:
+      - lambda: "id(controller).set_heater_power(x);"
+      - component.update: heater_power_number
+
+select:
+  # What is over the water, and what is around the tank. Each sets the band
+  # the Tank Time Constant may move in; changing one resets it to the new
+  # expected value and relearns. Option text matches cover_text() /
+  # placement_text() in the component.
+  - platform: template
+    name: "Tank Cover"
+    id: tank_cover_select
+    icon: "mdi:dome-light"
+    entity_category: config
+    options: ["Open top", "Lid", "Lid + evaporation cover", "Unknown"]
+    lambda: |-
+      return {tank_controller::TankController::cover_text(id(controller).get_tank_cover())};
+    update_interval: 60s
+    set_action:
+      - lambda: |-
+          id(controller).set_tank_cover(tank_controller::TankController::cover_from_text(x));
+      - component.update: tank_cover_select
+
+  - platform: template
+    name: "Tank Placement"
+    id: tank_placement_select
+    icon: "mdi:table-furniture"
+    entity_category: config
+    options: ["Open room", "Enclosed cabinet"]
+    lambda: |-
+      return {tank_controller::TankController::placement_text(id(controller).get_tank_placement())};
+    update_interval: 60s
+    set_action:
+      - lambda: |-
+          id(controller).set_tank_placement(tank_controller::TankController::placement_from_text(x));
+      - component.update: tank_placement_select
 
 switch:
   - platform: template
@@ -272,6 +372,15 @@ binary_sensor:
     lambda: "return id(controller).is_probe_disagreement();"
 
 text_sensor:
+  # The band Tank Time Constant may move in, and where physics expects it,
+  # from Tank Volume / Water Volume / Tank Cover / Tank Placement.
+  - platform: template
+    name: "Time Constant Band"
+    icon: "mdi:timer-sand"
+    entity_category: diagnostic
+    update_interval: 300s
+    lambda: "return {id(controller).get_time_constant_band_text()};"
+
   - platform: template
     name: "Seed Status"
     id: seed_status
@@ -448,6 +557,20 @@ sensor:
     entity_category: diagnostic
     lambda: |-
       float v = id(controller).get_time_constant();
+      if (isnan(v)) return {};
+      return v;
+
+  # What physics expects Tank Time Constant to be for this tank: m*c over
+  # the geometric centre of the U*A band. Unavailable with no Tank Volume.
+  - platform: template
+    name: "Expected Time Constant"
+    unit_of_measurement: "min"
+    icon: "mdi:timer-sand-complete"
+    accuracy_decimals: 0
+    update_interval: 300s
+    entity_category: diagnostic
+    lambda: |-
+      float v = id(controller).get_expected_time_constant();
       if (isnan(v)) return {};
       return v;
 

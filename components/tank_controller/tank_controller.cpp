@@ -232,10 +232,10 @@ static const float FAN_DEADBAND_MAX = FAN_DEADBAND_MAX_F * 5.0f / 9.0f;
 // gain free to approach zero turns any cooling demand into a saturated
 // output. A fan that does nothing at all is not a fan.
 //
-// theta[2]'s upper bound (-ka closest to zero, i.e. the SLOWEST tank) is
-// the one entry in THETA_MAX that is not used as written: it is the board's
-// max_time_constant, held as ka_min_ (see theta_max_()). -0.001 here is
-// the 1000 min default sized for the ~10 gal nano.
+// theta[2] and theta[0] are not used as written: with tank physics ka's
+// band and kh's come from the tank (compute_band_(), "What the tank's size
+// says"); without it ka's floor is max_time_constant (1000 min default) and
+// the rest stand. theta_min_() / theta_max_() are the only readers.
 //
 // History, because it explains everything below: on 2026-10-12 the 75's
 // ka sat pinned on its bound for days with Model Bias +2.5..+3.0 degF/h and
@@ -275,13 +275,10 @@ static const float THETA_MAX[N_PARAMS] = {0.300f, -0.002f, -0.001f, 0.050f, 0.15
 // tank it is wrong by a couple of degF/h, and that no longer matters --
 // c now re-learns in hours (see Q), where it used to need months.
 //
-// theta[2] as written here is NOT used: ka's prior is fifteen times the
-// board's floor, ka_min_ = 1/max_time_constant (theta_prior_()). At the
-// 1000 min default that is exactly the -0.015 below (66.7 min) -- every
-// board that keeps the default starts where it always did -- and on the
-// 75's 6000 min it is 400 min instead of a nano's 67. A prior an order of
-// magnitude inside the physical ceiling, scaled by the same tank-size
-// judgement that set the ceiling.
+// theta[2] and theta[0] as written here are the no-physics priors only
+// (and theta[2] not even then: it is fifteen times the max_time_constant
+// floor, 66.7 min at the 1000 min default). With tank physics both come
+// from the tank; see theta_prior_().
 static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0.030f};
 
 // ---------------------------------------------------------------------
@@ -322,10 +319,14 @@ static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0
 //
 // Q on the other parameters: zero for kh, kf and kl -- a heater's wattage
 // does not drift, and when one fails the stale-model re-inflation below is
-// the mechanism for that step change. A small Q on ka so its variance
-// creeps back up between informative stretches: 1e-7 per step at the
-// setpoint (excursions are rare; to the P_PRIOR*10 cap in ~2 months), 1e-6
-// with an ambient probe (every day is informative there).
+// the mechanism for that step change. And zero for ka (2026-10-14): ka is a
+// property of the glass, the lid and the room around it, which do not drift
+// either -- they change in steps (lids go on), and a step is announced by
+// the Tank Cover / Tank Placement entities, which reset ka on purpose (see
+// apply_physics_()). 201f2c8 gave ka a random walk (1e-7/1e-6 per step) and
+// a 1e-2 variance with a room sensor; on the 75's quiet afternoon of
+// 2026-10-14 that walked Tank Time Constant 400 -> 6000 in an hour while
+// the room moved 0.2 degF. See "Only excitation moves ka".
 //
 // How this sits with the anti-windup: Q inflates only the parameters it is
 // given, and c is excited on every step by construction (its regressor is
@@ -336,8 +337,6 @@ static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0
 // call every step informative.
 static const float C_TRACK_STEPS = 24.0f;  // 2 h
 static const float Q_C = 1.0f / (C_TRACK_STEPS * (C_TRACK_STEPS - 1.0f));
-static const float Q_KA_SETPOINT = 1e-7f;
-static const float Q_KA_AMBIENT = 1e-6f;
 
 // Prior covariance -- how wrong we think the prior is, per parameter.
 // c starts at its steady state, so a fresh (or migrated) model tracks at
@@ -345,11 +344,142 @@ static const float Q_KA_AMBIENT = 1e-6f;
 // is barely observable and a looser value only lets it wander onto a bound
 // (simulated on the nano: pinned at 1000 min half the time at 1e-2).
 static const float P_PRIOR[N_PARAMS] = {1e-3f, 1e-3f, 1e-4f, 1e-5f, 1.0f / (C_TRACK_STEPS - 1.0f)};
-// ka's variance in ambient mode, where the room's swing makes it
-// observable. Raised to this on entry and returned to P_PRIOR[2] on exit,
-// by scaling its row and column so P stays positive definite; see
-// set_ka_variance_().
+// ka's variance in ambient mode on a board with no tank physics, where the
+// room's swing is the only thing that can tell it anything. Raised to this
+// on entry and returned to P_PRIOR[2] on exit, by scaling its row and column
+// so P stays positive definite; see set_ka_variance_(). With physics, ka's
+// variance comes from its band instead (p_ka_) and does not change with the
+// mode.
 static const float P_KA_AMBIENT = 1e-2f;
+
+// ---------------------------------------------------------------------
+// What the tank's size says
+// ---------------------------------------------------------------------
+// Optional, per board (tank_volume / water_volume / heater_power /
+// tank_cover / tank_placement in YAML; the same five as entities in Home
+// Assistant). Without tank_volume nothing here applies and the model keeps
+// its old priors and bounds.
+//
+// tau = m*c / UA. The water's heat capacity is m*c; UA is how many watts the
+// tank sheds per degree above the air around it. Both come from the tank:
+//
+//   m*c  = water_volume (US gal) * 3.785 kg * 4186 J/kg.K. water_volume
+//          defaults to FILL_DEFAULT of tank_volume: substrate, hardscape and
+//          the gap under the rim take ~15%. The 75's 62 gal is that same
+//          estimate made by hand; its two full-power steps in Home Assistant
+//          (2026-09-29, 76 -> 77 degF: 1.85 degF/h; 2026-10-07, refilling
+//          after a water change: 2.10 degF/h) put 300 W into 226 kg
+//          (60 gal) of effective mass -- glass and rock included.
+//
+//   UA   = A_wall*U_wall + A_top*U_top. Areas from a standard rectangular
+//          tank of tank_volume (US gal, nominal) with L:W:H = 2:1:1.2 --
+//          a 10 gal's 20x10x12 exactly, a 75's 48x18x21 to within 15% of
+//          both areas. The bottom is left out: substrate on a stand.
+//     U_wall 3-10 W/m2.K. The glass and the water-side film are negligible
+//          resistances; the air side is natural convection (2-4) plus
+//          radiation (~5.5 at emissivity 0.9, room temperature), less
+//          where a background, the wall or the stand blocks the view.
+//     U_top by cover:
+//       open top        10-25: convection off a warm horizontal surface (3-5)
+//                       plus radiation (5.5) plus the part of evaporation
+//                       that moves with the room (~2 per K at constant
+//                       humidity), plus whatever the HVAC stirs. Most of
+//                       evaporation does NOT scale with the room: it is a
+//                       steady ~20 W loss, and lands in c -- the 75 open
+//                       measured c = -0.16 degF/h net of its pumps.
+//       lid             3-8: water -> air gap (~5-7, condensing) in series
+//                       with lid -> room (~8-10), plus leakage at cut-outs.
+//       lid + evap      2-5: the gap sealed; nothing evaporates through it.
+//       unknown         2-25: every case above.
+//     placement:
+//       open room       as above.
+//       enclosed        the tank sheds to cabinet air, which sheds to the
+//       cabinet         room through the stand: UA_eff = 1/(1/UA + 1/UA_cab),
+//                       with UA_cab = CAB_AREA_FACTOR * (walls + top + bottom)
+//                       * 1.5-6 W/m2.K (18 mm board ~2.5 plus gaps and
+//                       ventilation). So UA falls, tau rises, and the
+//                       cabinet's air follows the HEATER more than the room
+//                       -- an external room sensor does not measure it.
+//
+// The band is [UA_lo/BAND_MARGIN, UA_hi*BAND_MARGIN] in ka, the prior its
+// geometric centre. For the 75 (75 gal, 62 gal water, open top, room):
+// tau 446-2042 min, prior 954; measured from its Home Assistant history
+// (tools/thermal_model_sim.py --measure) 810 min, 90% 680-1010 -- inside,
+// and within 18% of the prior. For the nano (16 gal, lid, closed stand):
+// 628-3444 min, prior 1471. What the two had learned by 2026-10-14 (75:
+// pinned at 6000; nano: 59) is outside what their water can physically do.
+//
+// heater_power gives kh outright: P/(m*c), 1.98 degF/h for 300 W into
+// 62 gal, 4.5 for 150 W into the nano's 13.6. It is held to
+// [KH_BAND_LO, KH_BAND_HI] of that and anchored with a KH_REL_SIGMA prior:
+// in closed loop the 5 minute windows cannot measure kh unbiased (the loop
+// turns the heater on BECAUSE the water read low; heat reaches the probes a
+// minute late), and the physics is better than the regression. The lower
+// band edge still lets kh fall to 0.4x -- one of two heaters dead.
+static const float GAL_TO_KG = 3.785411784f;
+static const float CP_WATER = 4186.0f;
+static const float FILL_DEFAULT = 0.85f;
+static const float U_WALL_LO = 3.0f, U_WALL_HI = 10.0f;
+static const float U_TOP_LO[N_COVERS] = {10.0f, 3.0f, 2.0f, 2.0f};
+static const float U_TOP_HI[N_COVERS] = {25.0f, 8.0f, 5.0f, 25.0f};
+static const float CAB_AREA_FACTOR = 2.0f;
+static const float U_CAB_LO = 1.5f, U_CAB_HI = 6.0f;
+static const float BAND_MARGIN = 1.25f;
+static const float KH_BAND_LO = 0.4f, KH_BAND_HI = 1.5f;
+// Prior spreads, converted to P's units (RLS with a unit noise variance) by
+// the 5 minute rate's noise, P_SIGMA_N degC/min.
+static const float P_SIGMA_N = 0.005f;
+static const float KH_REL_SIGMA = 0.02f;
+static const float KA_SIGMA_FRAC = 0.25f;
+// kl's variance with physics. 1e-5 (P_PRIOR[3]) all but froze it, and the
+// light period coincides with the room's warm afternoon, so a light-heat
+// error had nowhere to go but ka: simulated, a light gain off by 0.3 degF/h
+// moved Tank Time Constant by 2.5x. At 0.2 kl learns from the light's
+// on/off edges and ka stays within ~20% whatever the light really adds.
+static const float P_KL_PHYS = 0.2f;
+
+// ---------------------------------------------------------------------
+// Only excitation moves ka
+// ---------------------------------------------------------------------
+// ka is identifiable only from changes in (T - T_ref) that the loop did not
+// cause. Two things used to feed it anyway:
+//   * the loop's own regulation. The water dithers one LSB around the
+//     setpoint, the heater comes on BECAUSE it read low, and that
+//     correlation reads as a loss coefficient. At the setpoint this is all
+//     (T - T_ref) ever is on a steady day.
+//   * in ambient mode, the LEVEL of (T - room): ~5 degF on the 75 that moves
+//     only as the room does, a copy of c's column. 201f2c8 let RLS split
+//     every correction between them by covariance -- and gave ka the bigger
+//     share.
+// So, in ambient mode the reference is the room PLUS a slow offset
+// (centre_off_, a KA_CENTRE_MIN mean of the water above the room), moved by
+// rebase_() so nothing steps: ka's regressor is then the room's departure
+// from where it has been, and the level belongs to c. And on any step whose
+// regressor is under KA_EXCITE -- the dither band, a quiet room -- ka is a
+// "consider" parameter: its gain is zeroed and the covariance updated in
+// Joseph form, P = (I-K phi')P(I-K phi')' + K K', which is exact for a
+// non-optimal gain. ka keeps its value and its uncertainty; c takes the
+// step. A setpoint move, a water change, a heater outage or an ordinary
+// day's room swing clears the bar.
+static const float KA_EXCITE_F = 0.3f;
+static const float KA_EXCITE = KA_EXCITE_F * 5.0f / 9.0f;
+static const float KA_CENTRE_MIN = 720.0f;
+
+// ---------------------------------------------------------------------
+// Delivered, not commanded
+// ---------------------------------------------------------------------
+// The model learned kh against the duty it commanded. On the 75 that is
+// not what the heaters do: the board restarts the 900 s window on every
+// 0 -> >0 demand edge (so a call for heat closes the relays now), and with
+// the loop toggling between ~49% and 0 as the probe flips one LSB, the
+// relays were closed 21.7% of the time against 12.7% commanded over 17
+// days -- 1.7x. kh came out 4.97 degF/h against the 1.98 that 300 W into
+// 62 gal can give, and every loss estimate built on it was 2.5x off. With
+// heater_relay / fan_relay (control.yaml wires the boards' relay entities)
+// the regressor is the fraction of each window the contacts were closed,
+// timed from the relay's own state changes, and the 15 minute forecast uses
+// the last 15 minutes of the same. Boards whose relay entity has not
+// reported yet fall back to the commanded duty.
 
 // ---------------------------------------------------------------------
 // Where the model is centred
@@ -480,17 +610,19 @@ static float clampf(float v, float lo, float hi) {
 }
 
 void TankController::load_prior_() {
+  // Mode first: p_prior_() reads it.
+  this->model_.t_ref = NAN;
+  this->model_.ref_mode = REF_SETPOINT;
+  this->centre_init_ = false;
   for (uint8_t i = 0; i < N_PARAMS; i++) {
     this->model_.theta[i] = this->theta_prior_(i);
     for (uint8_t j = 0; j < N_PARAMS; j++)
-      this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
+      this->model_.p[i][j] = (i == j) ? this->p_prior_(i) : 0.0f;
   }
   this->model_.updates = 0;
   // Centred on the first tick, wherever the operating point is then. The
   // prior's c is already "drift where the tank is held", so adopting the
   // reference needs no re-expression.
-  this->model_.t_ref = NAN;
-  this->model_.ref_mode = REF_SETPOINT;
   this->history_idx_ = 0;
   this->history_count_ = 0;
   for (uint8_t i = 0; i < N_SLOTS; i++) {
@@ -500,6 +632,26 @@ void TankController::load_prior_() {
 }
 
 void TankController::setup() {
+  // The tank's physics before the prior, which is built from it. YAML gave
+  // the defaults; what Home Assistant last set wins. The first boot that has
+  // nothing stored -- the first boot of this firmware on every board --
+  // persists the defaults and resets ka (and kh, given a wattage) to the
+  // physics prior on the first valid reading: physics_pending_.
+  this->physics_pref_ = global_preferences->make_preference<TankPhysics>(fnv1_hash("tank_physics_v1"));
+  TankPhysics ph{};
+  bool physics_first = true;
+  if (this->physics_pref_.load(&ph) && !std::isnan(ph.tank_gal)) {
+    this->physics_ = ph;
+    physics_first = false;
+  }
+  if (this->physics_.cover >= N_COVERS)
+    this->physics_.cover = COVER_UNKNOWN;
+  if (this->physics_.placement >= N_PLACEMENTS)
+    this->physics_.placement = PLACEMENT_ROOM;
+  this->compute_band_();
+  if (physics_first)
+    this->save_physics_();
+
   this->load_prior_();
 
   this->model_pref_ = global_preferences->make_preference<ThermalModel>(fnv1_hash("tank_model_v3"));
@@ -527,7 +679,10 @@ void TankController::setup() {
   // the first time the tank makes a real excursion.
   bool migrated = false;
   ThermalModel stored{};
+  bool pinned_6000 = false;
   if (this->model_pref_.load(&stored) && !std::isnan(stored.theta[0])) {
+    // Read before clamp_model_() moves it into today's band.
+    pinned_6000 = stored.theta[2] < 0.0f && -1.0f / stored.theta[2] >= 5990.0f;
     this->model_ = stored;
     this->clamp_model_();
     ESP_LOGI(TAG, "Restored thermal model after %" PRIu32 " learning steps", this->model_.updates);
@@ -538,7 +693,7 @@ void TankController::setup() {
       for (uint8_t i = 0; i < N_PARAMS; i++) {
         this->model_.theta[i] = legacy.theta[i];
         for (uint8_t j = 0; j < N_PARAMS; j++)
-          this->model_.p[i][j] = (i == j) ? P_PRIOR[i] : 0.0f;
+          this->model_.p[i][j] = (i == j) ? this->p_prior_(i) : 0.0f;
       }
       this->model_.updates = legacy.updates;
       this->model_.t_ref = LEGACY_TEMP_REF;
@@ -570,6 +725,30 @@ void TankController::setup() {
   if (this->ambient_sensor_ != nullptr)
     this->ambient_sensor_->add_on_state_callback([this](float) { this->ambient_last_ms_ = millis(); });
 
+  // Delivered on-time, timed from the relays' own edges. See "Delivered, not
+  // commanded".
+  if (this->heater_relay_ != nullptr)
+    this->heater_relay_->add_on_state_callback([this](bool on) {
+      const uint32_t now = millis();
+      if (this->heater_on_)
+        this->heater_on_acc_ms_ += now - this->heater_on_since_ms_;
+      this->heater_on_ = on;
+      this->heater_on_since_ms_ = now;
+    });
+  if (this->fan_relay_ != nullptr)
+    this->fan_relay_->add_on_state_callback([this](bool on) {
+      const uint32_t now = millis();
+      if (this->fan_on_)
+        this->fan_on_acc_ms_ += now - this->fan_on_since_ms_;
+      this->fan_on_ = on;
+      this->fan_on_since_ms_ = now;
+    });
+
+  // A model whose ka sits on 6000 min is 201f2c8's wander, not a measurement
+  // (2026-10-14 on the 75: 400 -> 6000 in an hour of a quiet room). Reset it
+  // with the rest of the physics, whether or not physics is configured.
+  this->physics_pending_ = this->model_.updates > 0 && ((physics_first && this->physics_active_) || pinned_6000);
+
   this->resid_var_ = QUANT_RATE_SIGMA * QUANT_RATE_SIGMA;
 
   // Setpoint is loaded, so the model can be centred on it now -- a migrated
@@ -585,7 +764,7 @@ void TankController::setup() {
     // it the prior is no worse a guess than a clamp artefact. Only ka: a
     // fan gain on its floor, say, is real evidence of a fan not cooling.
     const float ka = this->model_.theta[2];
-    if (ka <= THETA_MIN[2] || ka >= this->theta_max_(2)) {
+    if (ka <= this->theta_min_(2) || ka >= this->theta_max_(2)) {
       ESP_LOGW(TAG, "Migrated loss coefficient was pinned at %.0f min - back to the %.0f min prior",
                -1.0f / ka, -1.0f / this->theta_prior_(2));
       this->model_.theta[2] = this->theta_prior_(2);
@@ -742,30 +921,258 @@ void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float
 }
 
 float TankController::theta_max_(uint8_t i) const {
-  // ka's floor is the board's max_time_constant; every other bound is fixed.
-  return i == 2 ? -this->ka_min_ : THETA_MAX[i];
+  // ka's floor and kh's band come from compute_band_(); the rest are fixed.
+  if (i == 2)
+    return -this->ka_min_;
+  if (i == 0)
+    return this->kh_max_;
+  return THETA_MAX[i];
+}
+
+float TankController::theta_min_(uint8_t i) const {
+  if (i == 2)
+    return -this->ka_max_;
+  if (i == 0)
+    return this->kh_min_;
+  return THETA_MIN[i];
 }
 
 void TankController::set_max_time_constant(float minutes) {
-  // __init__.py validates 100-20000 min. Re-checked here because ka_min_
-  // must stay strictly positive (get_time_constant divides by it). ka's
-  // prior is 15*ka_min_ (theta_prior_()), so at the 100 min minimum it is
-  // 0.15 -- still inside THETA_MIN[2]'s 0.2. 1000 min is the default.
-  if (!(minutes >= 100.0f))
-    minutes = 1000.0f;
-  this->ka_min_ = 1.0f / minutes;
+  // __init__.py validates 100-20000 min. An explicit value overrides the
+  // physics band's ceiling; compute_band_() applies it.
+  // Called from codegen, before setup() computes the band.
+  this->max_tc_override_ = minutes >= 100.0f ? minutes : NAN;
 }
 
 float TankController::theta_prior_(uint8_t i) const {
-  // See THETA_PRIOR for why ka's prior follows the board's ceiling.
-  return i == 2 ? -15.0f * this->ka_min_ : THETA_PRIOR[i];
+  if (i == 2)
+    return -this->ka_prior_;
+  if (i == 0)
+    return this->kh_prior_;
+  return THETA_PRIOR[i];
 }
 
 float TankController::p_prior_(uint8_t i) const {
-  // ka's variance is mode-dependent; see P_KA_AMBIENT.
-  if (i == 2 && this->model_.ref_mode == REF_AMBIENT)
-    return P_KA_AMBIENT;
+  if (i == 2) {
+    // Without physics ka's variance is mode-dependent; see P_KA_AMBIENT.
+    if (!this->physics_active_ && this->model_.ref_mode == REF_AMBIENT)
+      return P_KA_AMBIENT;
+    return this->p_ka_;
+  }
+  if (i == 0)
+    return this->p_kh_;
+  if (i == 3)
+    return this->p_kl_;
   return P_PRIOR[i];
+}
+
+void TankController::compute_band_() {
+  // See "What the tank's size says". Without tank_volume: the legacy band.
+  const TankPhysics &ph = this->physics_;
+  this->physics_active_ = ph.tank_gal > 0.0f;
+  const float override_min = std::isnan(this->max_tc_override_) ? NAN : 1.0f / this->max_tc_override_;
+  if (!this->physics_active_) {
+    this->ka_min_ = std::isnan(override_min) ? 0.001f : override_min;
+    this->ka_max_ = -THETA_MIN[2];
+    this->ka_prior_ = 15.0f * this->ka_min_;
+    this->p_ka_ = P_PRIOR[2];
+    this->kh_prior_ = THETA_PRIOR[0];
+    this->kh_min_ = THETA_MIN[0];
+    this->kh_max_ = THETA_MAX[0];
+    this->p_kh_ = P_PRIOR[0];
+    this->p_kl_ = P_PRIOR[3];
+    snprintf(this->band_text_, sizeof(this->band_text_), "no tank volume set");
+    return;
+  }
+  // Geometry of a standard rectangular tank, L:W:H = 2:1:1.2, from the
+  // nominal volume; heat capacity from the water actually in it.
+  const float v_m3 = ph.tank_gal * GAL_TO_KG / 1000.0f;
+  const float w = std::cbrt(v_m3 / 2.4f);
+  const float l = 2.0f * w, h = 1.2f * w;
+  const float a_top = l * w;
+  const float a_wall = 2.0f * (l + w) * h;
+  const float water = ph.water_gal > 0.0f ? ph.water_gal : FILL_DEFAULT * ph.tank_gal;
+  const float cap = water * GAL_TO_KG * CP_WATER;  // J/K
+  float ua_lo = a_wall * U_WALL_LO + a_top * U_TOP_LO[ph.cover];
+  float ua_hi = a_wall * U_WALL_HI + a_top * U_TOP_HI[ph.cover];
+  if (ph.placement == PLACEMENT_CABINET) {
+    const float a_cab = CAB_AREA_FACTOR * (a_wall + 2.0f * a_top);
+    ua_lo = 1.0f / (1.0f / ua_lo + 1.0f / (a_cab * U_CAB_LO));
+    ua_hi = 1.0f / (1.0f / ua_hi + 1.0f / (a_cab * U_CAB_HI));
+  }
+  // W/K over J/K is 1/s; the model works per minute.
+  this->ka_min_ = ua_lo / BAND_MARGIN * 60.0f / cap;
+  this->ka_max_ = std::fmin(ua_hi * BAND_MARGIN * 60.0f / cap, -THETA_MIN[2]);
+  if (!std::isnan(override_min))
+    this->ka_min_ = override_min;
+  if (this->ka_min_ > this->ka_max_)
+    this->ka_min_ = this->ka_max_ * 0.5f;
+  this->ka_prior_ = clampf(std::sqrt(ua_lo * ua_hi) * 60.0f / cap, this->ka_min_, this->ka_max_);
+  const float ka_sigma = KA_SIGMA_FRAC * (this->ka_max_ - this->ka_min_);
+  this->p_ka_ = (ka_sigma / P_SIGMA_N) * (ka_sigma / P_SIGMA_N);
+  this->p_kl_ = P_KL_PHYS;
+  if (ph.heater_w > 0.0f) {
+    const float kh = ph.heater_w / cap * 60.0f;  // degC/min at 100%
+    this->kh_prior_ = clampf(kh, THETA_MIN[0], THETA_MAX[0]);
+    this->kh_min_ = std::fmax(KH_BAND_LO * kh, THETA_MIN[0]);
+    this->kh_max_ = std::fmin(KH_BAND_HI * kh, THETA_MAX[0]);
+    const float kh_sigma = KH_REL_SIGMA * kh;
+    this->p_kh_ = (kh_sigma / P_SIGMA_N) * (kh_sigma / P_SIGMA_N);
+  } else {
+    this->kh_prior_ = THETA_PRIOR[0];
+    this->kh_min_ = THETA_MIN[0];
+    this->kh_max_ = THETA_MAX[0];
+    this->p_kh_ = P_PRIOR[0];
+  }
+  snprintf(this->band_text_, sizeof(this->band_text_), "%.0f-%.0f min, expect %.0f", 1.0f / this->ka_max_,
+           1.0f / this->ka_min_, 1.0f / this->ka_prior_);
+}
+
+float TankController::get_expected_time_constant() const {
+  return this->physics_active_ ? 1.0f / this->ka_prior_ : NAN;
+}
+
+void TankController::save_physics_() { this->physics_pref_.save(&this->physics_); }
+
+void TankController::reset_param_(uint8_t i, float t_now, float u_now) {
+  // Move theta[i] to its prior without changing today's forecast: c takes
+  // the difference at the current operating point (water temperature for
+  // ka, recent delivered heat for kh) -- the same re-expression rebase_()
+  // does for a reference move. theta[i] is then decoupled from the rest and
+  // its variance re-opened to the prior, so it relearns from the next
+  // informative window instead of carrying the old fit's certainty.
+  float(&th)[N_PARAMS] = this->model_.theta;
+  const float was = th[i];
+  const float now = this->theta_prior_(i);
+  if (i == 2 && !std::isnan(this->model_.t_ref) && !std::isnan(t_now))
+    th[4] += (was - now) * (t_now - this->model_.t_ref);
+  if (i == 0 && !std::isnan(u_now))
+    th[4] += (was - now) * u_now;
+  th[4] = clampf(th[4], THETA_MIN[4], THETA_MAX[4]);
+  th[i] = now;
+  for (uint8_t j = 0; j < N_PARAMS; j++)
+    if (j != i)
+      this->model_.p[i][j] = this->model_.p[j][i] = 0.0f;
+  this->model_.p[i][i] = this->p_prior_(i);
+}
+
+void TankController::apply_physics_(bool reset_ka, bool reset_kh, const char *why) {
+  // A physics input changed (or this is the first boot that has one): new
+  // band, and the parameters it determines back to their new prior. Needs a
+  // water temperature to re-express c; at boot it waits for the first valid
+  // reading (physics_pending_).
+  this->compute_band_();
+  const float t = this->last_temp_;
+  const float u = this->recent_fraction_(true);
+  const float tau_was = this->get_time_constant();
+  const float kh_was = this->model_.theta[0];
+  if (reset_ka)
+    this->reset_param_(2, t, u);
+  if (reset_kh && this->physics_active_ && this->physics_.heater_w > 0.0f)
+    this->reset_param_(0, t, u);
+  this->clamp_model_();
+  this->save_state_();
+  if (this->physics_active_) {
+    ESP_LOGW(TAG,
+             "%s: %.0f gal (%.0f gal water), %.0f W, %s, %s -> Tank Time Constant %.0f -> %.0f min (band %s), "
+             "heater %.2f -> %.2f degF/h",
+             why, this->physics_.tank_gal,
+             this->physics_.water_gal > 0.0f ? this->physics_.water_gal : FILL_DEFAULT * this->physics_.tank_gal,
+             this->physics_.heater_w, cover_text(this->physics_.cover), placement_text(this->physics_.placement),
+             tau_was, this->get_time_constant(), this->band_text_, kh_was * 108.0f, this->model_.theta[0] * 108.0f);
+  } else {
+    ESP_LOGW(TAG, "%s: no tank volume - Tank Time Constant %.0f -> %.0f min (legacy prior)", why, tau_was,
+             this->get_time_constant());
+  }
+  if (this->physics_active_ && this->physics_.placement == PLACEMENT_CABINET && this->ambient_sensor_ != nullptr)
+    ESP_LOGW(TAG, "Tank is in a closed cabinet: the room sensor (%s) measures the room, not the cabinet air the "
+                  "tank actually sheds to. ka is then the tank-through-cabinet loss, and the room's swing reaches "
+                  "the tank damped and late.",
+             this->ambient_source_);
+}
+
+void TankController::set_tank_volume(float gal) {
+  if (std::isnan(gal) || gal < 0.0f)
+    return;
+  if (gal == this->physics_.tank_gal)
+    return;
+  this->physics_.tank_gal = gal;
+  this->save_physics_();
+  this->apply_physics_(true, true, "Tank volume changed");
+}
+
+void TankController::set_water_volume(float gal) {
+  if (std::isnan(gal) || gal < 0.0f)
+    return;
+  if (gal == this->physics_.water_gal)
+    return;
+  this->physics_.water_gal = gal;
+  this->save_physics_();
+  this->apply_physics_(true, true, "Water volume changed");
+}
+
+void TankController::set_heater_power(float watts) {
+  if (std::isnan(watts) || watts < 0.0f)
+    return;
+  if (watts == this->physics_.heater_w)
+    return;
+  this->physics_.heater_w = watts;
+  this->save_physics_();
+  // ka's band does not depend on the heater; only kh resets. Setting it to
+  // 0 (unknown) returns kh to the learned-only prior and bounds.
+  if (watts > 0.0f) {
+    this->apply_physics_(false, true, "Heater power changed");
+  } else {
+    this->compute_band_();
+    this->reset_param_(0, this->last_temp_, this->recent_fraction_(true));
+    this->clamp_model_();
+    this->save_state_();
+    ESP_LOGW(TAG, "Heater power cleared - heater gain back to learning from the prior");
+  }
+}
+
+void TankController::set_tank_cover(uint8_t cover) {
+  if (cover >= N_COVERS || cover == this->physics_.cover)
+    return;
+  this->physics_.cover = cover;
+  this->save_physics_();
+  this->apply_physics_(true, false, "Tank cover changed");
+}
+
+void TankController::set_tank_placement(uint8_t placement) {
+  if (placement >= N_PLACEMENTS || placement == this->physics_.placement)
+    return;
+  this->physics_.placement = placement;
+  this->save_physics_();
+  this->apply_physics_(true, false, "Tank placement changed");
+}
+
+const char *TankController::cover_text(uint8_t c) {
+  switch (c) {
+    case COVER_OPEN_TOP:
+      return "Open top";
+    case COVER_LID:
+      return "Lid";
+    case COVER_EVAPORATION:
+      return "Lid + evaporation cover";
+    default:
+      return "Unknown";
+  }
+}
+
+const char *TankController::placement_text(uint8_t p) {
+  return p == PLACEMENT_CABINET ? "Enclosed cabinet" : "Open room";
+}
+
+uint8_t TankController::cover_from_text(const std::string &s) {
+  for (uint8_t c = 0; c < N_COVERS; c++)
+    if (s == cover_text(c))
+      return c;
+  return COVER_UNKNOWN;
+}
+
+uint8_t TankController::placement_from_text(const std::string &s) {
+  return s == placement_text(PLACEMENT_CABINET) ? PLACEMENT_CABINET : PLACEMENT_ROOM;
 }
 
 void TankController::set_ka_variance_(float target) {
@@ -799,7 +1206,7 @@ void TankController::clamp_model_() {
   for (uint8_t i = 0; i < N_PARAMS; i++) {
     if (std::isnan(this->model_.theta[i]))
       this->model_.theta[i] = this->theta_prior_(i);
-    this->model_.theta[i] = clampf(this->model_.theta[i], THETA_MIN[i], this->theta_max_(i));
+    this->model_.theta[i] = clampf(this->model_.theta[i], this->theta_min_(i), this->theta_max_(i));
     for (uint8_t j = 0; j < N_PARAMS; j++) {
       if (std::isnan(this->model_.p[i][j]))
         this->model_.p[i][j] = (i == j) ? this->p_prior_(i) : 0.0f;
@@ -839,7 +1246,7 @@ bool TankController::project_bounds_() {
   // Returns whether any bound was active.
   bool active = false;
   for (uint8_t i = 0; i < N_PARAMS; i++) {
-    const float lo = THETA_MIN[i], hi = this->theta_max_(i);
+    const float lo = this->theta_min_(i), hi = this->theta_max_(i);
     const float ti = this->model_.theta[i];
     if (std::isnan(ti)) {
       this->model_.theta[i] = this->theta_prior_(i);
@@ -971,19 +1378,30 @@ void TankController::sync_reference_(uint32_t now, float water) {
   // unless something actually moved.
   if (this->ambient_usable_(now, water)) {
     const float a = this->ambient_filt_;
-    if (this->model_.ref_mode != REF_AMBIENT) {
-      this->rebase_(a);
+    if (this->model_.ref_mode != REF_AMBIENT || !this->centre_init_) {
+      // Entering -- or restored in ambient mode from flash, with no centre.
+      // Centre on where the water is NOW, so ka's regressor starts at zero
+      // and only the room's movement from here reaches it ("Only excitation
+      // moves ka"). Needs a water temperature; without one, wait a tick.
+      const bool valid = !std::isnan(water) && water >= PLAUSIBLE_MIN && water <= PLAUSIBLE_MAX;
+      if (!valid)
+        return;
+      const bool entering = this->model_.ref_mode != REF_AMBIENT;
+      this->centre_off_ = water - a;
+      this->centre_init_ = true;
+      this->rebase_(a + this->centre_off_);
       this->model_.ref_mode = REF_AMBIENT;
-      if (this->model_.p[2][2] < P_KA_AMBIENT)
+      if (!this->physics_active_ && this->model_.p[2][2] < P_KA_AMBIENT)
         this->set_ka_variance_(P_KA_AMBIENT);
-      ESP_LOGI(TAG, "Thermal model now measured against room air (%s, %.1f degF)", this->ambient_source_,
-               a * 9.0f / 5.0f + 32.0f);
+      if (entering)
+        ESP_LOGI(TAG, "Thermal model now measured against room air (%s, %.1f degF)", this->ambient_source_,
+                 a * 9.0f / 5.0f + 32.0f);
     } else {
       // The room is the regressor here, not a reference to re-express
-      // against: c keeps its meaning (the tank's own heat) and the swing
-      // goes to ka. The window's deviations are accumulated per tick
-      // against the room as it was then, so nothing needs shifting.
-      this->model_.t_ref = a;
+      // against: the room's swing goes to ka. The window's deviations are
+      // accumulated per tick against the room as it was then, so nothing
+      // needs shifting. Only the slow centre is rebased (update_centre_()).
+      this->model_.t_ref = a + this->centre_off_;
     }
     return;
   }
@@ -991,7 +1409,8 @@ void TankController::sync_reference_(uint32_t now, float water) {
   if (this->model_.ref_mode == REF_AMBIENT) {
     // Back from the last room value the model used to the setpoint.
     this->model_.ref_mode = REF_SETPOINT;
-    if (this->model_.p[2][2] > P_PRIOR[2])
+    this->centre_init_ = false;
+    if (!this->physics_active_ && this->model_.p[2][2] > P_PRIOR[2])
       this->set_ka_variance_(P_PRIOR[2]);
     this->rebase_(sp);
     ESP_LOGW(TAG, "Room air (%s) not usable - thermal model back on the %.1f degF setpoint", this->ambient_source_,
@@ -1006,6 +1425,21 @@ void TankController::sync_reference_(uint32_t now, float water) {
       ESP_LOGI(TAG, "Thermal model re-centred %.1f -> %.1f degF (prediction unchanged)", was * 9.0f / 5.0f + 32.0f,
                sp * 9.0f / 5.0f + 32.0f);
   }
+}
+
+void TankController::update_centre_(float dev_avg, float window_min) {
+  // After each learning step in ambient mode, the centre follows the
+  // window's mean deviation with a KA_CENTRE_MIN time constant. A daily
+  // swing keeps ~95% of its amplitude against a 12 h centre; a level that
+  // has sat still for half a day is c's. Moved by rebase_(), so the
+  // forecast and c's meaning stay continuous.
+  if (this->model_.ref_mode != REF_AMBIENT || !this->centre_init_ || std::isnan(dev_avg))
+    return;
+  const float step = dev_avg * (window_min / (KA_CENTRE_MIN + window_min));
+  if (step == 0.0f)
+    return;
+  this->centre_off_ += step;
+  this->rebase_(this->model_.t_ref + step);
 }
 
 const char *TankController::get_reference_text() const {
@@ -1120,12 +1554,41 @@ void TankController::learn_(float dt_min, float measured_rate) {
   if (!(denom > 1e-9f))
     return;
 
+  // Gain. On a window that does not excite ka (|T - T_ref| under
+  // KA_EXCITE), ka's gain is zeroed: it is held as a "consider" parameter,
+  // value and uncertainty kept, and c takes the step. See "Only excitation
+  // moves ka".
+  float k[N_PARAMS];
   for (uint8_t i = 0; i < N_PARAMS; i++)
-    this->model_.theta[i] += (p_phi[i] / denom) * err;
+    k[i] = p_phi[i] / denom;
+  const bool ka_excited = std::fabs(phi[2]) >= KA_EXCITE;
+  if (!ka_excited)
+    k[2] = 0.0f;
 
   for (uint8_t i = 0; i < N_PARAMS; i++)
-    for (uint8_t j = 0; j < N_PARAMS; j++)
-      this->model_.p[i][j] = (this->model_.p[i][j] - (p_phi[i] * p_phi[j]) / denom) / lambda;
+    this->model_.theta[i] += k[i] * err;
+
+  // Joseph form, P = (I - k phi') P (I - k phi')' + k k' (unit noise): the
+  // covariance update that stays right for a gain that is not the optimal
+  // one, and stays positive definite in float. With every gain optimal it
+  // is the textbook update, P - P phi phi' P / denom. lambda is 1.
+  {
+    float a_p[N_PARAMS][N_PARAMS];
+    for (uint8_t i = 0; i < N_PARAMS; i++)
+      for (uint8_t j = 0; j < N_PARAMS; j++) {
+        float phi_p = 0.0f;  // (phi' P)_j
+        for (uint8_t m = 0; m < N_PARAMS; m++)
+          phi_p += phi[m] * this->model_.p[m][j];
+        a_p[i][j] = this->model_.p[i][j] - k[i] * phi_p;
+      }
+    for (uint8_t i = 0; i < N_PARAMS; i++) {
+      float ap_phi = 0.0f;  // (A P phi)_i
+      for (uint8_t m = 0; m < N_PARAMS; m++)
+        ap_phi += a_p[i][m] * phi[m];
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        this->model_.p[i][j] = (a_p[i][j] - ap_phi * k[j] + k[i] * k[j]) / lambda;
+    }
+  }
 
   // P is symmetric by construction but drifts with float rounding over
   // thousands of updates, and an asymmetric covariance can make the gain
@@ -1144,18 +1607,22 @@ void TankController::learn_(float dt_min, float measured_rate) {
     float post = 0.0f;
     for (uint8_t i = 0; i < N_PARAMS; i++)
       post += this->model_.theta[i] * phi[i];
-    const float want = err * lambda / denom;
+    // err*(1 - phi'k): err*lambda/denom when every gain is optimal, and
+    // still right when ka's was held.
+    float phi_k = 0.0f;
+    for (uint8_t i = 0; i < N_PARAMS; i++)
+      phi_k += phi[i] * k[i];
+    const float want = err * (1.0f - phi_k);
     const float refit = (measured_rate - post) - want;
     const float c = this->model_.theta[4] + refit;
-    if (c >= THETA_MIN[4] && c <= THETA_MAX[4])
+    if (c >= this->theta_min_(4) && c <= this->theta_max_(4))
       this->model_.theta[4] = c;
   }
 
-  // Process noise: the parameters that drift, drift (see Q). Added on every
+  // Process noise: the parameter that drifts, drifts (see Q). Added on every
   // step, informative or not -- the room moves whether or not the heater
-  // happens to be running.
+  // happens to be running. Nothing on ka; see Q.
   this->model_.p[4][4] += Q_C;
-  this->model_.p[2][2] += this->model_.ref_mode == REF_AMBIENT ? Q_KA_AMBIENT : Q_KA_SETPOINT;
 
   this->clamp_model_();
   this->model_.updates++;
@@ -1192,11 +1659,33 @@ void TankController::learn_(float dt_min, float measured_rate) {
     }
   }
 
-  ESP_LOGD(TAG, "learn: rate=%.2f pred=%.2f err=%.2f degF/h kh=%.4f kf=%.4f ka=%.5f kl=%.4f c=%.4f ref=%.2f degF",
+  ESP_LOGD(TAG,
+           "learn: rate=%.2f pred=%.2f err=%.2f degF/h kh=%.4f kf=%.4f ka=%.5f%s kl=%.4f c=%.4f ref=%.2f degF",
            measured_rate * 108.0f, pred * 108.0f, err * 108.0f, this->model_.theta[0], -this->model_.theta[1],
-           -this->model_.theta[2], this->model_.theta[3], this->model_.theta[4],
+           -this->model_.theta[2], ka_excited ? "" : " (held)", this->model_.theta[3], this->model_.theta[4],
            this->model_.t_ref * 9.0f / 5.0f + 32.0f);
   (void) dt_min;
+}
+
+uint64_t TankController::relay_on_ms_(bool heater, uint32_t now) const {
+  // Total milliseconds the relay has been closed since boot, to now.
+  if (heater)
+    return this->heater_on_acc_ms_ + (this->heater_on_ ? (uint64_t) (now - this->heater_on_since_ms_) : 0);
+  return this->fan_on_acc_ms_ + (this->fan_on_ ? (uint64_t) (now - this->fan_on_since_ms_) : 0);
+}
+
+float TankController::recent_fraction_(bool heater) const {
+  // Delivered duty over the last 15 minutes. Commanded duty when the relay
+  // is not wired or has not reported, or before the first tick.
+  const binary_sensor::BinarySensor *relay = heater ? this->heater_relay_ : this->fan_relay_;
+  if (relay == nullptr || !relay->has_state() || this->recent_n_ == 0)
+    return heater ? this->heater_duty_ : this->fan_duty_;
+  uint32_t on = 0, span = 0;
+  for (uint8_t i = 0; i < this->recent_n_; i++) {
+    on += heater ? this->recent_heater_ms_[i] : this->recent_fan_ms_[i];
+    span += this->recent_dt_ms_[i];
+  }
+  return span > 0 ? clampf((float) on / (float) span, 0.0f, 1.0f) : 0.0f;
 }
 
 void TankController::apply_outputs_(float heater, float fan) {
@@ -1211,7 +1700,23 @@ void TankController::apply_outputs_(float heater, float fan) {
 void TankController::update() {
   const uint32_t now = millis();
   const float dt_min = (now - this->last_update_ms_) / 60000.0f;
+  const uint32_t dt_ms = now - this->last_update_ms_;
   this->last_update_ms_ = now;
+
+  // Delivered on-time this tick, into the 15 minute ring the forecast reads.
+  {
+    const uint64_t h = this->relay_on_ms_(true, now), f = this->relay_on_ms_(false, now);
+    const uint64_t dh = h - this->last_heater_total_ms_, df = f - this->last_fan_total_ms_;
+    this->last_heater_total_ms_ = h;
+    this->last_fan_total_ms_ = f;
+    const uint32_t cap = 65535;
+    this->recent_heater_ms_[this->recent_idx_] = (uint16_t) (dh > cap ? cap : dh);
+    this->recent_fan_ms_[this->recent_idx_] = (uint16_t) (df > cap ? cap : df);
+    this->recent_dt_ms_[this->recent_idx_] = (uint16_t) (dt_ms > cap ? cap : dt_ms);
+    this->recent_idx_ = (this->recent_idx_ + 1) % N_RECENT;
+    if (this->recent_n_ < N_RECENT)
+      this->recent_n_++;
+  }
 
   // Centre the model before anything reads it: a setpoint, override or
   // ambient-probe change since the last tick is re-expressed here.
@@ -1254,6 +1759,24 @@ void TankController::update() {
   const uint32_t since_valid = this->last_valid_ms_ == 0 ? 0 : now - this->last_valid_ms_;
   this->last_valid_ms_ = now;
   this->last_temp_ = t;
+
+  // First boot of a board with tank physics (or of a model 201f2c8 left on
+  // 6000 min): ka -- and kh, given a wattage, since it was learned against
+  // commanded duty -- to the physics prior, now that there is a water
+  // temperature to re-express c at.
+  if (this->physics_pending_) {
+    this->physics_pending_ = false;
+    // The light gain keeps its value but gets the physics-mode variance:
+    // a model from before this firmware carries kl's old 1e-5, and a frozen
+    // kl hands every light-heat error to ka (see P_KL_PHYS).
+    if (this->physics_active_ && this->model_.p[3][3] < this->p_kl_) {
+      for (uint8_t j = 0; j < N_PARAMS; j++)
+        if (j != 3)
+          this->model_.p[3][j] = this->model_.p[j][3] = 0.0f;
+      this->model_.p[3][3] = this->p_kl_;
+    }
+    this->apply_physics_(true, true, "Tank physics applied to the stored model");
+  }
   if (since_valid > HISTORY_WIPE_MS) {
     ESP_LOGW(TAG, "Gap of %" PRIu32 "s in readings - discarding swing history", since_valid / 1000);
     this->history_idx_ = 0;
@@ -1392,6 +1915,8 @@ void TankController::update() {
     this->learn_anchor_temp_ = t;
     this->learn_anchor_cross_ = cross;
     this->learn_anchor_ms_ = now;
+    this->anchor_heater_on_ms_ = this->relay_on_ms_(true, now);
+    this->anchor_fan_on_ms_ = this->relay_on_ms_(false, now);
   } else if (now - this->learn_anchor_ms_ >= LEARN_WINDOW_MS && this->acc_n_ > 0) {
     const float window_min = (now - this->learn_anchor_ms_) / 60000.0f;
     const float d_a = t - this->learn_anchor_temp_;
@@ -1407,12 +1932,25 @@ void TankController::update() {
     this->acc_fan_ /= this->acc_n_;
     this->acc_light_ /= this->acc_n_;
     this->acc_dev_ /= this->acc_n_;
-    if (this->learning_enabled_)
+    // Delivered, not commanded: the fraction of this window the contacts
+    // were closed, when the relay entities are wired and have reported.
+    const float window_ms = (float) (now - this->learn_anchor_ms_);
+    if (this->heater_relay_ != nullptr && this->heater_relay_->has_state())
+      this->acc_heater_ =
+          clampf((float) (this->relay_on_ms_(true, now) - this->anchor_heater_on_ms_) / window_ms, 0.0f, 1.0f);
+    if (this->fan_relay_ != nullptr && this->fan_relay_->has_state())
+      this->acc_fan_ = clampf((float) (this->relay_on_ms_(false, now) - this->anchor_fan_on_ms_) / window_ms, 0.0f, 1.0f);
+    const float dev_avg = this->acc_dev_;
+    if (this->learning_enabled_) {
       this->learn_(window_min, rate);
+      this->update_centre_(dev_avg, window_min);
+    }
     this->reset_learn_window_();
     this->learn_anchor_temp_ = t;
     this->learn_anchor_cross_ = cross;
     this->learn_anchor_ms_ = now;
+    this->anchor_heater_on_ms_ = this->relay_on_ms_(true, now);
+    this->anchor_fan_on_ms_ = this->relay_on_ms_(false, now);
   }
 
   // --- hard safety limits ------------------------------------------------
@@ -1585,8 +2123,10 @@ void TankController::update() {
   // Where the model says we'll be in 15 minutes at this output level.
   // Uses the unweighted prediction: this is the model's honest forecast,
   // not the trust-limited term the controller acts on.
-  const float rate_now =
-      kh * this->heater_duty_ + this->model_.theta[1] * this->fan_duty_ + passive_raw;
+  // At this output level -- as delivered over the last 15 minutes when the
+  // relays are wired (see "Delivered, not commanded").
+  const float rate_now = kh * this->recent_fraction_(true) + this->model_.theta[1] * this->recent_fraction_(false) +
+                         passive_raw;
   this->predicted_temp_ = t + rate_now * 15.0f;
 
   if (now - this->last_save_ms_ > SAVE_INTERVAL_MS) {
@@ -1653,7 +2193,27 @@ void TankController::dump_config() {
   ESP_LOGCONFIG(TAG, "  Setpoint: %.1f degF (limits %.1f - %.1f)", this->setpoint_ * 9.0f / 5.0f + 32.0f,
                 this->min_temp_ * 9.0f / 5.0f + 32.0f, this->max_temp_ * 9.0f / 5.0f + 32.0f);
   ESP_LOGCONFIG(TAG, "  Response time: %.0f min", this->response_time_);
-  ESP_LOGCONFIG(TAG, "  Max time constant: %.0f min", 1.0f / this->ka_min_);
+  if (this->physics_active_) {
+    ESP_LOGCONFIG(TAG, "  Tank: %.0f gal (%.1f gal of water), %s, %s", this->physics_.tank_gal,
+                  this->physics_.water_gal > 0.0f ? this->physics_.water_gal
+                                                  : FILL_DEFAULT * this->physics_.tank_gal,
+                  cover_text(this->physics_.cover), placement_text(this->physics_.placement));
+    if (this->physics_.heater_w > 0.0f) {
+      ESP_LOGCONFIG(TAG, "  Heater: %.0f W -> %.2f degF/h at full power (held to %.2f-%.2f)", this->physics_.heater_w,
+                    this->kh_prior_ * 108.0f, this->kh_min_ * 108.0f, this->kh_max_ * 108.0f);
+    } else {
+      ESP_LOGCONFIG(TAG, "  Heater: power not set - gain learned from the prior");
+    }
+    ESP_LOGCONFIG(TAG, "  Time constant: %s%s", this->band_text_,
+                  std::isnan(this->max_tc_override_) ? "" : " (ceiling from max_time_constant)");
+    if (this->physics_.placement == PLACEMENT_CABINET && this->ambient_sensor_ != nullptr)
+      ESP_LOGW(TAG, "  Tank is in a closed cabinet but the room sensor (%s) is outside it - see README",
+               this->ambient_source_);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Tank: volume not set (no physics); max time constant %.0f min", 1.0f / this->ka_min_);
+  }
+  ESP_LOGCONFIG(TAG, "  Relays as regressor: heater %s, fan %s", YESNO(this->heater_relay_ != nullptr),
+                YESNO(this->fan_relay_ != nullptr));
   if (this->ambient_sensor_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Room air: %s (valid for %" PRIu32 " min after each report)", this->ambient_source_,
                   this->ambient_timeout_ms_ / 60000UL);

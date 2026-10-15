@@ -258,46 +258,30 @@ tank_controller:
   # troubles glass, silicone or a Jager; it is a backstop on the water,
   # not a limit on the target.
   max_temperature: 88.0
-  # Ceiling on the learned Tank Time Constant, raised from the component's
-  # 1000 min default (sized for the ~10 gal nano) on 2026-10-12.
+  # The tank's physics: first-boot defaults for the Tank Volume, Water
+  # Volume, Heater Power, Tank Cover and Tank Placement entities, which the
+  # controller persists once set. They replace max_time_constant: 6000min
+  # (bbf4b6f..e382208), which was a ceiling sized by hand and is now
+  # computed: see "What the tank's size says" in tank_controller.cpp.
   #
-  # The evidence: Tank Time Constant read exactly 1000 min for days -- ka
-  # pinned on the old bound -- while Model Health sat at 72-78%, Model Bias
-  # held a steady +2.5 to +3.0 degF/h (tank warmer than predicted) and the
-  # 15 min Predicted Temperature read 76.33 degF against a tank holding
-  # 77.1 degF at its 77.0 setpoint with 0.11 degF of swing. Control was
-  # fine; the model was not. Here the tank sits ~1.9 degF above the model's
-  # 75.2 degF TEMP_REF and barely moves, so ka's regressor is close to a
-  # constant and RLS corrects ka and c together. With ka against the bound
-  # the clamp undid ka's share of every correction, the residual could
-  # never close, and health and feedforward trust stayed down.
+  # 75 gal nominal (48x18x21) holding ~62 gal of water after substrate and
+  # hardscape -- the figure water-flow/ uses, and the one the two full-power
+  # steps in Home Assistant agree with (300 W raised it 1.85 and 2.10 degF/h,
+  # i.e. ~60 gal of effective water). Two 150 W Jagers = 300 W. No lids yet:
+  # open top, in the office. When the lids with evaporation covers go on,
+  # set Tank Cover in Home Assistant -- not here -- and the model relearns
+  # its time constant from the new expected value.
   #
-  # Why 6000 min: tau = m*c/UA. ~235 L of water is 235 kg * 4186 J/kg.K =
-  # ~0.98 MJ/K, so 6000 min (360000 s) corresponds to a loss slope UA of
-  # only 2.7 W/K. Natural convection alone off ~2.3 m^2 of glass and lid
-  # at a couple of W/m^2.K exceeds that, before evaporation's slope is
-  # added, so no real value of this tank can sit beyond 6000 -- unlike
-  # 1000 min (UA 16 W/K), which a lidded tank of this size can plausibly
-  # beat. The bound's job is to stop nonsense, not to encode a guess, so it
-  # goes where physics, not the nano, rules values out.
-  #
-  # 2026-10-14: the 6000 min ceiling was not the fix. Two days after it
-  # went in Tank Time Constant read exactly 6000, Model Bias +2.6 degF/h,
-  # health 78% -- ka had simply run to the new bound. The cause was in the
-  # model, not the bound: (T - 75.2 degF) was a near-constant ~1.9 degF
-  # here, so ka and the constant c were interchangeable and RLS sent ten
-  # times more of each correction to ka; the clamp then threw it away, and
-  # c's covariance was too small to ever take it up. The component now
-  # centres the model on the setpoint (or on the room, see the room_air
-  # package below), enforces bounds by covariance-aware projection, and
-  # tracks c as a random walk, so a bound can no longer leave a bias.
-  # tools/thermal_model_sim.py reproduces the old pin and shows the fix.
-  #
-  # 6000 stays because the physics above still holds: it is where m*c/UA
-  # rules values out for this tank. It now also sets ka's starting guess
-  # (a fifteenth of it, 400 min, instead of the nano's 67), and a ka the
-  # old firmware left pinned on it is reset to that guess on first boot.
-  max_time_constant: 6000min
+  # What that gives (logged at boot, "Time Constant Band" in HA): Tank Time
+  # Constant 446-2042 min, expected 954; heater 1.98 degF/h at full power.
+  # Measured from 17 days of this tank's history: 810 min (90% 680-1010).
+  # 201f2c8 read 6000, which would need the tank to shed 2.7 W/K -- less
+  # than its glass alone does.
+  tank_volume: 75
+  water_volume: 62
+  heater_power: 300
+  tank_cover: open_top
+  tank_placement: open_room
 
 
 sensor:

@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import sensor, output, time as time_
+from esphome.components import sensor, output, binary_sensor, time as time_
 from esphome.const import (
     CONF_ID,
     CONF_TEMPERATURE,
@@ -12,7 +12,7 @@ CONF_FAN = "fan"
 
 CODEOWNERS = ["@tank-monitor"]
 DEPENDENCIES = []
-AUTO_LOAD = ["sensor", "output"]
+AUTO_LOAD = ["sensor", "output", "binary_sensor"]
 
 CONF_ILLUMINANCE = "illuminance"
 CONF_HEATER = "heater"
@@ -29,6 +29,17 @@ CONF_DISAGREEMENT_BAND = "disagreement_band"
 CONF_AMBIENT = "ambient"
 CONF_AMBIENT_TIMEOUT = "ambient_timeout"
 CONF_AMBIENT_SOURCE = "ambient_source"
+CONF_HEATER_RELAY = "heater_relay"
+CONF_FAN_RELAY = "fan_relay"
+CONF_TANK_VOLUME = "tank_volume"
+CONF_WATER_VOLUME = "water_volume"
+CONF_HEATER_POWER = "heater_power"
+CONF_TANK_COVER = "tank_cover"
+CONF_TANK_PLACEMENT = "tank_placement"
+
+# Order matches COVER_* / PLACEMENT_* in tank_controller.h.
+TANK_COVERS = {"open_top": 0, "lid": 1, "evaporation_cover": 2, "unknown": 3}
+TANK_PLACEMENTS = {"open_room": 0, "enclosed_cabinet": 1}
 
 tank_controller_ns = cg.esphome_ns.namespace("tank_controller")
 TankController = tank_controller_ns.class_("TankController", cg.PollingComponent)
@@ -80,6 +91,12 @@ def _f_delta_to_c(f):
 
 
 def _validate(config):
+    tank = config.get(CONF_TANK_VOLUME, 0.0)
+    water = config.get(CONF_WATER_VOLUME, 0.0)
+    if water and not tank:
+        raise cv.Invalid("water_volume needs tank_volume (the tank's size gives its surface area)")
+    if water and water > tank:
+        raise cv.Invalid("water_volume cannot exceed tank_volume")
     if config[CONF_MIN_TEMPERATURE] >= config[CONF_MAX_TEMPERATURE]:
         raise cv.Invalid("min_temperature must be below max_temperature")
     if not (
@@ -106,24 +123,48 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_FULL_SCALE_LUX, default=2000.0): cv.positive_float,
             cv.Optional(CONF_RESPONSE_TIME, default="20min"): cv.positive_time_period_minutes,
             cv.Optional(CONF_LEARNING, default=True): cv.boolean,
-            # Ceiling on the learned passive time constant (Tank Time
-            # Constant), i.e. the floor on the model's loss coefficient ka.
-            # 1000 min suits the ~10 gal nano and stays the default; a large
-            # lidded tank can be slower than that. Since the model is centred
-            # on its operating point and bounds are enforced by projection, a
-            # bound the fit leans on no longer leaves the model biased (see
-            # THETA_MAX in tank_controller.cpp) -- but it should still sit
-            # where physics, not a smaller tank, rules values out. Set it where m*c/UA rules
-            # values out: tau = m*c / (smallest loss slope the tank could
-            # physically have). 100 min keeps the RLS prior (67 min)
-            # learnable from either side; 20000 min is two weeks, beyond any
-            # aquarium.
-            cv.Optional(CONF_MAX_TIME_CONSTANT, default="1000min"): cv.All(
+            # Explicit ceiling on the learned passive time constant (Tank Time
+            # Constant), i.e. the floor on the loss coefficient ka. Optional.
+            # With tank_volume set the band comes from the tank's physics and
+            # this only overrides its ceiling; without it the ceiling is
+            # 1000 min unless set here. 100 min to 20000 min (two weeks).
+            cv.Optional(CONF_MAX_TIME_CONSTANT): cv.All(
                 cv.positive_time_period_minutes,
                 cv.Range(
                     min=cv.TimePeriod(minutes=100), max=cv.TimePeriod(minutes=20000)
                 ),
             ),
+            # The tank's physics. All optional, all FIRST-BOOT DEFAULTS: the
+            # "Tank Volume", "Water Volume", "Heater Power", "Tank Cover" and
+            # "Tank Placement" entities (control.yaml) change them at runtime
+            # and the controller persists them, like the setpoint. With
+            # tank_volume they set the thermal model's priors and bounds
+            # from m*c and U*A -- see "What the tank's size says" in
+            # tank_controller.cpp. Without it the model keeps its old priors.
+            #
+            # tank_volume: nominal size, US gallons (75 for a 75). Gives the
+            # glass and water-surface areas.
+            cv.Optional(CONF_TANK_VOLUME, default=0.0): cv.float_range(min=0.0, max=500.0),
+            # water_volume: the water actually in it, US gallons, after
+            # substrate and hardscape. Gives the heat capacity. 0 / omitted =
+            # 85% of tank_volume.
+            cv.Optional(CONF_WATER_VOLUME, default=0.0): cv.float_range(min=0.0, max=500.0),
+            # heater_power: all heaters together at 100% duty, watts (2 x 150
+            # = 300 on the 75). Gives the heater gain outright. 0 / omitted =
+            # unknown: the gain is learned from the generic prior as before.
+            cv.Optional(CONF_HEATER_POWER, default=0.0): cv.float_range(min=0.0, max=5000.0),
+            # What is over the water: open_top, lid, evaporation_cover
+            # (a lid with the gaps sealed), or unknown (the widest band).
+            cv.Optional(CONF_TANK_COVER, default="unknown"): cv.enum(TANK_COVERS, lower=True),
+            # What is around it: open_room, or enclosed_cabinet (the tank
+            # sits inside a closed stand -- warmer air around it, a longer
+            # time constant, and a room sensor that does not measure it).
+            cv.Optional(CONF_TANK_PLACEMENT, default="open_room"): cv.enum(TANK_PLACEMENTS, lower=True),
+            # The relays as switched (binary sensors published from the
+            # slow_pwm outputs). When given the model learns from delivered
+            # on-time, not commanded duty. control.yaml wires both.
+            cv.Optional(CONF_HEATER_RELAY): cv.use_id(binary_sensor.BinarySensor),
+            cv.Optional(CONF_FAN_RELAY): cv.use_id(binary_sensor.BinarySensor),
             # How far above setpoint the water must sit before the fan may
             # run, degF. First-boot default only: the "Fan Deadband" number
             # in control.yaml changes it at runtime and the controller
@@ -193,7 +234,21 @@ async def to_code(config):
     cg.add(var.set_full_scale_lux(config[CONF_FULL_SCALE_LUX]))
     cg.add(var.set_response_time(config[CONF_RESPONSE_TIME].total_minutes))
     cg.add(var.set_learning_enabled(config[CONF_LEARNING]))
-    cg.add(var.set_max_time_constant(config[CONF_MAX_TIME_CONSTANT].total_minutes))
+    if CONF_MAX_TIME_CONSTANT in config:
+        cg.add(var.set_max_time_constant(config[CONF_MAX_TIME_CONSTANT].total_minutes))
+    cg.add(
+        var.set_physics_default(
+            config[CONF_TANK_VOLUME],
+            config[CONF_WATER_VOLUME],
+            config[CONF_HEATER_POWER],
+            TANK_COVERS[config[CONF_TANK_COVER]],
+            TANK_PLACEMENTS[config[CONF_TANK_PLACEMENT]],
+        )
+    )
+    if CONF_HEATER_RELAY in config:
+        cg.add(var.set_heater_relay(await cg.get_variable(config[CONF_HEATER_RELAY])))
+    if CONF_FAN_RELAY in config:
+        cg.add(var.set_fan_relay(await cg.get_variable(config[CONF_FAN_RELAY])))
     cg.add(var.set_fan_deadband(_f_delta_to_c(config[CONF_FAN_DEADBAND])))
     cg.add(var.set_disagreement_band(_f_delta_to_c(config[CONF_DISAGREEMENT_BAND])))
     if CONF_CROSS_CHECK in config:

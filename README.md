@@ -633,10 +633,81 @@ on its limit hands its share of a correction to the others instead of leaving
 the model biased. `Model Health` is judged against the residual's measured
 noise floor, and `Model Reference` shows what the model is centred on.
 
+`ka` moves only when something actually excites it: a window where the water
+sits at least 0.3 °F from the model's centre — a setpoint move, a water change,
+a heater outage, or the room swinging. With a room sensor the centre is the
+room plus a 12-hour average of how far above it the water sits, so the room's
+*movement* teaches `ka` and its steady level belongs to `c`. On a quiet day
+`Tank Time Constant` stays where it is. (It used to walk: 400 → 6000 min in an
+hour on the 75 on 2026-10-14, with the room moving 0.2 °F.)
+
+The heater and fan terms learn from how long the relays were actually closed
+(`heater_relay` / `fan_relay`, wired in `control.yaml`), not from the duty the
+controller asked for. On the 75 those differ by 1.7× — its board restarts the
+15-minute PWM window on every new call for heat — and learning from commanded
+duty is what made its `Learned Heater Power` read 4.97 °F/h for heaters that
+can physically give 1.98.
+
+### Tank size, heater, cover and placement
+
+Five settings tell the model what physics allows, so its priors and bounds
+come from the tank instead of from a generic guess. Each is a YAML key on
+`tank_controller:` (the first-boot default, set in the board file) and an
+entity in Home Assistant (the controller persists what you set there):
+
+| YAML key | Entity | Meaning |
+| --- | --- | --- |
+| `tank_volume` | Tank Volume (gal) | nominal size, US gallons — gives glass and water-surface area |
+| `water_volume` | Water Volume (gal) | water actually in it after substrate and rock; 0 = 85% of Tank Volume — gives heat capacity |
+| `heater_power` | Heater Power (W) | all heaters together at full power; 0 = unknown |
+| `tank_cover` | Tank Cover | `open_top` / `lid` / `evaporation_cover` / `unknown` |
+| `tank_placement` | Tank Placement | `open_room` / `enclosed_cabinet` |
+
+From these the controller computes the time constant `m·c / UA`: the water's
+heat capacity over how many watts the tank sheds per degree. The areas are a
+standard rectangular tank of that volume; the heat-transfer coefficients are
+3–10 W/m²·K for the glass, and for the top 10–25 open (radiation, convection
+and the room-dependent part of evaporation), 3–8 under a lid, 2–5 with the
+evaporation cover sealed. A closed stand puts the cabinet's own walls in
+series. `Time Constant Band` and `Expected Time Constant` show the result, and
+`Tank Time Constant` learns within that band. `Heater Power` gives the heater
+gain outright (watts over heat capacity) and holds the learned value near it.
+
+Changing any of them resets what it determines — the time constant for volume,
+cover and placement; the heater gain for heater power and water volume — to the
+new expected value, re-opens its uncertainty so it relearns, and adjusts `c` so
+the 15-minute forecast does not jump. The log says what changed. **When you put
+a lid on, change Tank Cover**: most of an open tank's evaporation is a steady
+loss (the 75 open-top: about 0.16 °F/h, ~25 W), so the heater will work less,
+and the time constant rises with it.
+
+| Tank | Settings | Time constant band | Expected | Heater |
+| --- | --- | --- | --- | --- |
+| 75 gal | 75 gal, 62 gal water, 300 W, open top, room | 446–2042 min | 954 min | 1.98 °F/h |
+| 75 gal | same, lid | 618–3077 min | 1379 min | |
+| 75 gal | same, lid + evaporation cover | 663–3318 min | 1483 min | |
+| nano | 16 gal, 150 W, lid, enclosed cabinet | 628–3444 min | 1471 min | 4.51 °F/h |
+
+The 75's measured value, from 17 days of its own Home Assistant history (heat
+balance with delivered heater power, `tools/thermal_model_sim.py --measure`):
+**810 min, 90% range 680–1010**.
+
+**Room sensor and an enclosed cabinet.** A tank inside a closed stand sheds
+heat to the cabinet's air, and that air is warmed by the tank and its heater
+far more than it follows the room. An office or room sensor outside the
+cabinet does not measure it. With `enclosed_cabinet` and a room sensor
+configured the controller logs a warning; the model still runs (`ka` is then
+the loss through the cabinet to the room, and the room's swing reaches the
+tank late and damped), but a sensor *inside* the cabinet is the right input.
+The nano is in a cabinet and has no room sensor, so it centres on its setpoint.
+
 `tools/thermal_model_sim.py` replays the model and control law, in float32,
-against a simulated tank (room swing, heating-season step, slow-PWM heater, two
-quantised probes) for the old and current firmware. Run it after changing any
-of the model's constants.
+against a simulated tank (the 75's real office temperature from Home Assistant,
+slow-PWM heaters including the 75's restart-on-demand window, a minute of
+heater lag, two quantised probes, a Zigbee room sensor, lids going on, the nano
+in a cabinet) for the previous and current firmware, and replays 17 days of the
+75's real history (`tools/data/`) through the estimator. Run it after changing
+any of the model's constants.
 
 **Learning runs on 5-minute windows, not every tick.** A DS18B20 quantizes to
 0.1125 °F; differentiating that every 30 s produces noise far larger than the
@@ -769,7 +840,12 @@ Under one `Tank Monitor` device:
 `Electrical Conductivity` (µS/cm), `Tank Light Level` (lx), `Heater Output`
 (%), `Fan Output` (%), `Predicted Temperature (15 min)`, `Controller State`.
 
+**Tank** (config) — `Tank Volume` (gal), `Water Volume` (gal), `Heater Power`
+(W), `Tank Cover`, `Tank Placement`; see
+[Tank size, heater, cover and placement](#tank-size-heater-cover-and-placement).
+
 **Diagnostic** — `Model Confidence`, `Model Bias`, `Tank Time Constant`,
+`Expected Time Constant`, `Time Constant Band`,
 `Learned Heater Power`, `Learned Light Heat Gain`, `Predicted Light Load`,
 `Learned Fan Power`, `Temperature Drift Rate`, `TDS Probe Voltage`,
 `Temperature Fault`, `Heater Not Responding`, `Fan Not Responding`,

@@ -21,6 +21,16 @@
 # Without it the model is still right, by tracking the drift (c) as a
 # random walk; this makes it right sooner and explains why.
 #
+# Only the room's MOVEMENT teaches Tank Time Constant: the model is centred
+# on the room plus a 12 h average of the water's height above it, and a
+# quiet room leaves the time constant where it is ("Only excitation moves
+# ka" in tank_controller.cpp). It no longer wanders on a still afternoon.
+#
+# NOT FOR A TANK IN A CLOSED CABINET. A sensor in the room does not measure
+# the air inside a stand, which the tank and its heater warm far more than
+# the room does. With tank_placement: enclosed_cabinet the controller logs
+# a warning; put the sensor inside the cabinet instead.
+#
 # Why Zigbee and not a probe: the sensor already sits beside the tank and
 # reports to the same Mosquitto broker this board already uses. No wiring,
 # no opening the case, no new failure mode on the controller's 1-Wire buses.

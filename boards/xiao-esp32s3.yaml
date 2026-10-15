@@ -112,6 +112,23 @@ one_wire:
 # because the probe is a pin and the pin is this board's.
 tank_controller:
   cross_check: water_temp_b
+  # The nano's physics: first-boot defaults for the Tank Volume, Water
+  # Volume, Heater Power, Tank Cover and Tank Placement entities (persisted
+  # once set; change them in Home Assistant). 16 gal with one 150 W heater
+  # and a lid with no evaporation cover, inside a closed section of its
+  # stand. Water defaults to 85% of the tank (13.6 gal). See "What the
+  # tank's size says" in tank_controller.cpp: Tank Time Constant 628-3444
+  # min, expected 1471; heater 4.5 degF/h at full power -- per watt about
+  # 4.6x the 75's, for a quarter of the water. The 59 min it had learned
+  # would need 60 W/K of loss from a 16 gal in a cabinet.
+  #
+  # No room sensor here, and none should be added as-is: an office sensor
+  # does not measure the air inside the stand, which follows the heater more
+  # than the room (README, "Room sensor").
+  tank_volume: 16
+  heater_power: 150
+  tank_cover: lid
+  tank_placement: enclosed_cabinet
 
 globals:
   # Probe B's own offset. Two DS18B20 are +/-0.5 degC absolute EACH, so
