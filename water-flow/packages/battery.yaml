@@ -79,9 +79,12 @@ binary_sensor:
     id: low_battery
     device_class: battery
     trigger_on_initial_state: true
+    # No reading (divider not wired, or no pack) publishes nothing, so the
+    # entity stays unknown -- "normal" would vouch for a battery nobody read.
     lambda: |-
       const float v = id(battery_voltage).state;
-      return !std::isnan(v) && v < ${battery_low_v};
+      if (std::isnan(v)) return {};
+      return v < ${battery_low_v};
     filters:
       # A transmit burst is not a flat battery.
       - delayed_on: 30s
