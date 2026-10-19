@@ -51,12 +51,17 @@
 #     plateau lux is tracked as an average ("Light Learned Lux").
 #   * Plateau and reading below max(20 lx, a quarter of the learned level)
 #     for 5 minutes = the lamp is dark when it should be lit. Re-push.
-#   * Well outside the photoperiod and reading above HALF the learned level
-#     for 5 minutes = lit when it should be dark (lights left on overnight is
-#     the algae case). Re-push. Disabled until BOTH a lit level and the
-#     daylight reference (cal_nir_ref) have been learned: tank_lux passes
-#     sunlight through as lamp light until then, so a fresh board on a sunny
-#     afternoon would otherwise "detect" a lamp that is actually off.
+#   * Outside the photoperiod and reading above 5% of the learned level
+#     (floor 10 lx; 15 lx before anything is learned) for 5 minutes = lit
+#     when it should be dark (lights left on overnight is the algae case):
+#     "Light Brighter Than Schedule", and a re-push. Waits for the daylight
+#     reference (cal_nir_ref) or the sun below -6 deg: tank_lux passes
+#     sunlight through as lamp light until the reference is learned. (Was
+#     HALF the learned level, which a lamp creeping back on at 1 lx/min
+#     after sunset on 2026-10-19 never reached.)
+#   * On the sun curve, well above the curve (1.5x + 5%) for 5 minutes also
+#     counts, and suspends the curve until midnight: the single scene is
+#     pushed instead, which darkens / corrects the lamp at once.
 #   * No more than one fix per 15 minutes; after 3 fixes that did not take,
 #     stop pushing and raise "Light Not Responding" rather than hammering the
 #     radio. It clears the moment the lamp matches again.
@@ -355,6 +360,25 @@ globals:
     type: int
     restore_value: false
     initial_value: '-1'
+  # Lit / brighter than the schedule for 5 min ("Light Brighter Than
+  # Schedule").
+  - id: light_over
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Day of year the sun curve was suspended for (the lamp went brighter than
+  # the curve); the phase runs as the single scene until midnight. Restored,
+  # so a reboot that evening does not put the suspect curve back. -1 = none.
+  - id: light_curve_off_day
+    type: int
+    restore_value: true
+    initial_value: '-1'
+  # millis() of the last push, so the lamp's answers to it are logged at
+  # INFO (DEBUG otherwise; the lamp may also notify unprompted).
+  - id: light_push_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
   - id: lp_frac_now
     type: float
     restore_value: false
@@ -434,6 +458,8 @@ select:
             id(light_mismatch_min) = 0;
             id(light_fix_attempts) = 0;
             id(light_not_responding) = false;
+            id(light_over) = false;
+            id(light_curve_off_day) = -1;
         - script.execute: light_refresh_controls
         - script.execute: light_push
 
@@ -464,6 +490,8 @@ select:
             const int now_i = (int) i;
             if (now_i == id(light_shape_last)) return;
             id(light_shape_last) = now_i;
+            id(light_curve_off_day) = -1;     // an explicit choice ends a suspension
+            id(light_over) = false;
             id(light_learned_lux) = 0.0f;
             id(light_mismatch_min) = 0;
             id(light_fix_attempts) = 0;
@@ -582,7 +610,8 @@ script:
               int on = r.hour * 60 + r.minute, off = z.hour * 60 + z.minute;
               const int day = off - on;
               if (day > 60) {
-                if (id(light_shape).active_index().value_or(0) == 0) {
+                if (id(light_shape).active_index().value_or(0) == 0 &&
+                    id(light_curve_off_day) != now.day_of_year) {
                   // The sun curve: sunrise and sunset exactly, shape solved
                   // for the dose (chihiros::sun_curve).
                   float peak, p;
@@ -630,6 +659,8 @@ script:
             id(lp_bright_off) = -1;
             if (!id(lp_auto)) id(lp_dose) = 0.0f;
           }
+          if (id(light_curve_off_day) == now.day_of_year && id(lp_sun) && !id(lp_curve))
+            ESP_LOGW("light", "sun curve suspended today (lamp went brighter than it); single scene until midnight");
           ESP_LOGI("light", "phase %d: %s%s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
                    ph, ph ? "auto" : "manual-off",
                    id(lp_curve) ? " (sun curve)" : id(lp_sun) ? " (sun, single fade)" : "",
@@ -688,6 +719,7 @@ script:
           then:
             - lambda: |-
                 const bool pro = ${light_pro};
+                id(light_push_ms) = millis();
                 if (id(lp_auto) && id(lp_curve)) {
                   // The sun curve as points: exact sunrise and sunset at 0,
                   // and one point every `step` minutes on the clock between
@@ -903,44 +935,83 @@ interval:
 
           // learned = lux at the phase's FULL values. A scene learns on its
           // plateau only (its ramps are the lamp's own, shape unknown); the
-          // sun curve learns above 70% of its peak, as lux / level.
+          // sun curve learns above 70% of its peak, as lux / level. Once
+          // learned, a sample outside 0.6-1.4x of it is not learned from: an
+          // overshoot (the 2026-10-19 15:30 bump, ~2.3x) must not teach the
+          // board that the overshoot is normal.
+          //
+          // Two kinds of mismatch:
+          //   dark  the lamp is darker than it should be      -> re-push, x3
+          //   over  the lamp is lit when it should be dark, or (sun curve)
+          //         well above the curve                      -> Light
+          //         Brighter Than Schedule; a curve is suspended for the rest
+          //         of the day and the scene pushed instead, which darkens
+          //         the lamp at once (it did at 18:58 on 2026-10-19).
           float &learned = id(light_learned_lux);
-          bool mismatch = false;
+          bool dark = false, over = false;
           if (expect == 4) {
             const float dark_below = std::max(20.0f, 0.25f * learned * frac);
             const bool learn = id(lp_curve) ? rel >= 0.7f
                                             : (m >= on + ramp + 5 && m < off - ramp - 5);
             if (lux < dark_below) {
-              mismatch = true;
+              dark = true;
             } else if (learn && frac > 0.0f) {
               const float full = lux / frac;
-              if (learned <= 0.0f) learned = full;             // first sample
-              else learned += 0.05f * (full - learned);        // ~20 min average
+              if (learned <= 0.0f) learned = full;                     // first sample
+              else if (full > 0.6f * learned && full < 1.4f * learned)
+                learned += 0.05f * (full - learned);                    // ~20 min average
             }
-          } else if (expect == 1 || expect == 2) {
-            // Needs the daylight reference too. tank_lux fails OPEN -- until
-            // cal_nir_ref is learned, sunlight passes through as if it were
-            // the lamp, and a bright afternoon outside the photoperiod would
-            // read as "lamp left on" and end in a false Not Responding.
-            // Half of today's peak: a curve with a scaled-down peak never
-            // reaches the full-values lux, even when stuck on.
-            if (learned > 0.0f && id(cal_nir_ref) > 0.0f && lux > 0.5f * learned * std::max(0.3f, id(lp_peak)))
-              mismatch = true;
+          }
+          if (expect == 1 || expect == 2) {
+            // Lit when it should be dark. tank_lux fails OPEN until the
+            // daylight reference is learned (sunlight passes through as lamp
+            // light), so before that the check waits for the sun to be well
+            // down (civil dusk, -6 deg). 5% of full, floor 10 lx; 15 lx
+            // before anything is learned. Room LEDs leak into tank_lux, but
+            // the evening before this check was written read 0 throughout.
+            const bool daylight_ok = id(cal_nir_ref) > 0.0f || id(light_sun).elevation() < -6.0;
+            const float limit = learned > 0.0f ? std::max(10.0f, 0.05f * learned) : 15.0f;
+            if (daylight_ok && lux > limit) over = true;
+          } else if (id(lp_curve) && learned > 0.0f && !dark) {
+            // On the curve the level is known all day: well above it is a
+            // point the lamp holds that the board did not write.
+            if (lux > 1.5f * learned * frac + std::max(15.0f, 0.05f * learned)) over = true;
           }
 
-          if (!mismatch) {
-            if (id(light_not_responding))
+          if (!dark && !over) {
+            if (id(light_not_responding) || id(light_over))
               ESP_LOGI("light", "lamp matches the schedule again");
             id(light_mismatch_min) = 0;
             id(light_fix_attempts) = 0;
             id(light_not_responding) = false;
+            id(light_over) = false;
             return;
           }
 
           id(light_mismatch_min)++;
-          ESP_LOGW("light", "lamp does not match: expected %s (level %.0f%%), lamp lux %.0f, learned at full %.0f (%d min)",
-                   expect == 4 ? "lit" : "dark", frac * 100.0f, lux, learned, id(light_mismatch_min));
-          if (id(light_mismatch_min) < 5 || id(light_not_responding)) return;
+          ESP_LOGW("light", "lamp does not match: %s (expected level %.0f%%), lamp lux %.0f, learned at full %.0f (%d min)",
+                   dark ? "darker than the schedule" : "brighter than the schedule",
+                   frac * 100.0f, lux, learned, id(light_mismatch_min));
+          if (id(light_mismatch_min) < 5) return;
+
+          if (over) {
+            if (!id(light_over))
+              ESP_LOGE("light", "lamp lit / brighter than the schedule for 5 min");
+            id(light_over) = true;
+            if (id(lp_curve)) {
+              // Re-pushing the same curve would not help if the lamp holds
+              // points it should not; the scene is the lamp's proven path.
+              ESP_LOGE("light", "sun curve suspended until midnight; pushing the single scene instead");
+              id(light_curve_off_day) = now.day_of_year;
+              id(light_mismatch_min) = 0;
+              id(light_last_fix_ms) = millis();
+              id(light_select_phase).execute();
+              id(light_refresh_controls).execute();
+              id(light_push).execute();
+              return;
+            }
+          }
+          if (id(light_not_responding)) return;
           if (id(light_last_fix_ms) != 0 && millis() - id(light_last_fix_ms) < 15UL * 60UL * 1000UL) return;
 
           if (id(light_fix_attempts) >= 3) {
@@ -1268,6 +1339,14 @@ binary_sensor:
     device_class: problem
     lambda: return id(light_not_responding);
 
+  # The lamp lit when it should be dark (5% of full for 5 min), or well
+  # above the sun curve. On the curve this also suspends it until midnight.
+  - platform: template
+    trigger_on_initial_state: true
+    name: "Light Brighter Than Schedule"
+    device_class: problem
+    lambda: return id(light_over);
+
 sensor:
   # Link health. Drops counts every unplanned loss of the lamp link (not a
   # release to the app); a steady climb with "supervision timeout" in Light
@@ -1370,7 +1449,29 @@ sensor:
     notify: true
     internal: true
     lambda: |-
-      ESP_LOGD("light", "notify (%d bytes): %s", (int) x.size(), chihiros::hex_dump(x).c_str());
+      // Reassembled into whole 0x5b frames. Within a minute of a push (the
+      // push opens and, for the sun curve, closes with a status query) they
+      // are logged at INFO and a schedule snapshot -- what the lamp says it
+      // stores -- goes to "Light Lamp Report".
+      static chihiros::NotifyAssembler asm_;
+      const bool loud = millis() - id(light_push_ms) < 60000UL;
+      if (loud) {
+        ESP_LOGI("light", "notify (%d bytes): %s", (int) x.size(), chihiros::hex_dump(x).c_str());
+      } else {
+        ESP_LOGD("light", "notify (%d bytes): %s", (int) x.size(), chihiros::hex_dump(x).c_str());
+      }
+      if (asm_.feed(x)) {
+        const auto &f = asm_.frame();
+        if (chihiros::is_schedule_snapshot(f)) {
+          int n = 0;
+          const std::string pts = chihiros::decode_schedule_snapshot(f, &n);
+          ESP_LOGI("light", "lamp snapshot fw %u, %d bytes: %s", f[1], (int) f.size(), chihiros::hex_dump(f).c_str());
+          ESP_LOGI("light", "  decoded (A2 layout) %d points: %s", n, pts.c_str());
+          std::string rep = std::to_string(n) + " pts: " + pts;
+          if (rep.size() > 250) rep = rep.substr(0, 247) + "...";
+          id(light_lamp_report).publish_state(rep);
+        }
+      }
       return NAN;
 
 text_sensor:
@@ -1422,6 +1523,15 @@ text_sensor:
       snprintf(buf, sizeof(buf), "%02d:%02d", v / 60, v % 60);
       return {std::string(buf)};
 
+  # The lamp's own schedule snapshot after a push: the points it says it
+  # stores, decoded in the one documented layout (A2). Read with the raw
+  # frame in the log until a WRGB II Pro's layout is confirmed.
+  - platform: template
+    id: light_lamp_report
+    name: "Light Lamp Report"
+    icon: mdi:clipboard-text-clock
+    entity_category: diagnostic
+
   - platform: template
     name: "Light Expected"
     icon: mdi:calendar-clock
@@ -1432,8 +1542,8 @@ text_sensor:
       if (!id(light_linked)) return {"no link"};
       switch (id(light_expected)) {
         case 1: return {"off phase"};
-        case 2: return {"dark"};
-        case 3: return {"ramping"};
-        case 4: return {"lit"};
+        case 2: return {id(light_curve_off_day) >= 0 && id(light_curve_off_day) == id(lp_sun_day) ? "dark (curve suspended)" : "dark"};
+        case 3: return {id(light_curve_off_day) >= 0 && id(light_curve_off_day) == id(lp_sun_day) ? "ramping (curve suspended)" : "ramping"};
+        case 4: return {id(light_curve_off_day) >= 0 && id(light_curve_off_day) == id(lp_sun_day) ? "lit (curve suspended)" : "lit"};
         default: return {"unknown"};
       }

@@ -117,7 +117,9 @@ other section there. This is *not* on the `aquarium-tank` dashboard that
 | `button…release_light_for_app_30_min` | Hands the lamp to the Chihiros app for 30 min, then takes it back and re-pushes |
 | `button…reset_light_phase_to_defaults` | Restores the selected phase to the table below |
 | `binary_sensor…light_linked` | The BLE link to the lamp is up |
-| `binary_sensor…light_not_responding` | Three re-pushes did not make the lamp match the schedule |
+| `binary_sensor…light_not_responding` | Three re-pushes did not make the lamp darker-than-schedule match |
+| `binary_sensor…light_brighter_than_schedule` | Lit when it should be dark (5 % of full, floor 10 lx) or well above the sun curve, for 5 min. On the curve it also suspends the curve until midnight and pushes the single scene |
+| `sensor…light_lamp_report` | The lamp's own stored-schedule snapshot after a push (points it says it holds) |
 | `sensor…light_expected` | What the lamp should be doing now: lit (≥ half the peak) / ramping / dark / off phase |
 | `sensor…light_learned_lux` | Lux at the phase's full values (curve: learned as lux / level above 70 % of the peak) |
 | `sensor…light_link_drops`, `…light_link_uptime`, `…light_link_last_drop` | Link health and the radio's reason for the last drop |
@@ -188,15 +190,25 @@ Phases 3–4 are the CO2 ladder. See the DEFAULTS comment in
 **The schedule still runs on the lamp.** A fixed or Single-fade phase is
 pushed as an auto-mode scene (switch to scenes → clear slots → schedule →
 clock, the app's own sequence — chihiros-esphome `ca8fc35`). A Sun-curve phase
-is pushed as a multi-point day into the lamp's custom-curve controller (clear
-points `5a/05 [05]` → curve controller `5a/05 [03]` → one `5a/06 [ch, hh, mm,
-%]` frame per channel per point → clock; chihiros-esphome `321b3d1`): sunrise
+is pushed as a multi-point day into the lamp's custom-curve controller (curve
+controller `5a/05 [03]` → clear it `[05]` → `[03]` → one `5a/06 [ch, hh, mm,
+%]` frame per channel per point → clock → status query; chihiros-esphome `1e677ae`): sunrise
 and sunset at 0 plus one point per hour on the clock, 13 points × 4 channels on
 a 11 h day. Either way the lamp runs it off its RTC, so the board or HA going
 down does not darken the tank or freeze it mid-day. "Off (cycling)" is manual
 mode at 0, which darkens it at once and does not relight itself. The board
 re-pushes at 03:00 daily to resync the lamp's drifting clock, and on every
 reconnect.
+
+**2026-10-19 field bug, fixed in chihiros-esphome `1e677ae` / this repo.** The
+first Sun-curve day ran correctly except for a lamp-made bump to ~2.3× full
+around 15:30 (NIR flat, so not daylight) and, after the 18:21 sunset point, a
+slow relight (~1 lx/min, 30 lx by 18:58). Cause: `5a/05 [05]` clears the
+*active* controller's settings; it was sent while the lamp was still in scene
+mode, so the curve table kept points nobody had written that session. The
+clear now follows `[03]`. Switching to Single fade at 18:58 darkened the lamp at
+once (the scene path clears and runs the scenes). The relight also went
+unflagged because "lit when dark" needed half the full lux; it is now 5 %.
 
 **The board checks the lamp.** `tank_lux` is lamp-only lux (daylight is
 removed by its near-infrared signature on the AS7341). The board learns the
