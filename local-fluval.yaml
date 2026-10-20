@@ -1,0 +1,21 @@
+# LOCAL validation wrapper for the Fluval bridge. Sister to local-btproxy.yaml:
+# every package comes from the working tree, so `esphome config` and
+# `esphome compile` test what you just edited rather than what is on main.
+#
+# device_name carries a -test suffix so a stray flash cannot impersonate the
+# real bridge on MQTT.
+substitutions:
+  device_name: tank-monitor-fluval-test
+  friendly_name: Tank Monitor Fluval TEST
+packages:
+  base: !include packages/base.yaml
+  fluval: !include packages/fluval_light.yaml
+  board: !include boards/esp32-wroom32-btproxy.yaml
+web_server: !remove
+
+# The component from the working tree, not from main.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [fluval_light]

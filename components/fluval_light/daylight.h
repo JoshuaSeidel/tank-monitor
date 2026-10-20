@@ -6,6 +6,12 @@
 
 // A real day for an aquarium light, vendor-neutral.
 //
+// It lives inside components/fluval_light/ rather than a components/daylight/
+// of its own because ESPHome copies external components by DIRECTORY, and a
+// header in a directory with no component class in it does not reliably make
+// it into the build. One consumer, one copy. If a second fixture in this repo
+// ever needs the sun, promote it then -- and only then.
+//
 // ---------------------------------------------------------------------
 // WHERE THIS CAME FROM, AND THE SIBLING YOU MUST KEEP IN STEP
 // ---------------------------------------------------------------------

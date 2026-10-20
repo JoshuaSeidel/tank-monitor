@@ -1,0 +1,114 @@
+# The Fluval bridge: one BLE client, one nightly curve push, and the
+# entities to see whether it worked.
+#
+# Pin-free and board-agnostic, like every package here, so it can ride on
+# a dedicated WROOM-32 today and move onto a Freenove all-in-one later
+# without being rewritten.
+#
+# The component is the interesting part -- see components/fluval_light/
+# for the protocol and components/fluval_light/daylight.h for the solar
+# model it shares (by copy, deliberately) with the Chihiros bridge.
+
+substitutions:
+  # The tank's own coordinates. The curve is real solar elevation at this
+  # point, so these are not decoration -- a wrong sign gives a confidently
+  # wrong day rather than an error.
+  fluval_latitude: "40.0"
+  fluval_longitude: "-75.13"
+  # Per-emitter level at solar noon, 0-100, one substitution each so a
+  # single colour can be trimmed without restating the others. ESPHome
+  # substitutions are strings, so a list cannot come through as one value
+  # -- five scalars is not a workaround, it is the only shape that works.
+  #
+  # PLACEHOLDER: a flat white day at full output. Which physical emitter
+  # is channel 1 is not documented anywhere verifiable; read it off the
+  # fixture's 0xD2 state frames on first connect and set these then.
+  fluval_ch1: "100"
+  fluval_ch2: "100"
+  fluval_ch3: "100"
+  fluval_ch4: "100"
+  fluval_ch5: "100"
+  # Full-equivalent hours per day. Scales brightness, NOT the photoperiod.
+  # 7.0 matches the 75 gal's Phase 2.
+  fluval_dose_hours: "7.0"
+  fluval_mac: "C6:E2:28:EF:62:84"
+
+# A BLE client needs the tracker up, but this board is not a proxy and has
+# no reason to scan hard. 300 ms in 1100 ms is enough to find one known
+# MAC and leaves the radio mostly idle.
+esp32_ble_tracker:
+  scan_parameters:
+    interval: 1100ms
+    window: 300ms
+    active: true
+
+ble_client:
+  - mac_address: ${fluval_mac}
+    id: fluval_ble
+
+fluval_light:
+  id: fluval
+  ble_client_id: fluval_ble
+  time_id: sntp_time
+  latitude: ${fluval_latitude}
+  longitude: ${fluval_longitude}
+  channel_count: 5
+  channel_mix: ["${fluval_ch1}", "${fluval_ch2}", "${fluval_ch3}", "${fluval_ch4}", "${fluval_ch5}"]
+  dose_cap_hours: ${fluval_dose_hours}
+  # 01:30, dark at every latitude this tank will ever sit at. A curve that
+  # half-arrives mid-afternoon is visible in the tank; one that half-arrives
+  # at 01:30 is overwritten before anything is lit.
+  push_hour: 1
+  status:
+    name: "Fluval Status"
+    icon: "mdi:message-text"
+    entity_category: diagnostic
+  curve:
+    name: "Fluval Curve"
+    icon: "mdi:chart-bell-curve"
+    entity_category: diagnostic
+  points:
+    name: "Fluval Curve Points"
+    icon: "mdi:dots-horizontal"
+    entity_category: diagnostic
+  dose:
+    name: "Fluval Daily Light"
+    icon: "mdi:white-balance-sunny"
+  connected:
+    name: "Fluval Connected"
+    device_class: connectivity
+
+button:
+  # Push now, rather than waiting for 01:30. The first one should be
+  # pressed while you are standing in front of the tank: until the channel
+  # mix is read off the fixture it is a flat white day at full output.
+  - platform: template
+    name: "Fluval Push Curve"
+    icon: "mdi:upload"
+    entity_category: config
+    on_press:
+      - fluval_light.push_curve:
+          id: fluval
+
+  # The clock is synced on every connect and before every nightly push.
+  # This is for proving it works without waiting for either.
+  - platform: template
+    name: "Fluval Sync Clock"
+    icon: "mdi:clock-check"
+    entity_category: config
+    on_press:
+      - fluval_light.sync_clock:
+          id: fluval
+
+  # Hand the fixture back to its own Auto schedule -- the one programmed
+  # from the Fluval Connect app. The way out if a pushed curve is wrong
+  # and you want the tank lit correctly tonight rather than after a
+  # debugging session.
+  - platform: template
+    name: "Fluval Mode Auto"
+    icon: "mdi:calendar-clock"
+    entity_category: config
+    on_press:
+      - fluval_light.set_mode:
+          id: fluval
+          mode: 1

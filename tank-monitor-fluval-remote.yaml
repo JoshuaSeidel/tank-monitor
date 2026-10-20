@@ -1,0 +1,85 @@
+# NANO TANK light bridge -- Fluval Plant 4.0 over BLE. Put THIS file in the
+# ESPHome dashboard.
+#
+# ---------------------------------------------------------------------
+# What this board does, and what it deliberately does not
+# ---------------------------------------------------------------------
+# Once a night, in the dark, it computes the real sun for this tank's
+# location, resamples the day to the twelve points the fixture can hold,
+# writes them into the lamp's Professional schedule, and sets the clock
+# that runs them. Then it has nothing to do until tomorrow.
+#
+# The schedule lives in the FIXTURE. The light runs its day whether Home
+# Assistant is rebooting, the broker is down, or this board is unplugged.
+# That is the entire reason this exists rather than a Bluetooth proxy --
+# a proxy puts Home Assistant in the daily control path, which is what
+# you said you did not want.
+#
+# Sister to the 75 gal's Chihiros bridge (tank-monitor-lg-light-remote.yaml)
+# and built on the same solar model, lifted into components/fluval_light/
+# daylight.h. Two tanks in one room now compute the same sunrise.
+#
+# ---------------------------------------------------------------------
+# BEFORE THE FIRST FLASH: the channel mix is a guess
+# ---------------------------------------------------------------------
+# channel_mix is the level of each of the five emitters at solar noon,
+# and the curve is that mix scaled by the sun. The numbers below are
+# all-100 placeholders -- a flat white day at full output.
+#
+# THAT IS ALMOST CERTAINLY NOT WHAT YOU WANT, and it is deliberately not
+# a plausible-looking guess: this project has been bitten before by a
+# config that looked tuned and was invented. Which physical emitter is
+# channel 1 is not documented anywhere I can verify, so it gets read off
+# the fixture on first connect (the 0xD2 state frames are logged) and set
+# here afterwards.
+#
+# Until then, expect the first push to light the tank flat and bright.
+# Push it at a time you are standing in front of the tank.
+#
+# ---------------------------------------------------------------------
+# dose_cap_hours caps BRIGHTNESS, not the photoperiod
+# ---------------------------------------------------------------------
+# The lamp still runs civil dawn to civil dusk -- about twelve hours in
+# October at this latitude. The cap scales the whole curve down until it
+# delivers that many full-equivalent hours. 7.0 matches the 75 gal's
+# Phase 2 dose.
+#
+# This matters for CO2: a sun-following day is LONGER than the fixed
+# 07:00-19:00 schedule it replaces, and the nano injects CO2 only until
+# 12:00. More lit hours without carbon favours algae. The curve is
+# gentler than the old flat plateau through the afternoon, which helps,
+# but the gap is real and the CO2 window may need to follow the light
+# the way the 75 gal's does.
+#
+# ---------------------------------------------------------------------
+# WHICH BOARD, AND WHICH RADIOS
+# ---------------------------------------------------------------------
+# The spare WROOM-32. NOT tank-monitor-s3 (BLE server for the round
+# panel), NOT tank-monitor-round (BLE client to the controller), and
+# never a board running ESP-NOW -- see packages/bluetooth_proxy.yaml for
+# the measurement behind that rule.
+#
+# When the nano moves to a Freenove all-in-one this can ride along: the
+# component is pin-free and holds one BLE client. Expect BLE server plus
+# this client on one radio, which is more than any board here has
+# carried. Watch Heap Max Block for a week before trusting it.
+substitutions:
+  device_name: tank-monitor-fluval
+  friendly_name: Tank Monitor Fluval
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/fluval_light.yaml
+      - boards/esp32-wroom32-btproxy.yaml
+    refresh: 0s
+
+# Same reasoning as the Bluetooth proxy: a classic ESP32 with 520 KB and
+# no PSRAM, running WiFi, MQTT and a BLE client. web_server is the biggest
+# heap consumer in base.yaml and there is no page worth serving here.
+# base.yaml's debug block stays -- Heap Max Block is the number that
+# matters, and the round panel already taught this project why.
+web_server: !remove
