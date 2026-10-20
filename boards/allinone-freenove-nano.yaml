@@ -17,7 +17,7 @@
 #
 #   signal                   GPIO   notes
 #   pH board signal          1      ADC1_CH0
-#   DS18B20                  4      4.7k pull-up to 3V3 (CAM_SIOD)
+#   DS18B20                  4      pull-up already present -- see below
 #   TDS board signal         6      ADC1_CH5
 #   Heater relay             8
 #   Fan relay                10
@@ -42,8 +42,29 @@
 # BOARD, camera or not. NEVER put an analog input on them -- on the 75 gal,
 # TDS on GPIO4 sat at ~2.33 V in air with the probe unplugged, and the leak
 # input on GPIO5 read a dead-flat "wet" from the first boot. The 1-Wire bus
-# lives on GPIO4 instead, because 1-Wire wants a pull-up anyway and the
-# board's sits in parallel with the 4.7k.
+# lives on GPIO4 instead, turning that pull-up from a liability into the
+# thing 1-Wire needs anyway.
+#
+# ---------------------------------------------------------------------
+# THE 1-WIRE PULL-UP: NOTHING TO FIT
+# ---------------------------------------------------------------------
+# Two resistors already pull this bus up, and neither of them is new work:
+#
+#   - The probe harness carries a 4.7k from DQ to 3V3, soldered at the
+#     board end (ASSEMBLY.md section 6). It is part of the harness, not the
+#     board, so it travels with the probe onto this chip.
+#   - GPIO4's own camera-bus pull-up, ~10k, on the PCB whether or not a
+#     camera is fitted.
+#
+# In parallel those land near 3.2k -- inside the 2.2k-10k that ASSEMBLY.md
+# calls workable, and faster rise times than either alone. So: move the
+# harness across and land DQ on GPIO4. Do NOT add a third resistor. Three
+# in parallel is ~1.9k, which only burns current.
+#
+# And it has to be a real resistor: ESPHome's one_wire platform has no
+# pull-up option because the ESP32's internal one is ~45k, far too weak to
+# restore the bus between bits. That failure mode looks like CRC errors and
+# intermittent dropouts, not like a clean fault.
 #
 # ---------------------------------------------------------------------
 # ONE PROBE, NOT TWO
@@ -96,8 +117,9 @@ mqtt:
 # !extend its probe and this board does not.
 one_wire:
   - platform: gpio
-    # 4.7k pull-up to 3V3, in parallel with the board's own camera-bus
-    # pull-up. See the pin map note above for why this pin and not GPIO6.
+    # Already pulled up twice -- the harness's 4.7k and the board's own
+    # camera-bus resistor, in parallel. See the pull-up note above: there
+    # is nothing to fit, and no pullup: to set here.
     pin: GPIO4
 
 # BH1750 only. The 75 gal spends both of the S3's I2C controllers because it
