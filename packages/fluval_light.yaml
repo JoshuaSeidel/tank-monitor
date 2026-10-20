@@ -9,6 +9,28 @@
 # for the protocol and components/fluval_light/daylight.h for the solar
 # model it shares (by copy, deliberately) with the Chihiros bridge.
 
+# Pulled from git so this builds in the Home Assistant ESPHome add-on with
+# no local files -- same as packages/control.yaml does for tank_controller.
+#
+# THIS BLOCK BELONGS HERE, NOT IN THE WRAPPER. The wrapper is the one file
+# not fetched from git, and load-critical config has silently gone missing
+# from it five times in this project now. It went missing again on the
+# first flash of this component: the package declared `fluval_light:` and
+# nothing told ESPHome where to find it, so the build failed with
+# "Component not found: fluval_light". The local validation wrapper had
+# its own external_components block, so `esphome compile` passed and the
+# gap only appeared on the real board.
+#
+# refresh: 0s because the ref is a moving branch -- the default caches for
+# a day and you would silently build yesterday's component.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [fluval_light]
+    refresh: 0s
+
 substitutions:
   # The tank's own coordinates. The curve is real solar elevation at this
   # point, so these are not decoration -- a wrong sign gives a confidently
