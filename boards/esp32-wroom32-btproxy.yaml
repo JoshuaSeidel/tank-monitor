@@ -1,0 +1,51 @@
+# Plain ESP32-WROOM-32 devkit running as nothing but a Bluetooth proxy.
+#
+# Deliberately NOT boards/esp32-wroom32.yaml. That file is a controller:
+# it brings up an I2C bus, a 1-Wire bus, an ADC for TDS and two relay
+# outputs, because packages/control.yaml and packages/sensors.yaml demand
+# exactly those five things. A proxy needs none of them, and declaring
+# hardware that is not wired is how this project has previously ended up
+# with a bus that reports "no devices" and an afternoon spent looking for
+# a fault that was a config line.
+#
+# So this file supplies the two things a proxy board actually owes:
+# the chip, and a unique_id generator that will not collide.
+#
+# ---------------------------------------------------------------------
+# WROOM-32 is BLE 4.2, and for THIS job that is fine
+# ---------------------------------------------------------------------
+# The Chihiros bridge needed an ESP32-S3 because those fixtures use BLE
+# 5.0 extended advertising, which a classic ESP32 cannot see at all.
+# Fluval lights advertise on plain BLE 4.x -- fluvalble's own users run it
+# over classic-ESP32 proxies. If the light never appears in Home
+# Assistant's Bluetooth device list after this board is up, that
+# assumption is the first thing to doubt, and the answer is an S3.
+#
+# ---------------------------------------------------------------------
+# Heap, because this board has 520 KB of SRAM and no PSRAM
+# ---------------------------------------------------------------------
+# WiFi + MQTT + an active BLE proxy is a real memory load on a classic
+# ESP32, and the round panel already taught this project what running out
+# of internal RAM looks like: a board that works for days and then stops
+# answering until it is physically unplugged.
+#
+# Two decisions follow, and both are in the wrapper rather than here
+# because they are about what the board CARRIES, not what it IS:
+#   - web_server is removed. It is the single largest heap consumer in
+#     base.yaml and a proxy has no page worth serving.
+#   - Heap Free / Heap Max Block / Reset Reason come from base.yaml's
+#     debug block. Watch Heap Max Block, not Heap Free -- fragmentation
+#     kills an allocation while Free still looks healthy.
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+# ESPHome's default MQTT unique_id generator is "legacy": "ESP" + component
+# type + object_id, with NO device name and no MAC in it. Every board in
+# this project sets this, and for the same reason: two boards publishing a
+# "Status" binary sensor generate byte-identical unique_ids, and Home
+# Assistant silently refuses the second one.
+mqtt:
+  discovery_unique_id_generator: mac

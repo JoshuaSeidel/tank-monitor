@@ -1,0 +1,19 @@
+# LOCAL validation wrapper for the Bluetooth proxy.
+#
+# Sister to local-cyd.yaml and local-lg-dual.yaml: every package is
+# !include'd from the working tree instead of fetched from GitHub, so
+# `esphome config local-btproxy.yaml` tests what you just edited rather
+# than what is on main.
+#
+# device_name carries a -test suffix so a stray flash of a half-edited
+# build cannot impersonate the real proxy on MQTT.
+substitutions:
+  device_name: tank-monitor-btproxy-test
+  friendly_name: Tank Monitor BT Proxy TEST
+  ble_scan_interval: "1100ms"
+  ble_scan_window: "1100ms"
+packages:
+  base: !include packages/base.yaml
+  btproxy: !include packages/bluetooth_proxy.yaml
+  board: !include boards/esp32-wroom32-btproxy.yaml
+web_server: !remove

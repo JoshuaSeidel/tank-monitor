@@ -1,0 +1,109 @@
+# NANO TANK Bluetooth proxy -- the radio that lets Home Assistant reach the
+# Fluval Plant 4.0 over BLE. Put THIS file in the ESPHome dashboard.
+#
+# ---------------------------------------------------------------------
+# What this board is for
+# ---------------------------------------------------------------------
+# The `fluvalble` custom integration already speaks Fluval's BLE protocol;
+# what it lacks is a radio within range of the fixture. This board is that
+# radio and nothing else. See packages/bluetooth_proxy.yaml for why this
+# is a twenty-line package and the Chihiros bridge is a whole repository.
+#
+# The schedule stays ON THE FIXTURE. Home Assistant gets brightness, the
+# channel sliders, mode select, scene recall -- and the clock-sync button
+# that ends the monthly vendor-app chore. It does not get schedule
+# writing, and that is the deliberate trade: the light runs its day
+# through a Home Assistant reboot, an outage, or a dead broker.
+#
+# ---------------------------------------------------------------------
+# FIRST, CHECK WHETHER YOU NEED THIS BOARD AT ALL
+# ---------------------------------------------------------------------
+# If the Home Assistant box has a Bluetooth adapter and sits within range
+# of the nano tank, re-enabling the fluvalble config entry is the entire
+# job and this board is redundant. The entry already exists, disabled:
+#   Settings -> Devices & Services -> Fluval BLE -> "Plant4.0_EF6284"
+# Flash this only once that has been tried and the light is out of reach.
+#
+# ---------------------------------------------------------------------
+# WHICH BOARD THIS MUST NOT BE
+# ---------------------------------------------------------------------
+# Not tank-monitor-s3 (the nano controller): it runs a BLE *server* for the
+# round panel. Not tank-monitor-round (the panel): it holds a BLE *client*
+# to the controller. Adding scanning plus connection slots to either means
+# three BLE roles on one radio, on boards that are already the tightest
+# for heap in this project.
+#
+# Not any board running ESP-NOW, ever. That rule is measured, not assumed
+# -- packages/bluetooth_proxy.yaml carries the evidence.
+#
+# The spare WROOM-32 from the retired ESPresense nodes is the right board:
+# idle, mains-powered, and nothing depends on it.
+#
+# ---------------------------------------------------------------------
+# WHEN THE NANO MOVES TO A FREENOVE ALL-IN-ONE
+# ---------------------------------------------------------------------
+# The plan is one ESP32-S3 running the nano's control loop, its sensors,
+# the new pH probe and the BLE server for the round panel. The proxy can
+# ride along on it and this board can be retired -- the package is
+# pin-free precisely so that works. Three things to do at that point:
+#
+#   1. Add packages/bluetooth_proxy.yaml to that wrapper's files: list and
+#      set ble_scan_window: "300ms" in its substitutions. The 100% duty
+#      cycle below is right for a dedicated proxy and wrong for a board
+#      that is also regulating a tank -- discovery gets slower, the
+#      control loop keeps its radio time.
+#
+#   2. Expect BLE server + BLE scanning + BLE client slots on one radio.
+#      That is more than any board in this project has carried. Watch
+#      Heap Max Block for a week before trusting it, and if the S3 has
+#      PSRAM, apply the same sdkconfig fix that saved the round panel:
+#      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP (see
+#      boards/waveshare-amoled-175.yaml).
+#
+#   3. Power this board down and delete its MQTT device first. Two boards
+#      proxying the same light is not a failure mode worth discovering.
+#
+# Until then the two run side by side with no interaction at all -- they
+# share only the WiFi and the broker.
+#
+# ---------------------------------------------------------------------
+# device_name
+# ---------------------------------------------------------------------
+# Must not collide with any other board. Same name means the same MQTT
+# topic prefix, discovery ids, mDNS hostname and LWT, and the boards
+# overwrite each other's Home Assistant entities as fast as they appear.
+substitutions:
+  device_name: tank-monitor-btproxy
+  friendly_name: Tank Monitor BT Proxy
+  # A 100% BLE scan duty cycle. Correct for a board whose only job is to
+  # be connectable the instant Home Assistant wants the light. A shared
+  # board overrides ble_scan_window to 300ms; this one should not.
+  ble_scan_interval: "1100ms"
+  ble_scan_window: "1100ms"
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      # NOT webui.yaml, NOT control.yaml, NOT sensors.yaml. This board has
+      # no probes, no relays and no tank. Loading any of them would ask
+      # the board file for buses it does not declare.
+      - packages/bluetooth_proxy.yaml
+      - boards/esp32-wroom32-btproxy.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s
+
+# A dedicated proxy on a classic ESP32 is the board in this project with
+# the least internal RAM headroom: WiFi, MQTT and an active BLE proxy with
+# connection slots, on 520 KB of SRAM and no PSRAM. web_server is the
+# largest single consumer in base.yaml and serves nothing here -- there is
+# no tank page to draw, no calibration to press. Dropping it buys back
+# heap that the BLE stack can actually use.
+#
+# The diagnostics stay: Heap Free, Heap Max Block, Loop Time and Reset
+# Reason all come from base.yaml's debug block, and after the round
+# panel's heap-starvation episode they are the first thing to read if this
+# board starts dropping off.
+web_server: !remove

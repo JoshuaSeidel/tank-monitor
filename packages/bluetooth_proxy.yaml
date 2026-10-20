@@ -1,0 +1,109 @@
+# Bluetooth proxy -- the radio that lets Home Assistant reach BLE devices
+# that are nowhere near the Home Assistant box.
+#
+# ---------------------------------------------------------------------
+# Why this is NOT shaped like the Chihiros bridge
+# ---------------------------------------------------------------------
+# The Chihiros bridge is a full protocol implementation living in ESPHome
+# (JoshuaSeidel/chihiros-esphome), because nobody wrote a Home Assistant
+# integration for those fixtures -- the BLE command framing had to live
+# somewhere, so it lives on the board.
+#
+# Fluval is the other way round. The reverse-engineering already lives in
+# Home Assistant as the `fluvalble` custom integration, which explicitly
+# supports ESPHome Bluetooth Proxy as a transport. So this board does not
+# need to know one byte of the Fluval protocol. It is a radio relay: Home
+# Assistant speaks, this board repeats it over BLE, and the answers come
+# back the same way.
+#
+# That difference is why this file is twenty lines and the Chihiros bridge
+# is a separate repository.
+#
+# ---------------------------------------------------------------------
+# What it does and does not buy you
+# ---------------------------------------------------------------------
+# fluvalble gives: power, brightness, per-channel 0-100% numbers, mode
+# select (Manual/Auto/Professional), scene recall P1-P4, reachability and
+# signal diagnostics, and a CLOCK-SYNC BUTTON -- which is the end of the
+# monthly "open the vendor app and press Sync clock" chore that this
+# fixture's drifting RTC has needed all year.
+#
+# It does NOT program the fixture's stored schedule. It can read back
+# which schedule is loaded, but writing one stays in the Fluval Connect
+# app, because Fluval's schedule-write command has never been publicly
+# reverse-engineered. That is a real limit, and it is deliberately the
+# right trade here: the schedule lives on the FIXTURE, so the light runs
+# its day whether Home Assistant is up, rebooting, or gone. Driving the
+# curve live from Home Assistant would give schedule control and take that
+# resilience away.
+#
+# ---------------------------------------------------------------------
+# THE HARD RULE: never on a board that runs ESP-NOW
+# ---------------------------------------------------------------------
+# This package brings up continuous BLE scanning alongside WiFi. A board
+# already running ESP-NOW cannot take it. That is measured, not assumed:
+# packages/remote_display.yaml records the CYD losing its ESP-NOW link and
+# then refusing HTTP entirely at 1100ms/100ms PASSIVE scanning -- already
+# gentler than anything here. The isolation test passed (WiFi + BLE alone
+# was fine), so the pairing is the problem, not BLE.
+#
+# So: WiFi + ESP-NOW, or WiFi + BLE. Never all three. Do not load this
+# beside packages/espnow_link.yaml or packages/remote_display.yaml.
+#
+# ---------------------------------------------------------------------
+# Composing it onto a controller later
+# ---------------------------------------------------------------------
+# This file is pin-free and board-agnostic on purpose, so it can ride
+# along on a bigger board instead of needing its own. Two things to get
+# right when that happens -- see tank-monitor-btproxy-remote.yaml for the
+# full note:
+#
+#   1. Back the duty cycle off. The defaults below scan 100% of the time,
+#      which is right for a dedicated proxy and wrong for a board that is
+#      also regulating a tank. Override ble_scan_window to 300ms.
+#   2. Watch the heap. A proxy with active connection slots is not free,
+#      and the round panel has already taught this project what happens
+#      when an ESP32 runs out of internal RAM (see boards/
+#      waveshare-amoled-175.yaml and its PSRAM sdkconfig fix).
+
+substitutions:
+  # 1100/1100 is a 100% scan duty cycle -- Home Assistant's own
+  # recommendation for a proxy whose job is to be connectable on demand.
+  # A dedicated board should keep it. A shared board should not: override
+  # ble_scan_window to 300ms in the wrapper and accept slower discovery.
+  ble_scan_interval: "1100ms"
+  ble_scan_window: "1100ms"
+
+# bluetooth_proxy rides the NATIVE API, not MQTT. That is not a style
+# choice -- ESPHome refuses to build the component without it, because the
+# proxy protocol is a binary stream of BLE events and GATT calls that MQTT
+# was never going to carry.
+#
+# Every other board in this project is MQTT-only, so this is the second
+# place `tank_monitor_api_key` is needed (the Chihiros bridge was the
+# first). It already exists in secrets.yaml; generate with
+# `openssl rand -base64 32` if a fresh dashboard ever needs one.
+#
+# Home Assistant will offer to adopt this board as an ESPHome device once
+# the API is up. Accept it -- that adoption IS the proxy link. The MQTT
+# entities from base.yaml keep working alongside it; the two transports
+# carry different things and do not fight.
+api:
+  encryption:
+    key: !secret tank_monitor_api_key
+
+esp32_ble_tracker:
+  scan_parameters:
+    interval: ${ble_scan_interval}
+    window: ${ble_scan_window}
+    # active: true asks each advertiser for its scan response, which is
+    # where Fluval puts the model name. fluvalble matches on that to pick
+    # the right channel layout; a passive scan leaves it guessing.
+    active: true
+
+bluetooth_proxy:
+  # active: true is the whole point. A passive proxy forwards
+  # advertisements only -- Home Assistant could SEE the light and never
+  # talk to it. Connections are what carry brightness, mode and the clock
+  # sync.
+  active: true
