@@ -76,10 +76,21 @@ substitutions:
   # ---- the Fluval light ----
   # The Plant 4.0's BLE MAC, read off the fixture 2026-10-20.
   fluval_mac: "C6:E2:28:EF:62:84"
-  # The nano tank's own coordinates. Real solar elevation is computed from
-  # these, so a wrong sign gives a confidently wrong day rather than an error.
-  fluval_latitude: "40.0"
-  fluval_longitude: "-75.13"
+  # The tank's coordinates, and they MUST equal light_latitude /
+  # light_longitude in tank-monitor-allinone-freenove-remote.yaml. Both
+  # tanks are in the same house and run the same solar model, so the only
+  # way their schedules can differ is if these numbers do.
+  #
+  # Home is 39.7929, -76.7406 (HA zone.home). The 75 gal was given
+  # 39.8 / -76.7, under a minute of solar time away, and these match it
+  # exactly rather than being more precise than its neighbour -- two
+  # configs that are literally the same string cannot drift apart.
+  #
+  # They were 40.0 / -75.13 until 2026-10-20: a placeholder from the first
+  # build, about 85 miles east near Philadelphia, which ran the nano's day
+  # 7 minutes ahead of the 75 gal's all month.
+  fluval_latitude: "39.8"
+  fluval_longitude: "-76.7"
   # Full-equivalent hours per day. Scales BRIGHTNESS, not the photoperiod --
   # the lamp still runs civil dawn to civil dusk.
   fluval_dose_hours: "7.0"
