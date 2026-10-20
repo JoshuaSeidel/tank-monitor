@@ -176,8 +176,13 @@ template<typename... Ts> class SyncClockAction : public Action<Ts...> {
 template<typename... Ts> class SetModeAction : public Action<Ts...> {
  public:
   explicit SetModeAction(FluvalLight *p) : parent_(p) {}
-  TEMPLATABLE_VALUE(int, mode)
-  void play(const Ts &...x) override { this->parent_->set_mode((uint8_t) this->mode_.value(x...)); }
+  // uint8_t, not int: the declared type here must match the type the Python
+  // codegen gives the generated lambda, or ESPHome warns that the return
+  // type does not match and the templated value goes through a deprecated
+  // conversion. Mode is a 0..2 enum, so uint8_t is also what it should have
+  // been on the merits -- __init__.py passes cg.uint8 to match.
+  TEMPLATABLE_VALUE(uint8_t, mode)
+  void play(const Ts &...x) override { this->parent_->set_mode(this->mode_.value(x...)); }
 
  protected:
   FluvalLight *parent_;

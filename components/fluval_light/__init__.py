@@ -158,5 +158,9 @@ async def sync_clock_to_code(config, action_id, template_arg, args):
 async def set_mode_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, paren)
-    cg.add(var.set_mode(await cg.templatable(config[CONF_MODE], args, int)))
+    # cg.uint8, matching TEMPLATABLE_VALUE(uint8_t, mode) in the header.
+    # The third argument is the C++ type of the generated lambda's return
+    # value; a mismatch compiles but warns, and later ESPHome makes it an
+    # error.
+    cg.add(var.set_mode(await cg.templatable(config[CONF_MODE], args, cg.uint8)))
     return var
