@@ -1,0 +1,34 @@
+# LOCAL validation wrapper for the nano all-in-one. Every package comes from
+# the working tree, so `esphome config` and `esphome compile` test what you
+# just edited rather than what is on main.
+#
+# device_name carries a -test suffix so a stray flash of a half-edited build
+# cannot impersonate the live controller on MQTT.
+substitutions:
+  device_name: tank-monitor-nano-aio-test
+  friendly_name: Tank Monitor Nano AIO TEST
+  fluval_mac: "C6:E2:28:EF:62:84"
+  fluval_latitude: "40.0"
+  fluval_longitude: "-75.13"
+  fluval_dose_hours: "7.0"
+  fluval_ch1: "75"
+  fluval_ch2: "75"
+  fluval_ch3: "75"
+  fluval_ch4: "75"
+  fluval_ch5: "75"
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui.yaml
+  control: !include packages/control.yaml
+  sensors: !include packages/sensors.yaml
+  ph: !include packages/ph.yaml
+  ble: !include packages/ble_link.yaml
+  fluval: !include packages/fluval_light.yaml
+  board: !include boards/allinone-freenove-nano.yaml
+
+# The components from the working tree, not from main.
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tank_controller, time_proportioning, fluval_light]

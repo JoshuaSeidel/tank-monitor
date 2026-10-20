@@ -1,0 +1,114 @@
+# ALL-IN-ONE NANO -- Freenove ESP32-S3-WROOM. Replaces the XIAO controller
+# (tank-monitor-xiao-remote.yaml) AND the Fluval light bridge
+# (tank-monitor-fluval-remote.yaml) with one board. Put THIS file in the
+# ESPHome dashboard. Nothing else lives locally except secrets.yaml.
+#
+# ---------------------------------------------------------------------
+# device_name -- deliberately the SAME as the XIAO controller's
+# ---------------------------------------------------------------------
+# Home Assistant is wired to tank_monitor_s3_*: the log-manual-test script,
+# the dashboards, the chemistry automations, the CO2 pH-floor cutoff and
+# the dry-probe alarm. Keeping the name keeps every entity id. Two
+# consequences:
+#
+#   - The XIAO and this board must NEVER run at the same time. Two devices
+#     on one name overwrite each other's entities as fast as they appear.
+#   - Entity unique_ids are MAC-based, so this board's entities are NEW to
+#     Home Assistant even under the same name. Before this board's first
+#     boot: power the XIAO off and delete the "Tank Monitor S3" device from
+#     the MQTT integration, or every entity comes back with a _2 suffix and
+#     the automations keep pointing at the dead ones. Delete the Fluval
+#     bridge's device too -- nothing publishes it any more.
+#
+# ---------------------------------------------------------------------
+# THE RISK THIS BOARD TAKES, STATED PLAINLY
+# ---------------------------------------------------------------------
+# It runs a BLE SERVER (packages/ble_link.yaml, which the round panel
+# connects to) and a BLE CLIENT (the Fluval light) on one radio, alongside
+# WiFi and MQTT. No board in this project has carried both BLE roles at
+# once. It compiles, and compiling has proved nothing here before -- the
+# CYD's own notes say so after WiFi + ESP-NOW + BLE looked fine until it
+# wasn't.
+#
+# So treat the first week as the experiment it is:
+#   - Watch HEAP MAX BLOCK, not Heap Free. Fragmentation kills an
+#     allocation while Free still looks healthy, and that is exactly how
+#     the round panel ended up needing a physical unplug.
+#   - Watch "Controller Link" on the panel and "Fluval Connected" here. If
+#     one radio role starves the other, one of those two drops first.
+#   - If it misbehaves, the fallback is cheap: drop the two fluval lines
+#     from files: below and put the light back on the WROOM-32 bridge. The
+#     tank keeps running either way, because the light's schedule lives in
+#     the fixture and the tank's control loop never needed BLE at all.
+#
+# This board has PSRAM (N8R8). If heap gets tight, the first thing to try
+# is the fix that saved the round panel -- CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+# in the board file's sdkconfig_options, moving the WiFi and LWIP buffers
+# out of internal RAM. It is not set by default here because the 75 gal's
+# all-in-one has run without it and unproven flags do not belong in a
+# first flash.
+#
+# ---------------------------------------------------------------------
+# WIRE IT BEFORE YOU FLASH IT
+# ---------------------------------------------------------------------
+# The pin map is in boards/allinone-freenove-nano.yaml. It is inherited
+# from the 75 gal's board, so a diagram drawn for one reads against the
+# other. The two that will bite if ignored: the DS18B20 goes on GPIO4 (NOT
+# an analog pin -- the board pulls GPIO4/5 up to 3V3 for the camera bus),
+# and the strapping pins 0, 3, 45, 46 must be left alone or the board may
+# not boot at all.
+#
+# ---------------------------------------------------------------------
+# AFTER THE SWAP
+# ---------------------------------------------------------------------
+#   1. Recalibrate pH and TDS -- both now read on this chip's ADC and the
+#      stored values do not transfer. Nothing will warn you; both will read
+#      plausible wrong numbers.
+#   2. Read "Controller BLE MAC" off this board and put it in
+#      tank-monitor-amoled-remote.yaml, or the round panel sits red
+#      forever looking exactly like a wrong-MAC bug, because it is one.
+#   3. Set the Fluval channel mix below from this tank's own numbers, not
+#      the placeholders.
+substitutions:
+  device_name: tank-monitor-s3
+  friendly_name: Tank Monitor S3
+
+  # ---- the Fluval light ----
+  # The Plant 4.0's BLE MAC, read off the fixture 2026-10-20.
+  fluval_mac: "C6:E2:28:EF:62:84"
+  # The nano tank's own coordinates. Real solar elevation is computed from
+  # these, so a wrong sign gives a confidently wrong day rather than an error.
+  fluval_latitude: "40.0"
+  fluval_longitude: "-75.13"
+  # Full-equivalent hours per day. Scales BRIGHTNESS, not the photoperiod --
+  # the lamp still runs civil dawn to civil dusk.
+  fluval_dose_hours: "7.0"
+  # Per-emitter level at solar noon, 0-100. 75 reproduces the plateau the
+  # old fixed schedule ran (86% curve peak x 75 = ~65%), which the lux
+  # probe measured at 45-55 lx midday. REPLACE THESE once the lamp's own
+  # state frame has given up the real channel order -- all five equal is a
+  # flat white mix, not this fixture's actual colour balance.
+  fluval_ch1: "75"
+  fluval_ch2: "75"
+  fluval_ch3: "75"
+  fluval_ch4: "75"
+  fluval_ch5: "75"
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      - packages/ph.yaml
+      # BLE server for the round panel. NEVER espnow_link.yaml alongside it.
+      - packages/ble_link.yaml
+      # The Fluval bridge. Drop these two lines to fall back to the
+      # standalone WROOM-32 light bridge -- see the risk note above.
+      - packages/fluval_light.yaml
+      - boards/allinone-freenove-nano.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s

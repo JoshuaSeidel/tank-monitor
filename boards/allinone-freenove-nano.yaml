@@ -1,0 +1,171 @@
+# ALL-IN-ONE NANO -- Freenove ESP32-S3-WROOM (FNK0085; ESP32-S3-WROOM-1 N8R8,
+# DevKitC-1 pin layout). The whole Fluval Spec 16 on one board: heater, fan,
+# the temperature probe, TDS, the new pH probe, lux, the BLE server the round
+# panel reads, and the Fluval Plant 4.0 light itself over BLE.
+#
+# Successor to boards/xiao-esp32s3.yaml AND tank-monitor-fluval-remote.yaml:
+# one board replaces the XIAO controller and the WROOM-32 light bridge.
+#
+# ---------------------------------------------------------------------
+# THE PIN MAP IS INHERITED, NOT INVENTED
+# ---------------------------------------------------------------------
+# Same chip, same devkit layout, same hard-won map as the 75 gal's
+# boards/allinone-freenove.yaml. Every pin below is one that board already
+# runs in a tank; the nano simply uses fewer of them. Nothing here is a
+# fresh guess, which matters because the expensive lessons in that file
+# were all paid for once already:
+#
+#   signal                   GPIO   notes
+#   pH board signal          1      ADC1_CH0
+#   DS18B20                  4      4.7k pull-up to 3V3 (CAM_SIOD)
+#   TDS board signal         6      ADC1_CH5
+#   Heater relay             8
+#   Fan relay                10
+#   BH1750 SDA / SCL         15 / 16
+#
+# Not used here, and deliberately left free rather than repurposed: 5
+# (the 75's cross-check probe) and 7 (its leak sensor). Keeping them idle
+# means the two boards' maps stay comparable, and a wiring diagram drawn
+# for one reads correctly against the other.
+#
+# Left alone, same as the 75 gal:
+#   0, 3, 45, 46   strapping pins -- a sensor holding one at reset can stop
+#                  the board booting
+#   35, 36, 37     the octal PSRAM
+#   19, 20         native USB
+#   43, 44         the USB-serial console
+#   38, 39, 40     the microSD slot
+#   2, 48          onboard LED and WS2812 RGB LED
+#
+# GPIO 4-18 also run to the (unfitted) camera connector; do not fit one.
+# GPIO4 and GPIO5 are the camera's SCCB bus and are PULLED UP TO 3V3 ON THE
+# BOARD, camera or not. NEVER put an analog input on them -- on the 75 gal,
+# TDS on GPIO4 sat at ~2.33 V in air with the probe unplugged, and the leak
+# input on GPIO5 read a dead-flat "wet" from the first boot. The 1-Wire bus
+# lives on GPIO4 instead, because 1-Wire wants a pull-up anyway and the
+# board's sits in parallel with the 4.7k.
+#
+# ---------------------------------------------------------------------
+# ONE PROBE, NOT TWO
+# ---------------------------------------------------------------------
+# The 75 gal runs a cross-check probe and the controller vetoes the heater
+# when the two disagree. The nano does not: "I'm not putting two probes on
+# a 16 gal tank" settled that, and the firmware tolerates its absence by
+# design -- no cross_check: binding here means no veto, and the value /
+# rate guards in packages/sensors.yaml plus the 20-minute heater-stall
+# detector carry the safety instead.
+#
+# ---------------------------------------------------------------------
+# WHAT THIS BOARD OWES THE SHARED PACKAGES
+# ---------------------------------------------------------------------
+#   one_wire bus                 -> dallas_temp in packages/sensors.yaml
+#   i2c bus                      -> bh1750 (tank_lux) in packages/sensors.yaml
+#   sensor id: tds_voltage       -> packages/sensors.yaml
+#   sensor id: ph_voltage        -> packages/ph.yaml
+#   output id: heater_output     -> packages/control.yaml
+#   output id: fan_output        -> packages/control.yaml
+#
+# ---------------------------------------------------------------------
+# AFTER THE SWAP: RECALIBRATE
+# ---------------------------------------------------------------------
+# pH and TDS now read on this chip's ADC, not the XIAO's. The stored
+# calibrations do NOT transfer and nothing will tell you so -- both will
+# read plausible wrong numbers:
+#   TDS   Calibrate TDS against the 342 ppm standard (packages/sensors.yaml)
+#   pH    Capture High Point / Capture Low Point (packages/ph.yaml)
+#   temp  Cal Temperature Offset lives in NVS on the OLD board
+#
+# The round panel pairs by BLE MAC. This is a new chip, so read
+# "Controller BLE MAC" off this board once it is up and put it in
+# tank-monitor-amoled-remote.yaml.
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+# MAC-based unique_ids, as on every board here: the legacy generator omits
+# the device name, and same-named entities on two boards collide silently.
+mqtt:
+  discovery_unique_id_generator: mac
+
+# One probe, one bus. No id: needed -- packages/sensors.yaml's address-less
+# dallas_temp binds to the only bus declared, which is why the 75 gal has to
+# !extend its probe and this board does not.
+one_wire:
+  - platform: gpio
+    # 4.7k pull-up to 3V3, in parallel with the board's own camera-bus
+    # pull-up. See the pin map note above for why this pin and not GPIO6.
+    pin: GPIO4
+
+# BH1750 only. The 75 gal spends both of the S3's I2C controllers because it
+# also carries an AS7341; the nano needs one bus and leaves the second free.
+i2c:
+  sda: GPIO15
+  scl: GPIO16
+  scan: true
+
+sensor:
+  # Raw TDS probe voltage. Internal: packages/sensors.yaml does the maths,
+  # the temperature compensation and the K-factor calibration.
+  - platform: adc
+    pin: GPIO6
+    id: tds_voltage
+    update_interval: 500ms
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      # The probe output is AC-excited and noisy; median rejects spikes
+      # without lagging a value that moves over minutes anyway.
+      - median:
+          window_size: 20
+          send_every: 20
+          send_first_at: 20
+
+  # pH electrode. packages/ph.yaml owns the calibration, the 3-11 sanity
+  # clamp and the unknown-on-absence behaviour.
+  - platform: adc
+    pin: GPIO1
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
+    internal: true
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+
+output:
+  # Time-proportional over a 15 minute period (components/time_proportioning;
+  # see boards/lafvin-esp32c6.yaml for why not slow_pwm). These are
+  # mechanical relay contacts: a shorter period gives finer control at the
+  # cost of switching cycles, and pinned full-on or full-off costs nothing,
+  # so the wear only happens at partial duty.
+  #
+  # state_change_action is NOT optional. packages/control.yaml defines
+  # heater_relay and fan_relay and deliberately does not publish them --
+  # the board file does, from the actual contact transition. The XIAO
+  # shipped without these and Home Assistant showed a heater that never ran
+  # for three days while the tank regulated perfectly.
+  - platform: time_proportioning
+    id: heater_output
+    pin: GPIO8
+    period: 900s
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: heater_relay
+          state: !lambda "return state;"
+
+  - platform: time_proportioning
+    id: fan_output
+    pin: GPIO10
+    period: 900s
+    state_change_action:
+      - binary_sensor.template.publish:
+          id: fan_relay
+          state: !lambda "return state;"
