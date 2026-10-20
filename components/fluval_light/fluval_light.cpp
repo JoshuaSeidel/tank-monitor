@@ -390,10 +390,19 @@ void FluvalLight::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
           hex += b;
         }
         ESP_LOGI(TAG, "Lamp says (%u bytes): %s", (unsigned) param->notify.value_len, hex.c_str());
-        if (this->status_sensor_ != nullptr && param->notify.value[0] == SPP_STATUS_HEADER) {
-          // Onto an entity as well as the log. The log is a terminal
-          // somebody has to be watching; this survives until it is read.
-          this->publish_status_(std::string("lamp: ") + hex.substr(0, 180));
+        // Two sensors on purpose. Every frame lands on Status, which is
+        // useful for "did anything just happen" -- but the lamp answers a
+        // mode write with four bytes (d2a10102 = map, key 1 mode, value 2
+        // professional), and that short ack was overwriting the long reply
+        // to the params request before anyone could read it.
+        //
+        // So the long frames get their own entity and short acks cannot
+        // clobber them. Eight bytes is comfortably above every ack seen so
+        // far and far below a real state dump carrying keys 11, 12 and 13.
+        if (param->notify.value[0] == SPP_STATUS_HEADER) {
+          this->publish_status_(std::string("lamp: ") + hex.substr(0, 120));
+          if (param->notify.value_len > 8 && this->lamp_state_sensor_ != nullptr)
+            this->lamp_state_sensor_->publish_state(hex);
         }
       }
       break;

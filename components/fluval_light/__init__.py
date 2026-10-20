@@ -17,6 +17,7 @@ CONF_CURVE_EDGE_STEP = "curve_edge_step"
 CONF_PUSH_HOUR = "push_hour"
 CONF_STATUS = "status"
 CONF_CURVE = "curve"
+CONF_LAMP_STATE = "lamp_state"
 CONF_POINTS = "points"
 CONF_DOSE = "dose"
 CONF_CONNECTED = "connected"
@@ -77,6 +78,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_TIME_ID): cv.use_id(time_.RealTimeClock),
             cv.Optional(CONF_STATUS): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_CURVE): text_sensor.text_sensor_schema(),
+            # The lamp's own long state frames, kept clear of short acks.
+            cv.Optional(CONF_LAMP_STATE): text_sensor.text_sensor_schema(),
             cv.Optional(CONF_POINTS): sensor.sensor_schema(accuracy_decimals=0),
             cv.Optional(CONF_DOSE): sensor.sensor_schema(
                 unit_of_measurement="h", accuracy_decimals=2
@@ -113,6 +116,7 @@ async def to_code(config):
     for key, setter in (
         (CONF_STATUS, var.set_status_sensor),
         (CONF_CURVE, var.set_curve_sensor),
+        (CONF_LAMP_STATE, var.set_lamp_state_sensor),
     ):
         if key in config:
             cg.add(setter(await text_sensor.new_text_sensor(config[key])))

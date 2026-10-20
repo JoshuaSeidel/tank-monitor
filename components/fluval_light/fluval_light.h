@@ -102,6 +102,7 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
 
   void set_status_sensor(text_sensor::TextSensor *s) { this->status_sensor_ = s; }
   void set_curve_sensor(text_sensor::TextSensor *s) { this->curve_sensor_ = s; }
+  void set_lamp_state_sensor(text_sensor::TextSensor *s) { this->lamp_state_sensor_ = s; }
   void set_points_sensor(sensor::Sensor *s) { this->points_sensor_ = s; }
   void set_dose_sensor(sensor::Sensor *s) { this->dose_sensor_ = s; }
   void set_connected_sensor(binary_sensor::BinarySensor *s) { this->connected_sensor_ = s; }
@@ -155,6 +156,7 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
 
   text_sensor::TextSensor *status_sensor_{nullptr};
   text_sensor::TextSensor *curve_sensor_{nullptr};
+  text_sensor::TextSensor *lamp_state_sensor_{nullptr};
   sensor::Sensor *points_sensor_{nullptr};
   sensor::Sensor *dose_sensor_{nullptr};
   binary_sensor::BinarySensor *connected_sensor_{nullptr};

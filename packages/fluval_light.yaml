@@ -89,6 +89,10 @@ fluval_light:
     name: "Fluval Curve"
     icon: "mdi:chart-bell-curve"
     entity_category: diagnostic
+  lamp_state:
+    name: "Fluval Lamp State"
+    icon: "mdi:script-text"
+    entity_category: diagnostic
   points:
     name: "Fluval Curve Points"
     icon: "mdi:dots-horizontal"
