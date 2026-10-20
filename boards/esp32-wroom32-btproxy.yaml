@@ -1,4 +1,11 @@
-# Plain ESP32-WROOM-32 devkit running as nothing but a Bluetooth proxy.
+# Plain ESP32-WROOM-32 devkit carrying one radio job and nothing else.
+#
+# Two wrappers use it: tank-monitor-btproxy-remote.yaml (a Bluetooth proxy
+# for Home Assistant) and tank-monitor-fluval-remote.yaml (the Fluval
+# bridge). The filename still says btproxy because the deploy wrappers name
+# this path in their files: list and those wrappers are the one file NOT
+# fetched from git -- renaming it here would break a config nobody can see
+# to fix.
 #
 # Deliberately NOT boards/esp32-wroom32.yaml. That file is a controller:
 # it brings up an I2C bus, a 1-Wire bus, an ADC for TDS and two relay
@@ -41,6 +48,25 @@ esp32:
   board: esp32dev
   framework:
     type: esp-idf
+    advanced:
+      # +40 KB of IRAM, from the boot log's own advice:
+      #   "Bootloader supports SRAM1 as IRAM (+40KB). Set sram1_as_iram: true"
+      # Worth taking on the board in this project with the least room --
+      # 520 KB of SRAM, no PSRAM, running WiFi, MQTT and a BLE client. The
+      # bootloader support is not assumed; that line only prints when the
+      # bootloader actually has it.
+      sram1_as_iram: true
+
+      # NOT setting minimum_chip_revision, though the same boot log asks
+      # for it ("Chip rev >= 3.0 detected. Set minimum_chip_revision: 3.1
+      # ... to reduce binary size").
+      #
+      # It would save a few KB of compatibility shims and in exchange
+      # refuse to boot on any ESP32 older than rev 3.1. This file is
+      # generic -- it is whichever spare WROOM is on the bench, and the
+      # next one may well be a rev 1. The failure mode is a boot loop with
+      # nothing in it that names the cause, which is a bad trade for a few
+      # KB on a board sitting at 73% flash.
 
 # ESPHome's default MQTT unique_id generator is "legacy": "ESP" + component
 # type + object_id, with NO device name and no MAC in it. Every board in
