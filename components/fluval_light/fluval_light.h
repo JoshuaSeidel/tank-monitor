@@ -150,6 +150,9 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   std::vector<std::pair<std::vector<uint8_t>, std::string>> queue_frames_;
   uint32_t last_write_ms_{0};
   int last_push_day_{-1};
+  // Cleared on every connect. update() retries the clock until it takes,
+  // because the on-connect attempt usually beats SNTP to a valid time.
+  bool clock_synced_{false};
 };
 
 template<typename... Ts> class PushCurveAction : public Action<Ts...> {

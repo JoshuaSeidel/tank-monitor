@@ -91,11 +91,15 @@ std::vector<uint8_t> FluvalLight::spp_command_(const std::vector<std::pair<uint8
 std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   std::vector<uint8_t> blob;
 #ifdef USE_TIME
-  if (this->time_ == nullptr)
+  if (this->time_ == nullptr) {
+    ESP_LOGW(TAG, "No time source configured -- cannot build a curve");
     return blob;
+  }
   auto now = this->time_->now();
-  if (!now.is_valid())
+  if (!now.is_valid()) {
+    ESP_LOGW(TAG, "No valid time yet -- cannot build a curve");
     return blob;
+  }
 
   // Local midnight as a UTC epoch. ESPHome's ESPTime carries the local
   // wall clock, so rewinding to 00:00:00 and converting back gives the
@@ -163,6 +167,11 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
 void FluvalLight::push_curve() {
   auto blob = this->build_pro_schedule_();
   if (blob.empty()) {
+    // build_pro_schedule_() has already logged which of the three ways
+    // it gave up: no time source, no valid time yet, or a latitude with
+    // no usable day. Saying "curve not built" without that would send
+    // someone hunting the BLE link for a clock problem.
+    ESP_LOGW(TAG, "No curve to push");
     this->publish_status_("curve not built");
     return;
   }
@@ -177,11 +186,22 @@ void FluvalLight::push_curve() {
 
 void FluvalLight::sync_clock() {
 #ifdef USE_TIME
-  if (this->time_ == nullptr)
+  if (this->time_ == nullptr) {
+    ESP_LOGW(TAG, "No time source configured -- cannot sync the clock");
     return;
+  }
   auto now = this->time_->now();
-  if (!now.is_valid())
+  if (!now.is_valid()) {
+    // Not a failure, just early. BLE reaches the lamp about twenty
+    // seconds after WiFi associates and SNTP is usually still in flight,
+    // so the on-connect sync lands before there is a clock to send.
+    // update() retries every 60 s until it takes. Said out loud because
+    // the first build returned here in silence and the only symptom was
+    // a board that said "connected" and then did nothing at all.
+    ESP_LOGI(TAG, "Clock sync deferred: no valid time yet (SNTP still syncing)");
+    this->publish_status_("waiting for time");
     return;
+  }
   // 0xCD + YY MM DD W hh mm ss, raw. NOT a CBOR map -- the clock is the
   // one frame on this transport that is not 0xD1-wrapped, and sending it
   // wrapped is accepted and ignored.
@@ -197,6 +217,7 @@ void FluvalLight::sync_clock() {
                          (uint8_t) now.minute,
                          (uint8_t) now.second};
   this->queue_(f, "clock");
+  this->clock_synced_ = true;
 #endif
 }
 
@@ -258,6 +279,16 @@ void FluvalLight::update() {
   auto now = this->time_->now();
   if (!now.is_valid())
     return;
+
+  // Catch the clock up once SNTP lands. The on-connect attempt usually
+  // fires before there is a time to send, so without this the lamp keeps
+  // whatever clock it had -- and a Pro schedule is only as good as the
+  // clock running it.
+  if (this->is_connected() && !this->clock_synced_) {
+    ESP_LOGI(TAG, "Time is valid now -- syncing the clock");
+    this->sync_clock();
+  }
+
   // Push once a day, in the small hours, while the lamp is dark. A curve
   // that half-arrives mid-afternoon would be visible in the tank; one
   // that half-arrives at 01:30 is overwritten before anything is lit.
@@ -295,7 +326,10 @@ void FluvalLight::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
         this->connected_sensor_->publish_state(true);
       this->publish_status_("connected");
       // The lamp's clock drifts, and a Pro schedule is only as good as the
-      // clock running it. Sync on every connect; it costs one frame.
+      // clock running it. Sync on every connect; it costs one frame. This
+      // often fires before SNTP has landed, in which case it defers and
+      // update() picks it up within the minute.
+      this->clock_synced_ = false;
       this->sync_clock();
       break;
     }
