@@ -129,6 +129,30 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     return blob;
   }
 
+  // ---------------------------------------------------------------------
+  // The night has to be written down
+  // ---------------------------------------------------------------------
+  // pick_minutes() returns the LIT day, dawn to dusk, and a schedule made
+  // only of those points never tells the fixture to go dark: it holds its
+  // last point until the next one. A day ending "18:41 = 1%" therefore
+  // leaves the tank glowing at 1% until dawn, which is what happened on
+  // 2026-10-20 -- the 75 gal went dark on time and the nano sat dim all
+  // evening on a curve that was otherwise correct.
+  //
+  // The fix costs no schedule slots. The first and last points ARE the
+  // civil twilight boundaries and the model already puts them at 1%, so
+  // pin those two to a hard zero instead of appending new ones. Darkness
+  // then holds from dusk to dawn if the fixture holds its last point, and
+  // interpolates 0 -> 0 across the night if it ramps between points --
+  // unambiguous either way, which matters because which one it does is not
+  // documented anywhere verifiable.
+  //
+  // Appending two extra dark points was the first attempt. It worked, but
+  // reserving those slots pushed pick_minutes() past a decimation step and
+  // the lit day fell from 12 points to 8, losing every point between 08:00
+  // and 12:00. Not worth it for a minute of darkness either side.
+  const size_t last_i = minutes.size() - 1;
+
   blob.push_back((uint8_t) minutes.size());
   std::string human;
   char buf[48];
@@ -156,8 +180,13 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   }
   human += " | ";
 
-  for (int m : minutes) {
-    const float frac = tank_monitor::daylight::frac_at(plan, m);
+  for (size_t i = 0; i < minutes.size(); i++) {
+    const int m = minutes[i];
+    // The two boundary points are forced dark. Not frac_at() rounded down:
+    // at civil twilight the model genuinely returns a fraction that rounds
+    // to 1%, and 1% all night is the entire complaint.
+    const bool dark = (i == 0 || i == last_i);
+    const float frac = dark ? 0.0f : tank_monitor::daylight::frac_at(plan, m);
     blob.push_back((uint8_t) (m / 60));
     blob.push_back((uint8_t) (m % 60));
     for (uint8_t c = 0; c < this->channel_count_; c++) {
@@ -181,6 +210,10 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
            plan.d.set % 60, plan.d.dusk / 60, plan.d.dusk % 60);
   ESP_LOGI(TAG, "Curve: %u points, scale %.3f, %.2f full-equivalent hours", (unsigned) minutes.size(), plan.scale,
            plan.dose_h);
+  // Printed on its own line because "is the tank actually dark at night" is
+  // the one question the curve string above is read to answer.
+  ESP_LOGI(TAG, "  dark from %02d:%02d until %02d:%02d (both boundary points pinned to 0%%)", minutes[last_i] / 60,
+           minutes[last_i] % 60, minutes[0] / 60, minutes[0] % 60);
   {
     std::string mixs;
     char mb[8];
