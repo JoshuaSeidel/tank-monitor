@@ -59,7 +59,7 @@
 #     sunlight through as lamp light until the reference is learned. (Was
 #     HALF the learned level, which a lamp creeping back on at 1 lx/min
 #     after sunset on 2026-10-19 never reached.)
-#   * On the sun curve, well above the curve (1.5x + 5%) for 5 minutes also
+#   * On the daylight curve, well above the curve (1.5x + 5%) for 5 minutes also
 #     counts, and suspends the curve until midnight: the single scene is
 #     pushed instead, which darkens / corrects the lamp at once.
 #   * No more than one fix per 15 minutes; after 3 fixes that did not take,
@@ -71,10 +71,10 @@
 # not cross midnight; none of the phases do.
 #
 # ---------------------------------------------------------------------
-# THE SUN CURVE -- a natural day, stored in the lamp
+# THE DAYLIGHT CURVE -- a real day, stored in the lamp
 # ---------------------------------------------------------------------
-# A sun-following phase ("Light Full Brightness Hours" > 0) with "Light Day
-# Shape" = Sun curve is not one fade-in/fade-out schedule. The board writes a
+# A sun-following phase ("Light Follows Sun" on) with "Light Day Shape" =
+# Daylight is not one fade-in/fade-out schedule. The board writes a
 # multi-point day into the lamp's own CUSTOM-CURVE controller (0x5a/0x06
 # points, the My Chihiros app's point-curve auto mode; frames in
 # chihiros-esphome chihiros_devices.h prepare_curve). The lamp stores the
@@ -83,23 +83,38 @@
 # allows one scene per weekday (max 7) and each fades from and to 0 on its
 # own, so scenes cannot be chained into one smooth day.
 #
-# Shape (math in chihiros-esphome sun_curve.h): x = (t - sunrise) / day,
-#   brightness = peak * sin(pi x)^p  of the phase's W/R/G/B (ratio kept)
-# "Light Full Brightness Hours" is the day's TOTAL light in hours at full
-# brightness (what plants and algae respond to). A pure sine at full peak
-# delivers day * 2/pi; a smaller target scales the peak down, a larger one
-# keeps peak 1 and widens the top with p < 1 (floored at 0.3, beyond which
-# the edges turn into a cliff -- then "Light Daily Light" shows what today
-# can actually deliver). Points go out every "Light Curve Step" minutes on
-# the clock (default 60) plus exact sunrise and sunset at 0; the lamp
-# interpolates between them, and a straight line between hourly points is
-# within ~1% of the sine. Pushed after midnight while the lamp is dark.
+# Shape (math in chihiros-esphome daylight.h): the sun's real elevation at
+# the tank (light_latitude/longitude) drives a clear-sky illuminance model
+# (direct sun + sky, civil twilight below the horizon), normalised so solar
+# noon = the phase's full W/R/G/B:
+#   level = (E(h) / E(noon)) ^ g      g = "Light Daylight Exponent" (0.5)
+# g = 1 is literal photometry, which is dimmer than a sine for the first
+# ~1.5 h and invisible through twilight (below the lamp's 1% step). 0.5
+# compresses it the way vision does: a glow from civil dawn, a fast first
+# hour, a flat midday. The day runs civil dawn (sun -6 deg) to civil dusk:
+# ~11.9 h in late October, ~10.3 h at the December solstice, ~16 h in June.
+# At low sun the mix is warmed toward golden white ("Light Dawn Warmth":
+# more W, less R, much less B) and back to the phase's ratio by 12 deg; no
+# channel ever exceeds the phase's full value.
+#
+# Total light is natural: whatever the day gives (full-equivalent hours,
+# "Light Daily Light"; 8.0 h on 2026-10-20 at g 0.5). "Light Full
+# Brightness Hours" is now an optional CAP (0 = natural, the default): a
+# day that would deliver more is scaled down to it.
+#
+# Points: civil dawn, sunrise, sunset, civil dusk exactly; every "Light
+# Curve Edge Step" (30 min) within 2 h of dawn and dusk where the curve is
+# steep; every "Light Curve Step" (60 min) between. 19 points on 2026-10-20,
+# 24 in June (the cap; steps double past it). The lamp interpolates between
+# them (confirmed 2026-10-19: smooth 1% steps); worst error ~4% of full for
+# a few minutes before sunset. Pushed after midnight while the lamp is dark.
+# After a push the lamp's own snapshot is checked: a stored time the board
+# did not send (the 2026-10-19 failure) suspends the curve for the day.
 #
 # Detection follows the curve: "Light Expected Level" is the computed
 # brightness now; the learned lux is the lux at the phase's FULL values,
-# learned while the curve is above 70% of its peak and scaled by the level
-# (lux / level); dark-when-lit fires when the curve is above half its peak
-# and lux is under a quarter of learned * level.
+# learned while the curve is above 70% of its peak (sun high, no warm
+# shift) and scaled by the level (lux / level).
 
 substitutions:
   # The Nordic UART service every Chihiros device speaks. Fixed by the
@@ -281,10 +296,11 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'
-  # FOLLOW THE SUN, per phase, in select order. 0 = the table's fixed times.
-  # >0 = the lights span today's sunrise to sunset and the day delivers this
-  # many minutes of FULL-BRIGHTNESS-EQUIVALENT light (the sun curve, or one
-  # scene's plateau + ramp, see "Light Day Shape"). Kept apart from
+  # DAILY-LIGHT CAP, per phase, in select order, minutes of
+  # FULL-BRIGHTNESS-EQUIVALENT light ("Light Full Brightness Hours"). 0 =
+  # natural (default). Whether a phase follows the sun is light_sun_follow.
+  # (Historically: >0 meant "follows the sun" and was a plateau length, then
+  # a daily target; light_daylight_migrated converted that.) Kept apart from
   # light_table so adding it did not discard the stored table. Seeded by
   # light_seed_sun, the only place its defaults live.
   - id: light_sun_plateau
@@ -313,6 +329,49 @@ globals:
     type: bool
     restore_value: true
     initial_value: 'false'
+  # Per phase: 1 = follows the sun (the daylight curve / single fade from
+  # today's sun), 0 = the table's fixed times. Used to be implied by
+  # light_sun_plateau > 0; light_sun_plateau is now the optional daily-light
+  # cap (0 = natural). light_daylight_migrated converts a board once.
+  - id: light_sun_follow
+    type: std::array<int, 5>
+    restore_value: true
+  - id: light_daylight_migrated
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  # Board-wide shape settings (see THE DAYLIGHT CURVE).
+  - id: light_day_expo
+    type: float
+    restore_value: true
+    initial_value: '0.5'
+  - id: light_dawn_warmth
+    type: int
+    restore_value: true
+    initial_value: '100'
+  - id: light_curve_edge
+    type: int
+    restore_value: true
+    initial_value: '30'
+  # Today's resolved day (sun events, curve, bright window).
+  - id: lp_plan
+    type: chihiros::daylight::Plan
+    restore_value: false
+  # The minutes last written to the lamp as a curve, and when the read-back
+  # (the lamp's answer to the closing status query) is due. 0 = not armed.
+  - id: light_sent_min
+    type: std::vector<int>
+    restore_value: false
+  - id: light_readback_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # The lamp's snapshot after a curve push listed a time the board did not
+  # send ("Light Curve Rejected"). Cleared by the next clean read-back.
+  - id: light_curve_rejected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   # Fraction of the curve's own peak that counts as "bright" (Light Bright
   # Start/End, which the CO2 schedule in HA keys off). Percent.
   # The Light Day Shape option last acted on, so its restore at boot is not
@@ -331,9 +390,10 @@ globals:
     restore_value: true
     initial_value: '60'
   # The resolved curve for the selected phase (light_select_phase).
-  #   lp_curve      the lamp runs the multi-point sun curve (else one scene)
-  #   lp_peak/pow   brightness = peak * sin(pi x)^pow, fraction of full
+  #   lp_curve      the lamp runs the multi-point daylight curve (else one scene)
+  #   lp_peak       today's peak, fraction of full (<1 only under a cap)
   #   lp_dose       full-equivalent minutes the day actually delivers
+  #   lp_natural    full-equivalent minutes of the natural day (no cap)
   #   lp_bright_*   the window at or above light_bright_pct of the peak, min
   #   lp_frac_now   the computed brightness this minute, fraction of full
   - id: lp_curve
@@ -344,10 +404,10 @@ globals:
     type: float
     restore_value: false
     initial_value: '1.0'
-  - id: lp_pow
+  - id: lp_natural
     type: float
     restore_value: false
-    initial_value: '1.0'
+    initial_value: '0.0'
   - id: lp_dose
     type: float
     restore_value: false
@@ -366,7 +426,7 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
-  # Day of year the sun curve was suspended for (the lamp went brighter than
+  # Day of year the daylight curve was suspended for (the lamp went brighter than
   # the curve); the phase runs as the single scene until midnight. Restored,
   # so a reboot that evening does not put the suspect curve back. -1 = none.
   - id: light_curve_off_day
@@ -384,15 +444,12 @@ globals:
     restore_value: false
     initial_value: '0.0'
 
-# Sunrise/sunset are computed here, from the clock, so a sun-following phase
-# keeps working with Home Assistant down. The tank is in south-central
-# Pennsylvania; one decimal (~10 km) is well under a minute of sunrise.
-# Override light_latitude/light_longitude in the board file if it moves.
-sun:
-  id: light_sun
-  time_id: sntp_time
-  latitude: ${light_latitude}
-  longitude: ${light_longitude}
+# Sun position is computed on the board (chihiros-esphome daylight.h,
+# NOAA low-precision ephemeris) from the clock and light_latitude /
+# light_longitude, so a sun-following phase keeps working with Home
+# Assistant down. The tank is in south-central Pennsylvania; one decimal
+# (~10 km) is well under a minute of sunrise. Override them in the board
+# file if it moves.
 
 # List form: a mapping on_boot in a package can be dropped when packages
 # merge. Late priority, so the select has already restored its option. This
@@ -419,17 +476,22 @@ esphome:
                   id: light_seed_sun
                   only: -1
               - script.wait: light_seed_sun
-        # The sun value changed meaning from plateau length to the day's
-        # full-equivalent light. Re-seed, once, the phases that follow the
-        # sun; fixed-time phases (0) are left alone.
+        # light_sun_plateau has meant three things: a plateau length, then a
+        # daily-light target, now an optional cap. Once per board: a phase
+        # that had a value follows the sun, and the cap starts off (natural).
         - if:
             condition:
-              lambda: return !id(light_dose_migrated);
+              lambda: return !id(light_daylight_migrated);
             then:
-              - script.execute:
-                  id: light_seed_sun
-                  only: -3
-              - script.wait: light_seed_sun
+              - lambda: |-
+                  for (int ph = 0; ph < 5; ph++) {
+                    id(light_sun_follow)[ph] = (ph > 0 && id(light_sun_plateau)[ph] > 0) ? 1 : 0;
+                    ESP_LOGI("light", "phase %d: %s the sun, daily-light cap off (was %d min)", ph,
+                             id(light_sun_follow)[ph] ? "follows" : "does not follow", id(light_sun_plateau)[ph]);
+                    id(light_sun_plateau)[ph] = 0;
+                  }
+                  id(light_dose_migrated) = true;
+                  id(light_daylight_migrated) = true;
         - script.execute: light_select_phase
 
 select:
@@ -463,13 +525,13 @@ select:
         - script.execute: light_refresh_controls
         - script.execute: light_push
 
-  # How a sun-following phase spreads its light over the day. Sun curve: a
-  # multi-point day in the lamp, 0 at sunrise rising smoothly to solar noon
-  # and back to 0 at sunset (see THE SUN CURVE above). Single fade: the
-  # older one scene, a linear ramp up, a plateau, a ramp down. Both deliver
-  # the same "Light Full Brightness Hours". Fixed-time phases always run as
-  # one scene -- this only matters for phases that follow the sun. Single
-  # fade is also the fallback if the lamp turns out not to run a curve.
+  # How a sun-following phase spreads its light over the day. Daylight: a
+  # multi-point day in the lamp following real outdoor light from civil dawn
+  # to civil dusk (see THE DAYLIGHT CURVE above). Single fade: one scene,
+  # sunrise to sunset, linear ramps and a plateau, delivering the same daily
+  # light (the cap if set, else the natural day's). Fixed-time phases always
+  # run as one scene. Single fade is also the automatic fallback when the
+  # lamp goes brighter than the curve or its read-back shows foreign points.
   - platform: template
     name: "Light Day Shape"
     id: light_shape
@@ -477,9 +539,11 @@ select:
     entity_category: config
     optimistic: true
     restore_value: true
-    initial_option: "Sun curve"
+    initial_option: "Daylight"
+    # Index 0 was "Sun curve" (a sine) before the daylight model; boards that
+    # stored it come up on Daylight.
     options:
-      - "Sun curve"
+      - "Daylight"
       - "Single fade"
     on_value:
       then:
@@ -535,33 +599,25 @@ script:
           only: !lambda return only;
       - script.wait: light_seed_sun
 
-  # Follow-the-sun defaults, as the day's TOTAL light in full-brightness-
-  # equivalent minutes: 7.5 h for Phases 1-2 (no CO2), 8 h for Phases 3-4
-  # (CO2 on). Past ~8 h of full-equivalent light a planted tank feeds algae
-  # whatever the season. For scale: on 2026-10-19 the old Phase 1 setting
-  # (6 h plateau + two 150-min ramps) was 8.5 h equivalent, and Phase 2's
-  # earlier 6.25 h was ~7.8 h at Phase 1 brightness, so 7.5 h trims a little
-  # without a step change the plants would notice.
-  #   only = phase index, -1 every phase, -3 only the phases already
-  #   following the sun (the one-time migration from the plateau meaning).
+  # Follow-the-sun defaults: every lit phase follows the sun, daily light
+  # natural (cap 0). The daylight curve on 2026-10-20 delivers 8.0 h
+  # full-equivalent (the sine it replaced was set to 7.5 h); 6.9 h at the
+  # December solstice, 10.75 h at the June one -- set a cap before spring if
+  # the CO2 phases should not track that.
+  #   only = phase index, -1 every phase.
   - id: light_seed_sun
     parameters:
       only: int
     then:
       - lambda: |-
-          static const int sun_defaults[5] = {0, 450, 450, 480, 480};
           for (int ph = 0; ph < 5; ph++) {
-            if (only == -3) {
-              if (id(light_sun_plateau)[ph] <= 0) continue;
-              ESP_LOGI("light", "phase %d: sun value %d min was a plateau length; now %d min of daily light",
-                       ph, id(light_sun_plateau)[ph], sun_defaults[ph]);
-            } else if (only != -1 && ph != only) {
-              continue;
-            }
-            id(light_sun_plateau)[ph] = sun_defaults[ph];
+            if (only != -1 && ph != only) continue;
+            id(light_sun_follow)[ph] = ph > 0 ? 1 : 0;
+            id(light_sun_plateau)[ph] = 0;
           }
           id(light_sun_seeded) = true;
           id(light_dose_migrated) = true;
+          id(light_daylight_migrated) = true;
 
   # Resolve the selected phase from the stored table into lp_*. "Off
   # (cycling)" is manual mode at 0 whatever its stored values say: the lamp
@@ -588,46 +644,47 @@ script:
           id(lp_b) = ph ? clampi(t[b + 6], 0, 100) : 0;
           id(lp_valid) = true;
 
-          // Follow the sun: lights span today's sunrise..sunset and the day
-          // delivers `dose` minutes of full-equivalent light, either as the
-          // sun curve or as one scene (ramp, plateau, ramp). Without a valid
-          // clock or a computable sun the table's fixed times stand in.
+          // Follow the sun: today's sun at the tank, computed on the board
+          // (chihiros::daylight). Daylight = the multi-point curve from civil
+          // dawn to civil dusk; Single fade = one scene sunrise..sunset with
+          // the same daily light. `cap` (Light Full Brightness Hours) > 0
+          // limits the day's full-equivalent light; 0 = natural. Without a
+          // valid clock the table's fixed times stand in.
           id(lp_sun) = false;
           id(lp_curve) = false;
           id(lp_peak) = 1.0f;
-          id(lp_pow) = 1.0f;
-          const int dose = ph ? id(light_sun_plateau)[ph] : 0;
+          id(lp_natural) = 0.0f;
+          const bool follow = ph > 0 && id(light_sun_follow)[ph] != 0;
+          const int cap = ph ? std::max(0, id(light_sun_plateau)[ph]) : 0;
           const float th = clampi(id(light_bright_pct), 50, 90) / 100.0f;
           auto now = id(sntp_time).now();
-          if (dose > 0) {
+          if (follow) {
             id(lp_sun_day) = now.is_valid() ? now.day_of_year : -1;
-            auto rise = id(light_sun).sunrise(-0.833);
-            auto set = id(light_sun).sunset(-0.833);
-            if (now.is_valid() && rise.has_value() && set.has_value()) {
-              // Next events, in UTC; the lamp runs local wall-clock time.
-              auto r = ESPTime::from_epoch_local(rise->timestamp);
-              auto z = ESPTime::from_epoch_local(set->timestamp);
-              int on = r.hour * 60 + r.minute, off = z.hour * 60 + z.minute;
-              const int day = off - on;
-              if (day > 60) {
+            if (now.is_valid()) {
+              const time_t mid = now.timestamp - (time_t) (now.hour * 3600 + now.minute * 60 + now.second);
+              const float expo = std::max(0.3f, std::min(1.0f, id(light_day_expo)));
+              auto p = chihiros::daylight::plan(mid, ${light_latitude}, ${light_longitude}, expo, cap, th);
+              if (p.ok && p.d.rise > p.d.dawn && p.d.set > p.d.rise && p.d.dusk > p.d.set) {
+                id(lp_plan) = p;
+                id(lp_natural) = p.natural_h * 60.0f;
                 if (id(light_shape).active_index().value_or(0) == 0 &&
                     id(light_curve_off_day) != now.day_of_year) {
-                  // The sun curve: sunrise and sunset exactly, shape solved
-                  // for the dose (chihiros::sun_curve).
-                  float peak, p;
-                  id(lp_dose) = chihiros::sun_curve::solve((float) day, (float) dose, 0.3f, peak, p);
-                  id(lp_peak) = peak;
-                  id(lp_pow) = p;
                   id(lp_curve) = true;
-                  const int x0 = (int) lroundf(chihiros::sun_curve::crossing(th, p) * day);
-                  id(lp_bright_on) = on + x0;
-                  id(lp_bright_off) = off - x0;
-                  id(lp_ramp) = x0;          // read-out only: lights-on to the bright window
+                  id(lp_peak) = p.scale;
+                  id(lp_dose) = p.dose_h * 60.0f;
+                  id(lp_on_min) = p.d.dawn;
+                  id(lp_off_min) = p.d.dusk;
+                  id(lp_bright_on) = p.bright_on;
+                  id(lp_bright_off) = p.bright_off;
+                  id(lp_ramp) = p.bright_on > 0 ? p.bright_on - p.d.dawn : 0;   // read-out: dawn to bright
                 } else {
-                  // One scene. Two linear ramps of R deliver R between them,
-                  // so dose = plateau + R. R is limited to 15..150 (the lamp's
-                  // range here); what does not fit trims the span
-                  // symmetrically around solar noon.
+                  // One scene, sunrise..sunset. Two linear ramps of R deliver
+                  // R between them, so dose = plateau + R. R is limited to
+                  // 15..150 (the lamp's range here); what does not fit trims
+                  // the span symmetrically around solar noon.
+                  int on = p.d.rise, off = p.d.set;
+                  const int day = off - on;
+                  const int dose = cap > 0 ? cap : (int) lroundf(p.natural_h * 60.0f);
                   int ramp = day - dose, plat = 2 * dose - day;
                   if (ramp > 150) { ramp = 150; plat = dose - 150; }
                   if (plat < 0) { plat = 0; ramp = dose < 15 ? 15 : dose; }
@@ -637,14 +694,14 @@ script:
                   off = on + span;
                   id(lp_ramp) = ramp;
                   id(lp_dose) = (float) (plat + ramp);
+                  id(lp_on_min) = clampi(on, 0, 1439);
+                  id(lp_off_min) = clampi(off, 0, 1439);
                 }
-                id(lp_on_min) = clampi(on, 0, 1439);
-                id(lp_off_min) = clampi(off, 0, 1439);
                 id(lp_sun) = true;
               }
             }
             if (!id(lp_sun))
-              ESP_LOGW("light", "phase %d follows the sun but sunrise is not computable yet; fixed times until it is", ph);
+              ESP_LOGW("light", "phase %d follows the sun but the sun is not computable yet; fixed times until it is", ph);
           }
           if (!id(lp_curve)) {
             // One scene (fixed times or Single fade): the bright window is
@@ -660,16 +717,21 @@ script:
             if (!id(lp_auto)) id(lp_dose) = 0.0f;
           }
           if (id(light_curve_off_day) == now.day_of_year && id(lp_sun) && !id(lp_curve))
-            ESP_LOGW("light", "sun curve suspended today (lamp went brighter than it); single scene until midnight");
+            ESP_LOGW("light", "daylight curve suspended today (lamp went brighter than it or held foreign points); single scene until midnight");
           ESP_LOGI("light", "phase %d: %s%s %02d:%02d-%02d:%02d ramp %d W%d R%d G%d B%d",
                    ph, ph ? "auto" : "manual-off",
-                   id(lp_curve) ? " (sun curve)" : id(lp_sun) ? " (sun, single fade)" : "",
+                   id(lp_curve) ? " (daylight)" : id(lp_sun) ? " (sun, single fade)" : "",
                    id(lp_on_min) / 60, id(lp_on_min) % 60,
                    id(lp_off_min) / 60, id(lp_off_min) % 60,
                    id(lp_ramp), id(lp_w), id(lp_r), id(lp_g), id(lp_b));
+          if (id(lp_auto) && id(lp_sun))
+            ESP_LOGI("light", "  dawn %02d:%02d rise %02d:%02d noon %02d:%02d set %02d:%02d dusk %02d:%02d, noon %.0f klx clear-sky",
+                     id(lp_plan).d.dawn / 60, id(lp_plan).d.dawn % 60, id(lp_plan).d.rise / 60, id(lp_plan).d.rise % 60,
+                     id(lp_plan).d.noon / 60, id(lp_plan).d.noon % 60, id(lp_plan).d.set / 60, id(lp_plan).d.set % 60,
+                     id(lp_plan).d.dusk / 60, id(lp_plan).d.dusk % 60, id(lp_plan).d.e_noon / 1000.0);
           if (id(lp_auto))
-            ESP_LOGI("light", "  peak %.0f%% exponent %.3f, daily light %.2f h (target %.2f h), bright (>=%d%% of peak) %02d:%02d-%02d:%02d",
-                     id(lp_peak) * 100.0f, id(lp_pow), id(lp_dose) / 60.0f, dose / 60.0f,
+            ESP_LOGI("light", "  peak %.0f%% exponent %.2f, daily light %.2f h (natural %.2f h, cap %.2f h), bright (>=%d%% of peak) %02d:%02d-%02d:%02d",
+                     id(lp_peak) * 100.0f, id(light_day_expo), id(lp_dose) / 60.0f, id(lp_natural) / 60.0f, cap / 60.0f,
                      (int) (th * 100.0f + 0.5f),
                      std::max(0, id(lp_bright_on)) / 60, std::max(0, id(lp_bright_on)) % 60,
                      std::max(0, id(lp_bright_off)) / 60, std::max(0, id(lp_bright_off)) % 60);
@@ -720,28 +782,26 @@ script:
             - lambda: |-
                 const bool pro = ${light_pro};
                 id(light_push_ms) = millis();
+                id(light_readback_ms) = 0;
+                id(light_sent_min).clear();
                 if (id(lp_auto) && id(lp_curve)) {
-                  // The sun curve as points: exact sunrise and sunset at 0,
-                  // and one point every `step` minutes on the clock between
-                  // them (none within 10 min of either end). At most 48 per
-                  // channel; a longer day doubles the step.
-                  const int on = id(lp_on_min), off = id(lp_off_min), day = off - on;
-                  int step = std::max(15, std::min(120, id(light_curve_step)));
-                  while (day / step + 3 > 48) step *= 2;
-                  std::vector<chihiros::WRGB2Device::CurvePoint> pts;
-                  auto add = [&](int m) {
-                    const float f = chihiros::sun_curve::level((m - on) / (float) day, id(lp_peak), id(lp_pow));
-                    auto pc = [&](int full) { return (uint8_t) lroundf(full * f); };
-                    pts.push_back({(uint16_t) m, pc(id(lp_r)), pc(id(lp_g)), pc(id(lp_b)), pc(id(lp_w))});
-                  };
-                  add(on);
-                  for (int m = (on / step + 1) * step; m < off; m += step)
-                    if (m - on >= 10 && off - m >= 10) add(m);
-                  add(off);
-                  for (const auto &p : pts)
-                    ESP_LOGI("light", "  point %02d:%02d  W%d R%d G%d B%d", p.minute / 60, p.minute % 60,
+                  // The daylight curve as points (chihiros::daylight::points):
+                  // civil dawn / sunrise / sunset / civil dusk exactly, the
+                  // edge step near dawn and dusk, the main step between, at
+                  // most 24 per channel.
+                  const int step = std::max(30, std::min(120, id(light_curve_step)));
+                  const int edge = std::max(15, std::min(60, id(light_curve_edge)));
+                  const float warmth = std::max(0, std::min(100, id(light_dawn_warmth))) / 100.0f;
+                  auto pts = chihiros::daylight::points(id(lp_plan), id(lp_r), id(lp_g), id(lp_b),
+                                                        pro ? id(lp_w) : 0, warmth, step, edge, 120, 24);
+                  for (const auto &p : pts) {
+                    ESP_LOGI("light", "  point %02d:%02d  elev %5.1f  level %3.0f%%  W%d R%d G%d B%d",
+                             p.minute / 60, p.minute % 60, chihiros::daylight::elev_at(id(lp_plan), p.minute),
+                             chihiros::daylight::frac_at(id(lp_plan), p.minute) * 100.0f,
                              pro ? p.w : 0, p.r, p.g, p.b);
-                  ESP_LOGI("light", "sun curve: %d points x %d channels", (int) pts.size(), pro ? 4 : 3);
+                    id(light_sent_min).push_back(p.minute);
+                  }
+                  ESP_LOGI("light", "daylight curve: %d points x %d channels", (int) pts.size(), pro ? 4 : 3);
                   id(light_device).prepare_curve(id(sntp_time).now(), pts, pro);
                 } else {
                   id(light_device).prepare(
@@ -756,6 +816,11 @@ script:
                 condition:
                   lambda: return id(light_linked) && id(light_device).has_next();
                 then:
+                  # The last frame of a curve push is the status query: arm
+                  # the read-back check for the lamp's answer to it.
+                  - lambda: |-
+                      if (id(light_device).pending() == 1 && !id(light_sent_min).empty())
+                        id(light_readback_ms) = millis();
                   - ble_client.ble_write:
                       id: light_ble
                       service_uuid: ${light_ble_service}
@@ -821,6 +886,26 @@ script:
           format: "light: taken back; the phase is re-pushed on connect"
 
 switch:
+  # The selected phase follows the sun (on) or runs the table's fixed On/Off
+  # Time and Ramp (off). Not available on "Off (cycling)".
+  - platform: template
+    name: "Light Follows Sun"
+    id: light_ctl_follow
+    icon: mdi:sun-clock
+    lambda: |-
+      auto i = id(light_phase).active_index();
+      return i.has_value() && *i > 0 && *i < 5 && id(light_sun_follow)[*i] != 0;
+    turn_on_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (i.has_value() && *i > 0 && *i < 5) id(light_sun_follow)[*i] = 1;
+      - script.execute: light_changed
+    turn_off_action:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (i.has_value() && *i > 0 && *i < 5) id(light_sun_follow)[*i] = 0;
+      - script.execute: light_changed
+
   # Enables/disables the client. On = hold the link. Only light_release
   # turns it off, and only for a bounded time.
   - platform: ble_client
@@ -892,7 +977,7 @@ interval:
           // (and once the clock first syncs) and push while the lamp is dark.
           {
             auto i = id(light_phase).active_index();
-            if (i.has_value() && *i > 0 && *i < 5 && id(light_sun_plateau)[*i] > 0 &&
+            if (i.has_value() && *i > 0 && *i < 5 && id(light_sun_follow)[*i] != 0 &&
                 id(lp_sun_day) != now.day_of_year) {
               id(light_select_phase).execute();
               id(light_refresh_controls).execute();
@@ -902,12 +987,12 @@ interval:
           }
 
           // What the lamp should be giving now, as a fraction of the phase's
-          // full W/R/G/B: the sun curve, or one scene's linear ramps.
+          // full W/R/G/B: the daylight curve, or one scene's linear ramps.
           const int on = id(lp_on_min), off = id(lp_off_min), ramp = id(lp_ramp);
           float frac = 0.0f;
           if (id(lp_auto) && m > on && m < off) {
             if (id(lp_curve))
-              frac = chihiros::sun_curve::level((m - on) / (float) (off - on), id(lp_peak), id(lp_pow));
+              frac = chihiros::daylight::frac_at(id(lp_plan), m);
             else if (ramp <= 0 || (m >= on + ramp && m <= off - ramp))
               frac = 1.0f;
             else
@@ -935,14 +1020,14 @@ interval:
 
           // learned = lux at the phase's FULL values. A scene learns on its
           // plateau only (its ramps are the lamp's own, shape unknown); the
-          // sun curve learns above 70% of its peak, as lux / level. Once
+          // daylight curve learns above 70% of its peak, as lux / level. Once
           // learned, a sample outside 0.6-1.4x of it is not learned from: an
           // overshoot (the 2026-10-19 15:30 bump, ~2.3x) must not teach the
           // board that the overshoot is normal.
           //
           // Two kinds of mismatch:
           //   dark  the lamp is darker than it should be      -> re-push, x3
-          //   over  the lamp is lit when it should be dark, or (sun curve)
+          //   over  the lamp is lit when it should be dark, or (daylight curve)
           //         well above the curve                      -> Light
           //         Brighter Than Schedule; a curve is suspended for the rest
           //         of the day and the scene pushed instead, which darkens
@@ -969,7 +1054,8 @@ interval:
             // down (civil dusk, -6 deg). 5% of full, floor 10 lx; 15 lx
             // before anything is learned. Room LEDs leak into tank_lux, but
             // the evening before this check was written read 0 throughout.
-            const bool daylight_ok = id(cal_nir_ref) > 0.0f || id(light_sun).elevation() < -6.0;
+            const bool daylight_ok = id(cal_nir_ref) > 0.0f ||
+                chihiros::daylight::elevation(now.timestamp, ${light_latitude}, ${light_longitude}) < -6.0;
             const float limit = learned > 0.0f ? std::max(10.0f, 0.05f * learned) : 15.0f;
             if (daylight_ok && lux > limit) over = true;
           } else if (id(lp_curve) && learned > 0.0f && !dark) {
@@ -1001,7 +1087,7 @@ interval:
             if (id(lp_curve)) {
               // Re-pushing the same curve would not help if the lamp holds
               // points it should not; the scene is the lamp's proven path.
-              ESP_LOGE("light", "sun curve suspended until midnight; pushing the single scene instead");
+              ESP_LOGE("light", "daylight curve suspended until midnight; pushing the single scene instead");
               id(light_curve_off_day) = now.day_of_year;
               id(light_mismatch_min) = 0;
               id(light_last_fix_ms) = millis();
@@ -1121,7 +1207,7 @@ number:
     icon: mdi:sun-angle
     unit_of_measurement: "min"
     min_value: 0
-    # 150 is the lamp's limit for a set ramp; a sun curve READS back the
+    # 150 is the lamp's limit for a set ramp; a daylight curve READS back the
     # (longer) time from sunrise to its bright window, hence the wider range.
     max_value: 360
     step: 5
@@ -1136,8 +1222,8 @@ number:
       - lambda: |-
           auto i = id(light_phase).active_index();
           if (!i.has_value() || *i >= 5) return;
-          if (id(light_sun_plateau)[*i] > 0) {
-            ESP_LOGW("light", "this phase follows the sun; its ramp is computed. Change Light Full Brightness Hours instead");
+          if (id(light_sun_follow)[*i]) {
+            ESP_LOGW("light", "this phase follows the sun; its ramp is computed. Turn Light Follows Sun off to set it");
             id(light_ctl_ramp).publish_state(id(lp_ramp));
             return;
           }
@@ -1145,11 +1231,12 @@ number:
           id(light_table)[*i * 7 + 2] = std::min(150, (int) x);
       - script.execute: light_changed
 
-  # Follow-the-sun phases only: the day's TOTAL light, in hours at the
-  # phase's full brightness (a 2 h ramp at an even fade counts 1 h). Spread
-  # over today's sunrise..sunset by "Light Day Shape". 0 = fixed hours (the
-  # On/Off Time and Ramp controls). Setting it on a phase turns following on.
-  # "Light Daily Light" shows what today actually delivers.
+  # Follow-the-sun phases only: an optional CAP on the day's total light, in
+  # hours at the phase's full brightness (a 2 h ramp at an even fade counts
+  # 1 h). 0 = natural (the default): the day gives what the daylight curve
+  # gives ("Light Daily Light"). Above 0, a day that would deliver more is
+  # scaled down to it ("Light Curve Peak" drops below 100); Single fade uses
+  # it as its daily light. Following the sun is "Light Follows Sun".
   - platform: template
     name: "Light Full Brightness Hours"
     id: light_ctl_sun_hours
@@ -1194,16 +1281,15 @@ number:
       - script.execute: light_select_phase
       - script.execute: light_refresh_controls
 
-  # Spacing of the sun curve's points in the lamp. 60 min keeps a straight
-  # line between points within ~1% of the sine; 30 if the lamp turns out to
-  # STEP between points rather than fade (the lux curve shows stairs).
+  # Spacing of the daylight curve's points through the middle of the day
+  # (60 min; the lamp fades between points, confirmed 2026-10-19).
   - platform: template
     name: "Light Curve Step"
     id: light_ctl_curve_step
     icon: mdi:chart-timeline-variant
     entity_category: config
     unit_of_measurement: "min"
-    min_value: 15
+    min_value: 30
     max_value: 120
     step: 15
     mode: box
@@ -1211,6 +1297,66 @@ number:
     lambda: return (float) id(light_curve_step);
     set_action:
       - lambda: id(light_curve_step) = (int) x;
+      - script.execute: light_changed
+
+  # Point spacing within 2 h of civil dawn and dusk, where the daylight
+  # curve is steep. 30 min: 19 points on 2026-10-20 (24 at most, steps
+  # double past that); 15 halves the worst interpolation error (~4% -> ~3%)
+  # for ~7 more points.
+  - platform: template
+    name: "Light Curve Edge Step"
+    id: light_ctl_curve_edge
+    icon: mdi:chart-timeline-variant-shimmer
+    entity_category: config
+    unit_of_measurement: "min"
+    min_value: 15
+    max_value: 60
+    step: 5
+    mode: box
+    update_interval: 60s
+    lambda: return (float) id(light_curve_edge);
+    set_action:
+      - lambda: id(light_curve_edge) = (int) x;
+      - script.execute: light_changed
+
+  # How the real outdoor light is mapped onto the lamp: level =
+  # (illuminance / noon illuminance) ^ this. 1.0 = literal photometry (dark
+  # until sunrise, a slow first hour); 0.5 (default) = how daylight looks --
+  # a glow from civil dawn, a fast first hour, a flat midday. Lower = more
+  # daily light (0.5: 8.0 h on 2026-10-20; 0.6: 7.65 h; 1.0: 6.6 h).
+  - platform: template
+    name: "Light Daylight Exponent"
+    id: light_ctl_day_expo
+    icon: mdi:sun-wireless
+    entity_category: config
+    min_value: 0.3
+    max_value: 1.0
+    step: 0.05
+    mode: box
+    update_interval: 60s
+    lambda: return id(light_day_expo);
+    set_action:
+      - lambda: id(light_day_expo) = x;
+      - script.execute: light_changed
+
+  # Golden dawn and dusk: how far the mix moves toward warm white at low sun
+  # (100% = W +35%, G +10%, R -40%, B -70% at the horizon, fading to the
+  # phase's own ratio by 12 deg; brightness held). 0 = the phase's ratio
+  # all day (reads pink at low levels).
+  - platform: template
+    name: "Light Dawn Warmth"
+    id: light_ctl_dawn_warmth
+    icon: mdi:weather-sunset
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 10
+    mode: box
+    update_interval: 60s
+    lambda: return (float) id(light_dawn_warmth);
+    set_action:
+      - lambda: id(light_dawn_warmth) = (int) x;
       - script.execute: light_changed
 
 # Text, not datetime: ESPHome publishes a datetime over MQTT as JSON
@@ -1246,8 +1392,8 @@ text:
             id(light_ctl_on).publish_state(id(light_ctl_on).state);
             return;
           }
-          if (id(light_sun_plateau)[*i] > 0) {
-            ESP_LOGW("light", "this phase follows the sun; set Light Full Brightness Hours to 0 to use fixed times");
+          if (id(light_sun_follow)[*i]) {
+            ESP_LOGW("light", "this phase follows the sun; turn Light Follows Sun off to use fixed times");
             id(light_ctl_on).publish_state(id(light_ctl_on).state);
             return;
           }
@@ -1280,8 +1426,8 @@ text:
             id(light_ctl_off).publish_state(id(light_ctl_off).state);
             return;
           }
-          if (id(light_sun_plateau)[*i] > 0) {
-            ESP_LOGW("light", "this phase follows the sun; set Light Full Brightness Hours to 0 to use fixed times");
+          if (id(light_sun_follow)[*i]) {
+            ESP_LOGW("light", "this phase follows the sun; turn Light Follows Sun off to use fixed times");
             id(light_ctl_off).publish_state(id(light_ctl_off).state);
             return;
           }
@@ -1340,12 +1486,20 @@ binary_sensor:
     lambda: return id(light_not_responding);
 
   # The lamp lit when it should be dark (5% of full for 5 min), or well
-  # above the sun curve. On the curve this also suspends it until midnight.
+  # above the daylight curve. On the curve this also suspends it until midnight.
   - platform: template
     trigger_on_initial_state: true
     name: "Light Brighter Than Schedule"
     device_class: problem
     lambda: return id(light_over);
+
+  # After a daylight-curve push the lamp listed a stored time the board did
+  # not send. The curve is suspended until midnight (single scene instead).
+  - platform: template
+    trigger_on_initial_state: true
+    name: "Light Curve Rejected"
+    device_class: problem
+    lambda: return id(light_curve_rejected);
 
 sensor:
   # Link health. Drops counts every unplanned loss of the lamp link (not a
@@ -1373,7 +1527,7 @@ sensor:
       if (!id(light_linked)) return NAN;
       return (float) ((millis() - id(light_up_ms)) / 60000UL);
 
-  # Lux the lamp gives at the phase's FULL values (on the sun curve learned
+  # Lux the lamp gives at the phase's FULL values (on the daylight curve learned
   # as lux / level near the peak; on a scene, the plateau lux).
   - platform: template
     name: "Light Learned Lux"
@@ -1410,8 +1564,8 @@ sensor:
       if (!id(lp_valid) || id(light_learned_lux) <= 0.0f) return NAN;
       return id(light_learned_lux) * id(lp_frac_now);
 
-  # Full-equivalent hours today actually delivers (the target is Light Full
-  # Brightness Hours; short winter days can fall short of it).
+  # Full-equivalent hours of today's NATURAL daylight curve (no cap). With a
+  # cap set the lamp delivers less: Light Curve Peak shows the scaling.
   - platform: template
     id: light_daily_light
     name: "Light Daily Light"
@@ -1421,10 +1575,11 @@ sensor:
     update_interval: 60s
     lambda: |-
       if (!id(lp_valid)) return NAN;
+      if (id(lp_sun)) return id(lp_natural) / 60.0f;      // the natural day (cap: see Curve Peak)
       return id(lp_dose) / 60.0f;
 
   # Today's peak, % of the phase's full values: under 100 when the target
-  # is less than a full-height sine delivers.
+  # (Light Full Brightness Hours) is below what the natural day gives.
   - platform: template
     id: light_curve_peak
     name: "Light Curve Peak"
@@ -1450,7 +1605,7 @@ sensor:
     internal: true
     lambda: |-
       // Reassembled into whole 0x5b frames. Within a minute of a push (the
-      // push opens and, for the sun curve, closes with a status query) they
+      // push opens and, for the daylight curve, closes with a status query) they
       // are logged at INFO and a schedule snapshot -- what the lamp says it
       // stores -- goes to "Light Lamp Report".
       static chihiros::NotifyAssembler asm_;
@@ -1468,6 +1623,35 @@ sensor:
           ESP_LOGI("light", "lamp snapshot fw %u, %d bytes: %s", f[1], (int) f.size(), chihiros::hex_dump(f).c_str());
           ESP_LOGI("light", "  decoded (A2 layout) %d points: %s", n, pts.c_str());
           std::string rep = std::to_string(n) + " pts: " + pts;
+          // The answer to a curve push's closing status query: every time the
+          // lamp lists must be one the board just sent. A time it did not send
+          // is a stored point that will shape the day (the 2026-10-19 bump
+          // and relight). Fewer times than sent is only reported -- the
+          // snapshot may be size-limited -- and the lux check covers it.
+          if (id(light_readback_ms) != 0 && millis() - id(light_readback_ms) < 15000UL) {
+            id(light_readback_ms) = 0;
+            const auto got = chihiros::snapshot_minutes(f);
+            const auto &sent = id(light_sent_min);
+            int foreign = 0, missing = 0;
+            for (int t : got) if (std::find(sent.begin(), sent.end(), t) == sent.end()) foreign++;
+            for (int t : sent) if (std::find(got.begin(), got.end(), t) == got.end()) missing++;
+            if (foreign > 0) {
+              rep = "FOREIGN " + std::to_string(foreign) + " | " + rep;
+              ESP_LOGE("light", "read-back: the lamp holds %d time(s) the board did not send; curve suspended until midnight, pushing the single scene", foreign);
+              id(light_curve_rejected) = true;
+              auto now = id(sntp_time).now();
+              if (now.is_valid()) id(light_curve_off_day) = now.day_of_year;
+              id(light_select_phase).execute();
+              id(light_refresh_controls).execute();
+              id(light_push).execute();
+            } else {
+              id(light_curve_rejected) = false;
+              rep = (missing ? "lists " + std::to_string((int) got.size()) + " of " + std::to_string((int) sent.size()) + " | "
+                             : std::string("match | ")) + rep;
+              if (missing) ESP_LOGW("light", "read-back: the lamp lists %d of the %d times sent (snapshot may be size-limited)", (int) got.size(), (int) sent.size());
+              else ESP_LOGI("light", "read-back: the lamp holds exactly the %d times sent", (int) sent.size());
+            }
+          }
           if (rep.size() > 250) rep = rep.substr(0, 247) + "...";
           id(light_lamp_report).publish_state(rep);
         }
