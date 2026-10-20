@@ -80,7 +80,6 @@ link is worse than none.
 |---|---|---|
 | **LAFVIN / Waveshare ESP32-C6-LCD-1.47** | the controller and its display. Any ESP32 works — see `boards/` | [search](https://www.amazon.com/s?k=ESP32-C6+1.47+inch+LCD+development+board) |
 | **DS18B20 waterproof probe** | water temperature. The one measurement the whole control loop depends on | [search](https://www.amazon.com/s?k=DS18B20+waterproof+temperature+probe) |
-| **4.7 kΩ resistor, ¼ W** | **required** pull-up for the DS18B20, and the one part that arrives in none of the boxes | [assortment kit](https://www.amazon.com/Resistor-Assortment-Resistance-Electric-Projects/dp/B07N1ZK8CC) |
 | **CZH-Labs D-1584TL** | 2-channel relay outlet module, ~$49. Two *independently* switched outlets — a single-channel IoT Relay cannot run a heater and a fan | [Amazon](https://www.amazon.com/Two-Channel-Control-Module-Arduino-Raspberry/dp/B0GR85JF68) · [direct](https://czh-labs.com/products/ac-power-2-channel-iot-relay-outlet-module-din-rail-or-screw-mounting) |
 | 26–28 AWG stranded wire | hookup, silicone jacket is easiest | [search](https://www.amazon.com/s?k=26+AWG+silicone+stranded+hookup+wire) |
 | Heat shrink, 2 mm and 3 mm | joints and splices | [search](https://www.amazon.com/s?k=heat+shrink+tubing+assortment+2mm+3mm) |
@@ -123,30 +122,29 @@ phantom because a continuous reading was trusted over a liquid test.
 Test strips read GH and KH low and cannot resolve the range that matters
 here. Use the drop tests.
 
-### About the 4.7 kΩ resistor
+### About the 1-Wire pull-up: there isn't one
 
-**Anything from 2.2 kΩ to 10 kΩ works** — 4.7 kΩ is convention, not a
-requirement. Check your DS18B20 first: some waterproof probes ship with a
-small adapter board that already has one.
+No board in this project has an external DS18B20 pull-up fitted, and none
+needs one. ESPHome's `gpio` one_wire platform asserts the chip's own pull-up
+on every bus reset and every bit read — `pin_mode(gpio::FLAG_INPUT |
+gpio::FLAG_PULLUP)`, `components/gpio/one_wire/gpio_one_wire.cpp:11`, checked
+against 2026.9.1. The bus is never floating, so there is nothing to add and
+no `pullup:` to set; the driver owns the pin mode regardless of what the
+config says.
 
-**If you don't have one yet**, the C6's internal pull-up will get you
-through a bench test. Replace the `one_wire` block with:
+Earlier revisions of this file called the resistor **required** and said the
+bus "reads garbage without it". That was wrong, and the hardware had been
+disproving it daily — the XIAO controller has read temperatures for months
+with nothing fitted.
 
-```yaml
-one_wire:
-  - platform: gpio
-    pin:
-      number: GPIO18
-      mode:
-        input: true
-        output: true
-        open_drain: true
-        pullup: true
-```
-
-It is roughly 45 kΩ, ten times weaker than spec. Fine on a short lead on the
-bench; on a long waterproof probe cable it gives intermittent dropouts, which
-this firmware reads as a probe fault and answers by cutting the heater.
+It is worth knowing the margin is thin: ~45 kΩ against the DS18B20
+datasheet's 4.7 kΩ. One probe on a short lead tolerates it; a long cable in
+electrical noise is where slow rise times turn into CRC errors. Two things
+follow. First, on the Freenove all-in-one boards the probes sit on GPIO4/5,
+whose camera-bus resistors (~10 kΩ) parallel the internal one for ~8 kΩ —
+in spec, for free. Second, if a bus ever does go marginal, a resistor is the
+*last* thing to suspect: it has never been the cause here, and
+`1-Wire bus held low` means water in the probe, which no pull-up value fixes.
 
 ## Wiring
 
@@ -160,8 +158,8 @@ Everything runs at 3.3 V.
 | Black (GND) | GND    |
 | Yellow (DQ) | GPIO18 |
 
-Add a **4.7 kΩ resistor between DQ and 3V3**. Not optional — the bus is
-open-drain and reads garbage without it.
+That is the whole connection. The bus is open-drain, but ESPHome pulls it up
+from inside the chip — see *About the 1-Wire pull-up* above. No resistor.
 
 ### Keyestudio TDS meter — analog
 
@@ -273,13 +271,9 @@ everything. No external supply.
    ESP32-C6-LCD-1.47
    ┌─────────────┐
    │             │
-   │      GPIO18 ●──────────┬──────────────► DS18B20  DQ   (yellow)
-   │             │          │
-   │             │         ┌┴┐
-   │             │         │ │ 4.7k  pull-up, at the BOARD end
-   │             │         └┬┘        not out at the probe
-   │        3V3 ─┼──────────┘
-   │             │
+   │      GPIO18 ●─────────────────────────► DS18B20  DQ   (yellow)
+   │             │          (no pull-up resistor — the driver
+   │             │           supplies the chip's own)
    │       GPIO1 ●─────────────────────────► TDS       A    (analog)
    │             │
    │      GPIO19 ●─────────────────────────► BH1750    SDA
@@ -298,7 +292,7 @@ everything. No external supply.
 |---|---|---|
 | 3V3 | bus → DS18B20 red, TDS VCC, BH1750 VCC | TDS at 3.3 V, **never 5 V** |
 | GND | bus → DS18B20 black, TDS GND, BH1750 GND, relay IN− ×2 | one common ground |
-| GPIO18 | DS18B20 yellow (DQ) | + 4.7 kΩ from DQ to 3V3 |
+| GPIO18 | DS18B20 yellow (DQ) | one wire, no pull-up resistor |
 | GPIO1 | TDS "A" | ADC-capable pin |
 | GPIO19 | BH1750 SDA | |
 | GPIO20 | BH1750 SCL | |
@@ -796,7 +790,7 @@ Checks, with the board powered off:
 
 | Measure | Expect |
 |---|---|
-| DQ (GPIO18) to 3V3 | ~4.7 kΩ — the pull-up bridge |
+| DQ (GPIO18) to 3V3 | open — there is no pull-up resistor to find |
 | DQ to GND | open |
 | 3V3 to GND | open |
 | Probe VCC to 3V3 | ~0 Ω |

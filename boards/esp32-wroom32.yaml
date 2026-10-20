@@ -31,7 +31,7 @@
 #
 #   GPIO6-11    flash. Using them bricks the boot.
 #   GPIO0,2,12,15  strapping. A pull-up or pull-down on these at boot
-#               changes boot mode, and a 4.7k probe pull-up on GPIO12
+#               changes boot mode, and the 1-Wire driver's internal pull-up
 #               in particular stops some boards booting at all.
 #   GPIO34-39   INPUT ONLY, and no internal pull-ups. Fine for the TDS
 #               analog line, useless for a relay or a 1-Wire bus.
@@ -40,8 +40,8 @@
 #
 #   TDS analog   GPIO34  ADC1, input-only -- exactly what it is for, and
 #                        it keeps an output-capable pin free.
-#   DS18B20      GPIO4   4.7k pull-up to 3V3. Not a strapping pin, so the
-#                        pull-up is harmless here.
+#   DS18B20      GPIO4   No resistor fitted; the driver pulls the pin up from
+#                        inside the chip. Not a strapping pin, so harmless.
 #   BH1750 SDA   GPIO21  the devkit's default I2C pair, so it matches
 #   BH1750 SCL   GPIO22  every pinout diagram printed for this board.
 #   Heater relay GPIO26  adjacent to 27 on the header, so the two relay

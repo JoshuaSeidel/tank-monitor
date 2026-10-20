@@ -31,8 +31,8 @@
 # ---------------------------------------------------------------------
 #   signal                       GPIO   notes
 #   pH board signal (blue)       1      ADC1_CH0
-#   DS18B20 A (control probe)    4      4.7k pull-up to 3V3 (CAM_SIOD)
-#   DS18B20 B (cross-check)      5      4.7k pull-up to 3V3 (CAM_SIOC)
+#   DS18B20 A (control probe)    4      board pulls up (CAM_SIOD), none fitted
+#   DS18B20 B (cross-check)      5      board pulls up (CAM_SIOC), none fitted
 #   TDS board signal             6      ADC1_CH5
 #   Leak sensor                  7      ADC1_CH6; 2.2M + 100nF to GND at the pin
 #   Heater A relay               8
@@ -55,8 +55,9 @@
 # on them: on 2026-09-28 TDS (GPIO4) sat at ~2.33 V in air with the probe
 # unplugged, and the leak input (GPIO5) read a dead-flat 3.15 V -- "wet" --
 # against its 2.2M pull-down from the first boot. The 1-Wire buses live
-# there instead, because 1-Wire wants a pull-up anyway: the board's sits in
-# parallel with the 4.7k.
+# there instead, because 1-Wire wants a pull-up anyway. Nothing is fitted:
+# the board's ~10k parallels the pull-up ESPHome's one_wire driver asserts
+# from inside the chip (~45k) for roughly 8k, which is in spec on its own.
 #
 # ---------------------------------------------------------------------
 # POWER -- the one thing that is still shared
@@ -162,10 +163,10 @@ wifi:
 one_wire:
   - platform: gpio
     id: onewire_a
-    pin: GPIO4      # control probe. 4.7k pull-up to 3V3 (+ the board's CAM_SIOD pull-up).
+    pin: GPIO4      # control probe. No resistor fitted -- CAM_SIOD + the driver's.
   - platform: gpio
     id: onewire_b
-    pin: GPIO5      # cross-check probe. 4.7k pull-up to 3V3 (+ the board's CAM_SIOC pull-up).
+    pin: GPIO5      # cross-check probe. No resistor fitted -- CAM_SIOC + the driver's.
 
 # Two buses, one sensor each. 10 kHz on both: the leads run up to the
 # fixture, and the slow clock buys capacitance margin on a long run.

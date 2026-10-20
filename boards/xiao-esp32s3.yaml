@@ -38,8 +38,8 @@
 #   signal              SILKSCREEN   GPIO
 #   TDS analog          D1           2      ADC1
 #   pH analog           D3           4      ADC1
-#   DS18B20 data        D5           6      + 4.7k pull-up  (control probe)
-#   DS18B20 #2 data     D0           1      + 4.7k pull-up  (cross-check probe)
+#   DS18B20 data        D5           6      no pull-up fitted (control probe)
+#   DS18B20 #2 data     D0           1      no pull-up fitted (cross-check)
 #   I2C SDA (BH1750)    D6           43
 #   I2C SCL             D7           44
 #   heater relay IN+    D8           7
@@ -102,15 +102,17 @@ one_wire:
     # This comment used to claim the bus "never pulls high" without a 4.7k
     # -- untrue, and this board disproved it every day it ran.
     #
-    # It is ~45k though, against the datasheet's 4.7k. Fine for one device
-    # on a short cable, thin margin on a long or noisy one, and the way it
-    # fails is CRC errors rather than silence. If reads go marginal, a
-    # 4.7k from DQ to 3V3 is the fix -- not a different pin.
+    # It is ~45k though, against the datasheet's 4.7k: fine for one device
+    # on a short cable, thinner margin on a long or noisy one, and it fails
+    # as CRC errors rather than silence. Worth knowing, not worth acting on
+    # -- no board here fits an external pull-up and none is going to. The
+    # one 1-Wire fault actually diagnosed on this probe was `bus held low`,
+    # water inside the probe, which no pull-up value would have changed.
     pin: GPIO6
   - platform: gpio
     id: onewire_b
-    # Silkscreen D0. Same internal pull-up as onewire_a; same optional
-    # 4.7k if a long cable ever lands here. With nothing wired at all the
+    # Silkscreen D0. Same internal pull-up as onewire_a, nothing fitted
+    # here either. With nothing wired at all the
     # boot log says "No devices" for this bus, the cross-check reads
     # unavailable, and the controller simply has no second opinion -- so
     # this can be flashed before the second probe exists.

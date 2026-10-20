@@ -23,8 +23,8 @@
 #   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
 #
 #   signal                    SILKSCREEN   GPIO
-#   1-Wire bus A (control)    D5           6      + 4.7k pull-up
-#   1-Wire bus B (crosscheck) D0           1      + 4.7k pull-up
+#   1-Wire bus A (control)    D5           6      no pull-up fitted
+#   1-Wire bus B (crosscheck) D0           1      no pull-up fitted
 #   I2C SDA                   D6           43
 #   I2C SCL                   D7           44
 #   Heater A control          D8           7
@@ -111,10 +111,10 @@ mqtt:
 one_wire:
   - platform: gpio
     id: onewire_a
-    pin: GPIO6      # D5 -- control probe. 4.7k pull-up to 3V3.
+    pin: GPIO6      # D5 -- control probe. No pull-up resistor; the driver's.
   - platform: gpio
     id: onewire_b
-    pin: GPIO1      # D0 -- cross-check probe. 4.7k pull-up to 3V3.
+    pin: GPIO1      # D0 -- cross-check probe. No pull-up resistor either.
 
 # One bus, three devices: the ADS1115 next to the board and two BH1750s at
 # opposite ends of a 48" tank, so each SDA/SCL pair is a 4-5 ft run. I2C

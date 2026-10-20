@@ -24,7 +24,6 @@ last. That way if something is wrong you know which step caused it.
 ## What you need
 
 - 26–28 AWG stranded hookup wire (silicone jacket is easiest to work with)
-- 4.7 kΩ resistor (1/4 W)
 - Heat shrink, 2 mm and 3 mm
 - Soldering iron ~625 °F (330 °C), thin rosin-core solder
 - Multimeter
@@ -115,21 +114,22 @@ config expects.
 
 Shrink each joint as you go.
 
-## 6. The 4.7 kΩ pull-up
+## 6. The 1-Wire pull-up — nothing to solder
 
-Solder it between the **DQ line and 3V3**, at the *board* end of the run —
-not out at the probe. Easiest way: include one resistor leg in the 3V3 splice
-when you make it in step 3, and solder the other leg onto the GPIO18 wire
-where it leaves the board.
+This step used to say "solder a 4.7 kΩ between DQ and 3V3, without it the
+DS18B20 reads garbage". Skip it. **No board in this project has that resistor
+fitted and none is getting one.**
 
-Sleeve both legs with heat shrink. Bare resistor legs near a tank are a short
-waiting to happen.
+ESPHome's `gpio` one_wire platform asserts the chip's own pull-up on every bus
+reset and every bit read (`gpio_one_wire.cpp:11`, verified against 2026.9.1),
+so the bus is never floating. The XIAO controller has read temperatures for
+months with nothing fitted, which is the evidence that settles it.
 
-Without this resistor the DS18B20 reads nothing or garbage. Any value from
-2.2 kΩ to 10 kΩ will do — 4.7 kΩ is convention, not a requirement.
-
-If you don't have one yet, the README covers switching to the C6's internal
-pull-up as a bench-test stopgap. It is not a permanent substitute.
+The internal pull-up is ~45 kΩ, about ten times weaker than the datasheet's
+4.7 kΩ, and on a long cable in electrical noise that margin is where CRC
+errors come from. Note it; do not pre-empt it. It has never been a fault cause
+on this build, and the one 1-Wire failure actually diagnosed here —
+`1-Wire bus held low` — was water inside the probe, which no pull-up fixes.
 
 ## 7. Relay control pair
 
@@ -310,15 +310,16 @@ A controller with no screen — the same job as the C6, on a plain devkit.
 Everything solders to the board's own header pins; there is no breakout.
 
 Follow the C6 build above for technique: steps 2 (pre-tin), 3 (power splices),
-6 (the pull-up), 8 (inspect) and 10 (before it goes near water) apply
-unchanged. Only the pin numbers differ.
+8 (inspect) and 10 (before it goes near water) apply unchanged. Only the pin
+numbers differ. Step 6 is a no-op now — read it once for why there is no
+pull-up to fit.
 
 ## Pin map
 
 | Board pin | Goes to |
 |---|---|
 | GPIO34 | TDS `A` |
-| GPIO4 | DS18B20 yellow (DQ), with the 4.7 kΩ pull-up to 3V3 |
+| GPIO4 | DS18B20 yellow (DQ) — one wire, no pull-up resistor |
 | GPIO21 | BH1750 `SDA` |
 | GPIO22 | BH1750 `SCL` |
 | GPIO26 | Relay Ch1 `IN+` (heater) |
@@ -334,8 +335,9 @@ This board has pins to spare, so the choices are about which are *safe*:
 
 - **GPIO6–11** are the flash. Using them prevents boot.
 - **GPIO0, 2, 12, 15** are strapping pins. A pull-up or pull-down at boot
-  changes boot mode — a 4.7 kΩ probe pull-up on GPIO12 stops some boards
-  booting at all, which is why the DS18B20 is on GPIO4.
+  changes boot mode, and the 1-Wire driver asserts an internal pull-up on
+  whatever pin it is given — on GPIO12 that alone stops some boards booting,
+  which is why the DS18B20 is on GPIO4.
 - **GPIO34–39 are input only** with no internal pull-ups. Right for the TDS
   analog line, useless for a relay or a 1-Wire bus.
 - **ADC2 cannot be read while Wi-Fi is on.** Any analog input must be on
@@ -373,8 +375,9 @@ both the **Waveshare ESP32-S3-Zero** (23.5 × 18 mm) and the generic
 config in `boards/esp32s3-mini.yaml`.
 
 Follow the C6 build above for technique: steps 2 (pre-tin), 3 (power
-splices), 6 (the pull-up), 8 (inspect) and 10 (before it goes near water)
-apply unchanged. Only the pin numbers and the two extra parts differ.
+splices), 8 (inspect) and 10 (before it goes near water) apply unchanged.
+Only the pin numbers and the two extra parts differ. Step 6 is a no-op —
+there is no pull-up to fit.
 
 ## Two parts the other boards do not need
 
@@ -389,7 +392,7 @@ apply unchanged. Only the pin numbers and the two extra parts differ.
 |---|---|
 | GPIO1 | TDS `A` |
 | GPIO2 | pH board analog out (blue on the Gravity cable) |
-| GPIO5 | DS18B20 yellow (DQ), with the 4.7 kΩ pull-up to 3V3 |
+| GPIO5 | DS18B20 yellow (DQ) — one wire, no pull-up resistor |
 | GPIO6 | BH1750 `SDA` |
 | GPIO7 | BH1750 `SCL` |
 | GPIO8 | Relay Ch1 `IN+` (heater) |
@@ -519,8 +522,8 @@ The Freenove board is labelled with GPIO numbers directly (DevKitC-1 layout).
 | Device | Signal | GPIO | Harness wire (as built) |
 |---|---|---|---|
 | pH board | analog out | **1** | **blue** (single) |
-| DS18B20 A (control) | data; 4.7 kΩ to 3V3 | **4** | **gray** |
-| DS18B20 B (cross-check) | data; 4.7 kΩ to 3V3 | **5** | **white** |
+| DS18B20 A (control) | data — no pull-up resistor | **4** | **gray** |
+| DS18B20 B (cross-check) | data — no pull-up resistor | **5** | **white** |
 | TDS board | `A` (analog out) | **6** | **purple** (single) |
 | Leak sensor | sensor output; 2.2 MΩ + 100 nF from the pin to GND | **7** | **green** (single) |
 | Heater A relay | control | **8** | **yellow** (single) |
@@ -548,7 +551,9 @@ Everything except GPIO 1 is on the same header row. Leave these alone:
 `43`/`44` (console), `38`–`40` (microSD), `2` and `48` (LEDs). GPIO 4–18 also
 run to the camera connector. **GPIO 4 and 5 are the camera's SCCB bus and are
 pulled up to 3V3 on the Freenove board**, fitted camera or not, so they carry
-the 1-Wire probes (which want a pull-up anyway) and never an analog input.
+the 1-Wire probes — which want a pull-up anyway, and get ~8 kΩ from those
+resistors in parallel with the driver's internal one — and never an analog
+input.
 Until 2026-09-28 TDS and leak sat on 4 and 5: TDS read ~2.33 V in air and the
 leak read a flat 3.15 V ("wet") no matter what was wired to it.
 
@@ -606,7 +611,6 @@ other in this file.
   ADS1115 at the 3.3 V rail it must run on
 - D-1585TL 4-channel IoT relay outlet (the 4-outlet sibling of the D-1584TL
   you already run)
-- 2 × 4.7 kΩ resistors, 1/4 W
 - A scrap of perfboard, ~20 × 40 mm, for the power rails
 - 26–28 AWG silicone hookup wire, heat shrink, iron, multimeter — as for the C6
 
@@ -807,20 +811,21 @@ differential I2C extender — a PCA9615 board (SparkFun QwiicBus) at the XIAO
 and one at each sensor, which carries I2C over ordinary twisted pair for
 tens of metres. Do not chase it with thicker wire or a faster clock.
 
-## 6. Two 1-Wire buses, two pull-ups
+## 6. Two 1-Wire buses, three wires each
 
 Two probes, and they are **deliberately on separate buses** so neither
 needs an address in the config and a flooded probe takes down only itself.
-Each bus is exactly the C6's step 6, done twice:
+Three wires per probe and nothing else — no pull-up resistors, per the C6's
+step 6:
 
-| Probe | Red | Black | Yellow (DQ) | 4.7 kΩ |
-|---|---|---|---|---|
-| DS18B20 **A** (control, heater-A half) | 3V3 rail | GND rail | `D5` | between `D5` and the 3V3 rail |
-| DS18B20 **B** (cross-check, heater-B half) | 3V3 rail | GND rail | `D0` | between `D0` and the 3V3 rail |
+| Probe | Red | Black | Yellow (DQ) |
+|---|---|---|---|
+| DS18B20 **A** (control, heater-A half) | 3V3 rail | GND rail | `D5` |
+| DS18B20 **B** (cross-check, heater-B half) | 3V3 rail | GND rail | `D0` |
 
-Pull-up at the *board* end, not out at the probe. Sleeve both resistor legs.
-Without it that bus reports "No devices, can't auto-select address", which
-is indistinguishable from the probe being on the wrong pad.
+A bus that reports "No devices, can't auto-select address" is the yellow wire
+on the wrong pad or a cold joint on it. It is not a missing resistor; the
+driver supplies the pull-up.
 
 Label the probe leads **A** and **B** now, at the board, before they are
 routed. Once they are in the tank they look identical.
@@ -937,8 +942,8 @@ absent is BH1750 B's `ADDR` not reaching 3V3. `0x48` absent is the ADS1115
 [I][one_wire.gpio]:   0x...   (bus on GPIO1)
 ```
 
-"No devices" on one bus and not the other is that bus's pull-up or its
-yellow wire on the wrong pad.
+"No devices" on one bus and not the other is that bus's yellow wire on the
+wrong pad, or a cold joint on it.
 
 **Then** check Home Assistant: `Water Temperature Left` and `Water
 Temperature Right` both reporting, `TDS` and `pH` present and not NaN,

@@ -69,11 +69,11 @@
 # In spec, and better than what the XIAO runs on today -- the pin chosen
 # to dodge the analog problem turns out to fix the pull-up problem too.
 #
-# So: land DQ on GPIO4 and flash. Fitting a 4.7k from DQ to 3V3 would
-# take it to ~3.2k and is the better engineering answer if the probe
-# cable is long or the reads look marginal, but it is an option, not a
-# prerequisite. Whichever way: a RESISTOR. A bare wire from DQ to 3V3 is
-# a short the instant the sensor pulls low.
+# So: land DQ on GPIO4 and flash. Nothing to solder, and nothing to
+# solder later either -- no board in this project fits an external 1-Wire
+# pull-up, which is a settled decision and not an oversight to correct.
+# If a bus ever does read marginal, look at the joint, the pad and the
+# probe before the pull-up: a resistor has never been the cause here.
 #
 # ---------------------------------------------------------------------
 # ONE PROBE, NOT TWO

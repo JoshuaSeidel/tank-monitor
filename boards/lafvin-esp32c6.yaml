@@ -20,7 +20,7 @@ i2c:
   scan: true
 
 # ---------------------------------------------------------------
-# DS18B20 temperature probe -- 4.7k pull-up to 3.3V
+# DS18B20 temperature probe -- no pull-up resistor; the driver asserts the chip's
 # ---------------------------------------------------------------
 one_wire:
   - platform: gpio

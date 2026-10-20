@@ -135,7 +135,8 @@ logger:
 #   TDS analog   GPIO1   ADC1_CH0
 #   pH analog    GPIO2   ADC1_CH1
 #   (ORP later)  GPIO4   ADC1_CH3, reserved -- GPIO3 skipped, strapping
-#   DS18B20      GPIO5   4.7k pull-up to 3V3. Not strapping, so the
+#   DS18B20      GPIO5   No resistor fitted; the driver pulls the pin up from
+#                        inside the chip. Not strapping, so that internal
 #                        pull-up cannot change boot mode.
 #   BH1750 SDA   GPIO6
 #   BH1750 SCL   GPIO7
