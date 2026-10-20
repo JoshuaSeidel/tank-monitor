@@ -101,16 +101,21 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     return blob;
   }
 
-  // Local midnight as a UTC epoch. ESPHome's ESPTime carries the local
-  // wall clock, so rewinding to 00:00:00 and converting back gives the
-  // instant the day starts at this longitude -- which is what the solar
-  // model wants as its origin.
-  auto midnight = now;
-  midnight.hour = 0;
-  midnight.minute = 0;
-  midnight.second = 0;
-  midnight.recalc_timestamp_utc(false);
-  const time_t mid = (time_t) midnight.timestamp;
+  // Local midnight as a UTC epoch -- the origin the solar model wants.
+  //
+  // Subtract the local time of day from the UTC timestamp. now.timestamp
+  // is already UTC and now.hour/minute/second are local wall clock, so the
+  // difference lands exactly on local midnight whatever the offset, and
+  // follows DST without being told about it.
+  //
+  // The first version zeroed the h/m/s fields and called
+  // recalc_timestamp_utc(), which read those local fields as if they were
+  // UTC. That put the origin four hours early in EDT and the lamp ran a
+  // day shifted four hours late -- dawn at 10:49, sunset at 22:13, the
+  // tank dark all morning. The local g++ test never caught it because it
+  // supplied local-midnight-as-UTC by hand and so never exercised this
+  // conversion at all.
+  const time_t mid = (time_t) now.timestamp - (now.hour * 3600 + now.minute * 60 + now.second);
 
   auto plan = tank_monitor::daylight::plan(mid, this->lat_, this->lon_, this->expo_, this->cap_min_, 0.70f);
   if (!plan.ok) {
@@ -144,6 +149,9 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     human += buf;
   }
 
+  // Printed so a repeat of the timezone bug is one line to spot: these are
+  // LOCAL clock times, and they are what gets written to the lamp.
+  ESP_LOGI(TAG, "Local midnight is UTC epoch %lld; it is now %02d:%02d local", (long long) mid, now.hour, now.minute);
   ESP_LOGI(TAG, "Day: dawn %02d:%02d rise %02d:%02d noon %02d:%02d set %02d:%02d dusk %02d:%02d", plan.d.dawn / 60,
            plan.d.dawn % 60, plan.d.rise / 60, plan.d.rise % 60, plan.d.noon / 60, plan.d.noon % 60, plan.d.set / 60,
            plan.d.set % 60, plan.d.dusk / 60, plan.d.dusk % 60);
