@@ -227,6 +227,10 @@ void FluvalLight::set_mode(uint8_t mode) {
   this->queue_({SPP_COMMAND_HEADER, 0xA1, KEY_MODE, v[0]}, "mode");
 }
 
+void FluvalLight::read_params() {
+  this->queue_({SPP_READ_PARAMS[0], SPP_READ_PARAMS[1]}, "read params");
+}
+
 void FluvalLight::set_power(bool on) {
   this->queue_({SPP_COMMAND_HEADER, 0xA1, KEY_POWER, (uint8_t) (on ? 0xF5 : 0xF4)}, "power");
 }
@@ -321,6 +325,28 @@ void FluvalLight::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
         break;
       }
       this->char_handle_ = chr->handle;
+
+      // fff1 is where the fixture answers. Registering for it is not
+      // optional bookkeeping: without it the stack never delivers a
+      // notification and the 0xD2 state frames -- the only way to learn
+      // this lamp's real channel order rather than guess it -- simply do
+      // not arrive.
+      auto *ntf = this->parent()->get_characteristic(
+          esp32_ble_tracker::ESPBTUUID::from_raw("0000fff0-0000-1000-8000-00805f9b34fb"),
+          esp32_ble_tracker::ESPBTUUID::from_raw("0000fff1-0000-1000-8000-00805f9b34fb"));
+      if (ntf == nullptr) {
+        ESP_LOGW(TAG, "No fff1 notify characteristic -- commands will still work, but the lamp cannot answer");
+      } else {
+        this->notify_handle_ = ntf->handle;
+        auto status = esp_ble_gattc_register_for_notify(this->parent()->get_gattc_if(),
+                                                        this->parent()->get_remote_bda(), ntf->handle);
+        if (status != ESP_OK) {
+          ESP_LOGW(TAG, "register_for_notify failed, status %d", status);
+        } else {
+          ESP_LOGI(TAG, "Listening on fff1, handle 0x%04x", this->notify_handle_);
+        }
+      }
+
       ESP_LOGI(TAG, "Connected, write handle 0x%04x", this->char_handle_);
       if (this->connected_sensor_ != nullptr)
         this->connected_sensor_->publish_state(true);
@@ -331,6 +357,9 @@ void FluvalLight::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       // update() picks it up within the minute.
       this->clock_synced_ = false;
       this->sync_clock();
+      // And ask it to describe itself, so the first thing in the log after
+      // a connect is the lamp's own account of what it is holding.
+      this->read_params();
       break;
     }
     case ESP_GATTC_DISCONNECT_EVT: {
@@ -345,14 +374,19 @@ void FluvalLight::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t 
       // parsed for now: the point of first connect is to see what this
       // light actually reports back, and guessing at the decode before
       // seeing real bytes is how a readback ends up confirming itself.
-      if (param->notify.value_len > 0 && param->notify.value[0] == SPP_STATUS_HEADER) {
+      if (param->notify.value_len > 0) {
         std::string hex;
         char b[4];
         for (uint16_t i = 0; i < param->notify.value_len && i < 64; i++) {
           snprintf(b, sizeof(b), "%02x", param->notify.value[i]);
           hex += b;
         }
-        ESP_LOGI(TAG, "State frame: %s", hex.c_str());
+        ESP_LOGI(TAG, "Lamp says (%u bytes): %s", (unsigned) param->notify.value_len, hex.c_str());
+        if (this->status_sensor_ != nullptr && param->notify.value[0] == SPP_STATUS_HEADER) {
+          // Onto an entity as well as the log. The log is a terminal
+          // somebody has to be watching; this survives until it is read.
+          this->publish_status_(std::string("lamp: ") + hex.substr(0, 180));
+        }
       }
       break;
     }

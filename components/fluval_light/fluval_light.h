@@ -48,6 +48,11 @@ namespace fluval_light {
 
 static const uint8_t SPP_COMMAND_HEADER = 0xD1;
 static const uint8_t SPP_STATUS_HEADER = 0xD2;
+// Asking the fixture to describe itself. The 0xD2 state frame that comes
+// back carries every key it holds -- including 11/12 (day and night
+// levels) and 13 (the stored Pro schedule), which is how the real channel
+// order gets read off the lamp instead of guessed.
+static const uint8_t SPP_READ_PARAMS[2] = {0xD0, 0xFF};
 static const uint8_t MESH_OPCODE_CLOCK = 0xCD;
 
 static const uint8_t KEY_MODE = 1;
@@ -108,6 +113,8 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   void sync_clock();
   void set_mode(uint8_t mode);
   void set_power(bool on);
+  // Ask the lamp what it currently holds. The reply arrives as a notify.
+  void read_params();
 
   bool is_connected() const { return this->char_handle_ != 0; }
 
@@ -127,6 +134,11 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
 
   ble_client::BLEClientNode *node_{nullptr};
   uint16_t char_handle_{0};
+  // fff1. Separate from the write characteristic: the fixture answers on
+  // its own notify handle, and without registering for it the 0xD2 frames
+  // never arrive at all -- which is how the first build could sit
+  // "connected" and never once hear the lamp speak.
+  uint16_t notify_handle_{0};
 
   double lat_{0}, lon_{0};
   uint8_t channel_count_{5};
