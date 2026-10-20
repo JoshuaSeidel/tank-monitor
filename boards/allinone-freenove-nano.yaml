@@ -17,7 +17,7 @@
 #
 #   signal                   GPIO   notes
 #   pH board signal          1      ADC1_CH0
-#   DS18B20                  4      pull-up already present -- see below
+#   DS18B20                  4      pulled up by the board + ESPHome, see below
 #   TDS board signal         6      ADC1_CH5
 #   Heater relay             8
 #   Fan relay                10
@@ -46,25 +46,34 @@
 # thing 1-Wire needs anyway.
 #
 # ---------------------------------------------------------------------
-# THE 1-WIRE PULL-UP: NOTHING TO FIT
+# THE 1-WIRE PULL-UP: NOTHING TO FIT, AND WHY
 # ---------------------------------------------------------------------
-# Two resistors already pull this bus up, and neither of them is new work:
+# Verified against ESPHome 2026.9.1, components/gpio/one_wire/
+# gpio_one_wire.cpp, not assumed. The driver re-asserts the chip's own
+# pull-up on every reset and every bit read:
 #
-#   - The probe harness carries a 4.7k from DQ to 3V3, soldered at the
-#     board end (ASSEMBLY.md section 6). It is part of the harness, not the
-#     board, so it travels with the probe onto this chip.
-#   - GPIO4's own camera-bus pull-up, ~10k, on the PCB whether or not a
-#     camera is fitted.
+#     this->t_pin_->pin_mode(gpio::FLAG_INPUT | gpio::FLAG_PULLUP);
 #
-# In parallel those land near 3.2k -- inside the 2.2k-10k that ASSEMBLY.md
-# calls workable, and faster rise times than either alone. So: move the
-# harness across and land DQ on GPIO4. Do NOT add a third resistor. Three
-# in parallel is ~1.9k, which only burns current.
+# So the bus is never floating, with or without a resistor. That is why
+# the XIAO has read temperatures for months with nothing fitted -- the
+# earlier claim in boards/xiao-esp32s3.yaml that the bus "never pulls
+# high" without a 4.7k was wrong, and the hardware disproved it daily.
 #
-# And it has to be a real resistor: ESPHome's one_wire platform has no
-# pull-up option because the ESP32's internal one is ~45k, far too weak to
-# restore the bus between bits. That failure mode looks like CRC errors and
-# intermittent dropouts, not like a clean fault.
+# The internal pull-up is ~45k though, roughly ten times weaker than the
+# 4.7k the DS18B20 datasheet asks for. One short cable and one device
+# tolerates it; longer runs and electrical noise do not, and the failure
+# is slow rise times showing up as CRC errors rather than a clean fault.
+#
+# On THIS pin that is already handled: GPIO4 carries the board's own
+# camera-bus resistor, ~10k, in parallel with the internal one for ~8k.
+# In spec, and better than what the XIAO runs on today -- the pin chosen
+# to dodge the analog problem turns out to fix the pull-up problem too.
+#
+# So: land DQ on GPIO4 and flash. Fitting a 4.7k from DQ to 3V3 would
+# take it to ~3.2k and is the better engineering answer if the probe
+# cable is long or the reads look marginal, but it is an option, not a
+# prerequisite. Whichever way: a RESISTOR. A bare wire from DQ to 3V3 is
+# a short the instant the sensor pulls low.
 #
 # ---------------------------------------------------------------------
 # ONE PROBE, NOT TWO
@@ -117,9 +126,9 @@ mqtt:
 # !extend its probe and this board does not.
 one_wire:
   - platform: gpio
-    # Already pulled up twice -- the harness's 4.7k and the board's own
-    # camera-bus resistor, in parallel. See the pull-up note above: there
-    # is nothing to fit, and no pullup: to set here.
+    # No external resistor needed: ESPHome asserts the chip's internal
+    # pull-up, and GPIO4 adds the board's ~10k camera-bus one. See the
+    # pull-up note above. No pullup: key exists here -- the driver owns it.
     pin: GPIO4
 
 # BH1750 only. The 75 gal spends both of the S3's I2C controllers because it

@@ -96,14 +96,22 @@ mqtt:
 one_wire:
   - platform: gpio
     id: onewire_a
-    # Silkscreen D5. Needs a 4.7k pull-up to 3V3 -- without it the bus never
-    # pulls high and the scan reports "No devices, can't auto-select address",
-    # which is indistinguishable from the probe being on the wrong pin.
+    # Silkscreen D5. No external pull-up fitted, and none required: the
+    # gpio one_wire driver asserts the chip's internal pull-up on every
+    # reset and bit read (ESPHome 2026.9.1, gpio_one_wire.cpp line 11).
+    # This comment used to claim the bus "never pulls high" without a 4.7k
+    # -- untrue, and this board disproved it every day it ran.
+    #
+    # It is ~45k though, against the datasheet's 4.7k. Fine for one device
+    # on a short cable, thin margin on a long or noisy one, and the way it
+    # fails is CRC errors rather than silence. If reads go marginal, a
+    # 4.7k from DQ to 3V3 is the fix -- not a different pin.
     pin: GPIO6
   - platform: gpio
     id: onewire_b
-    # Silkscreen D0. Its own 4.7k pull-up to 3V3. With nothing wired here
-    # the boot log says "No devices" for this bus, the cross-check reads
+    # Silkscreen D0. Same internal pull-up as onewire_a; same optional
+    # 4.7k if a long cable ever lands here. With nothing wired at all the
+    # boot log says "No devices" for this bus, the cross-check reads
     # unavailable, and the controller simply has no second opinion -- so
     # this can be flashed before the second probe exists.
     pin: GPIO1
