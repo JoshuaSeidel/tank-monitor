@@ -132,6 +132,30 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   blob.push_back((uint8_t) minutes.size());
   std::string human;
   char buf[48];
+  // Peak LEVELS, not the peak fraction. The percentages below are the
+  // shape of the sun and are identical whatever channel_mix says, so a
+  // curve string built from them alone cannot show that the mix changed --
+  // and ESPHome skips republishing an unchanged string, so the entity sits
+  // at its old timestamp and looks like the push never happened. That is
+  // exactly how a mix change from 100 to 75 produced no visible evidence
+  // either way. These are the numbers actually written to the fixture.
+  std::vector<uint8_t> peak_levels(this->channel_count_, 0);
+  for (int m : minutes) {
+    const float f = tank_monitor::daylight::frac_at(plan, m);
+    for (uint8_t c = 0; c < this->channel_count_; c++) {
+      const uint8_t full = c < this->mix_.size() ? this->mix_[c] : 0;
+      const int lvl = (int) lroundf(f * full);
+      if (lvl > peak_levels[c])
+        peak_levels[c] = (uint8_t) (lvl > 100 ? 100 : lvl);
+    }
+  }
+  human += "peak ";
+  for (uint8_t c = 0; c < this->channel_count_; c++) {
+    snprintf(buf, sizeof(buf), "%s%u", c ? "/" : "", peak_levels[c]);
+    human += buf;
+  }
+  human += " | ";
+
   for (int m : minutes) {
     const float frac = tank_monitor::daylight::frac_at(plan, m);
     blob.push_back((uint8_t) (m / 60));
@@ -157,6 +181,15 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
            plan.d.set % 60, plan.d.dusk / 60, plan.d.dusk % 60);
   ESP_LOGI(TAG, "Curve: %u points, scale %.3f, %.2f full-equivalent hours", (unsigned) minutes.size(), plan.scale,
            plan.dose_h);
+  {
+    std::string mixs;
+    char mb[8];
+    for (uint8_t c = 0; c < this->channel_count_; c++) {
+      snprintf(mb, sizeof(mb), "%s%u", c ? "/" : "", c < this->mix_.size() ? this->mix_[c] : 0);
+      mixs += mb;
+    }
+    ESP_LOGI(TAG, "  noon mix %s -> peak levels in the line below", mixs.c_str());
+  }
   ESP_LOGI(TAG, "  %s", human.c_str());
 
   if (this->curve_sensor_ != nullptr)
