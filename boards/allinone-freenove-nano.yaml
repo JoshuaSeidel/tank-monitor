@@ -15,13 +15,24 @@
 # fresh guess, which matters because the expensive lessons in that file
 # were all paid for once already:
 #
-#   signal                   GPIO   notes
-#   pH board signal          1      ADC1_CH0
-#   DS18B20                  4      pulled up by the board + ESPHome, see below
-#   TDS board signal         6      ADC1_CH5
-#   Heater relay             8
-#   Fan relay                10
-#   BH1750 SDA / SCL         15 / 16
+#   signal                   GPIO   wire     notes
+#   pH board signal          1      blue     ADC1_CH0
+#   DS18B20                  4      yellow   pulled up by board + ESPHome, below
+#   TDS board signal         6      orange   ADC1_CH5
+#   Heater relay             8      white
+#   Fan relay                10     gray
+#   BH1750 SDA               15     brown
+#   BH1750 SCL               16     green
+#
+# Harness colours are as actually soldered, recorded 2026-10-21. Every one
+# is distinct -- unlike the 75 gal, where yellow, green, purple and blue
+# each appear twice and the build notes need a paragraph warning about it.
+# Two of them also match the device's own cable: the DS18B20's DQ is yellow
+# from the factory and the Gravity pH analog lead is blue, so those two
+# carry straight through.
+#
+# Not listed because they are the rails, not signals: 3V3 to every sensor
+# VCC, GND to every sensor ground and both relay IN-.
 #
 # Not used here, and deliberately left free rather than repurposed: 5
 # (the 75's cross-check probe) and 7 (its leak sensor). Keeping them idle
