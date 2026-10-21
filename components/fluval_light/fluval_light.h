@@ -6,6 +6,8 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+// Plan / elev_at / smoothstep are in the signature of levels_at_() below.
+#include "daylight.h"
 
 #ifdef USE_TIME
 #include "esphome/components/time/real_time_clock.h"
@@ -75,6 +77,40 @@ static const uint8_t MODE_PRO = 2;
 static const uint8_t PRO_MIN_POINTS = 4;
 static const uint8_t PRO_MAX_POINTS = 12;
 
+// ---------------------------------------------------------------------
+// What the five emitters actually are
+// ---------------------------------------------------------------------
+// Product 545 (Plant 4.0) is spectrum "plant", profile "plant_current",
+// five channels. These are not guesses and they are not eyeballed from a
+// photo: FluvalConnect ships the per-channel spectral power curves, and
+// fluvalble integrates them against the CIE 1931 2-degree observer to get
+// a CIE XYZ triple per channel, in LightDeviceUtils.getLightChannel()
+// order (fluvalble, core/color.py, SPECTRAL_XYZ["plant_current"]).
+// Converting those to sRGB names each emitter:
+//
+//   ch1  (245,   0, 255)  violet / magenta     x 0.3075  y 0.1406
+//   ch2  (  0,  41, 255)  deep blue            x 0.1349  y 0.0613
+//   ch3  (187, 197, 252)  cool cyan-white      x 0.2690  y 0.2670
+//   ch4  (238, 245, 246)  neutral white ~D65   x 0.3077  y 0.3281
+//   ch5  (255, 226, 142)  warm white / amber   x 0.4364  y 0.3987
+//
+// ch4 is the fixture's declared neutral_channel, which is a useful check:
+// it lands at x 0.3077 y 0.3281, and D65 is x 0.3127 y 0.3290.
+
+// Warm-shift factor per channel at full strength, as a delta. The Chihiros
+// does W +35% / G +10% / R -40% / B -70% (chihiros daylight.h, warm()).
+// Mapped onto these emitters by role rather than by name: the amber channel
+// is the golden one, neutral white lifts slightly, and everything blue is
+// cut -- violet hardest, since it is the least sunrise-like light the
+// fixture can make.
+static const float CH_WARM[5] = {-0.80f, -0.70f, -0.30f, +0.10f, +0.35f};
+
+// Relative luminous weight of 1% on each channel, used ONLY to stop the
+// warm shift from changing overall brightness. This is the Y of each
+// channel's XYZ integral normalised to ch5 -- a measured photometric
+// weight, where the Chihiros equivalent is explicitly a rough guess.
+static const float CH_LUMINOUS[5] = {0.1561f, 0.0526f, 0.3756f, 0.9448f, 1.0000f};
+
 class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
  public:
   void setup() override;
@@ -91,6 +127,9 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   void set_longitude(double v) { this->lon_ = v; }
   void set_channel_count(uint8_t v) { this->channel_count_ = v; }
   void set_daylight_exponent(float v) { this->expo_ = v; }
+  // 0..1. How hard the mix is warmed at low sun; 0 disables the shift and
+  // the day becomes a pure brightness ramp at a fixed colour.
+  void set_dawn_warmth(float v) { this->warmth_ = v; }
   // Full-brightness level per channel, 0-100, at solar noon. The curve
   // scales every point against these.
   void set_channel_mix(const std::vector<uint8_t> &v) { this->mix_ = v; }
@@ -143,6 +182,8 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   static std::vector<uint8_t> spp_command_(const std::vector<std::pair<uint8_t, std::vector<uint8_t>>> &entries);
 
   std::vector<uint8_t> build_pro_schedule_();
+  // Mix x sun x warm shift, for one minute of the day.
+  std::vector<uint8_t> levels_at_(const tank_monitor::daylight::Plan &plan, int m, float frac);
 
   ble_client::BLEClientNode *node_{nullptr};
   uint16_t char_handle_{0};
@@ -155,6 +196,7 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   double lat_{0}, lon_{0};
   uint8_t channel_count_{5};
   float expo_{0.5f};
+  float warmth_{1.0f};
   std::vector<uint8_t> mix_;
   int cap_min_{0};
   int step_{60};

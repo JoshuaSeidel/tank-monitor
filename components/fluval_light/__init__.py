@@ -11,6 +11,7 @@ AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor"]
 CONF_CHANNEL_COUNT = "channel_count"
 CONF_CHANNEL_MIX = "channel_mix"
 CONF_DAYLIGHT_EXPONENT = "daylight_exponent"
+CONF_DAWN_WARMTH = "dawn_warmth"
 CONF_DOSE_CAP_HOURS = "dose_cap_hours"
 CONF_CURVE_STEP = "curve_step"
 CONF_CURVE_EDGE_STEP = "curve_edge_step"
@@ -65,6 +66,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_DAYLIGHT_EXPONENT, default=0.5): cv.float_range(
                 min=0.1, max=1.0
             ),
+            # How hard the mix warms at low sun, percent. 100 matches the
+            # 75 gal's "Light Dawn Warmth". 0 disables the shift and the
+            # day is a brightness ramp at one fixed colour, which is all
+            # this bridge could do before.
+            cv.Optional(CONF_DAWN_WARMTH, default=100): cv.int_range(min=0, max=100),
             # Full-equivalent hours per day. Scales BRIGHTNESS, not the
             # photoperiod -- the lamp still runs dawn to dusk. 0 = natural.
             cv.Optional(CONF_DOSE_CAP_HOURS, default=0.0): cv.float_range(
@@ -103,6 +109,8 @@ async def to_code(config):
     cg.add(var.set_channel_count(config[CONF_CHANNEL_COUNT]))
     cg.add(var.set_channel_mix(config[CONF_CHANNEL_MIX]))
     cg.add(var.set_daylight_exponent(config[CONF_DAYLIGHT_EXPONENT]))
+    # Percent on the face, 0..1 inside, matching chihiros warm()'s strength.
+    cg.add(var.set_dawn_warmth(config[CONF_DAWN_WARMTH] / 100.0))
     # Hours on the face, minutes inside -- the solar integral is a sum of
     # per-minute levels, so minutes is the unit that needs no rounding.
     cg.add(var.set_dose_cap_minutes(int(round(config[CONF_DOSE_CAP_HOURS] * 60))))

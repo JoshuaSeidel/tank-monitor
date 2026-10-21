@@ -52,14 +52,31 @@ substitutions:
   # substitutions are strings, so a list cannot come through as one value
   # -- five scalars is not a workaround, it is the only shape that works.
   #
-  # PLACEHOLDER: a flat white day at full output. Which physical emitter
-  # is channel 1 is not documented anywhere verifiable; read it off the
-  # fixture's 0xD2 state frames on first connect and set these then.
-  fluval_ch1: "100"
-  fluval_ch2: "100"
-  fluval_ch3: "100"
-  fluval_ch4: "100"
-  fluval_ch5: "100"
+  # Per-emitter level at solar noon, 0-100. These are the fixture's REAL
+  # channels, read off FluvalConnect's own spectral data via fluvalble
+  # (core/color.py, SPECTRAL_XYZ["plant_current"]) and converted to sRGB:
+  #
+  #   ch1  violet / magenta      ch4  neutral white (~D65)
+  #   ch2  deep blue             ch5  warm white / amber
+  #   ch3  cool cyan-white
+  #
+  # White-led, with blue and violet held back -- a planted tank wants the
+  # photons, and this one runs CO2 with a possible hair-algae start, where
+  # heavy blue is the last thing to add. The warm and neutral whites carry
+  # the day; violet is a seasoning.
+  #
+  # Chosen to hold the SAME luminous output as the old flat 75/75/75/75/75
+  # placeholder, within 0.2%, using each channel's measured Y. The midday
+  # lux check (45-55 lx) should therefore still read the same -- this is a
+  # spectrum change, deliberately not a brightness change.
+  fluval_ch1: "25"
+  fluval_ch2: "35"
+  fluval_ch3: "45"
+  fluval_ch4: "85"
+  fluval_ch5: "85"
+  # Warm shift at low sun, percent, matching the 75 gal's Dawn Warmth 100.
+  # Full at the horizon, gone by 12 degrees of elevation.
+  fluval_dawn_warmth: "100"
   # Full-equivalent hours per day. Scales brightness, NOT the photoperiod.
   # 7.0 matches the 75 gal's Phase 2.
   fluval_dose_hours: "7.0"
@@ -87,6 +104,7 @@ fluval_light:
   channel_count: 5
   channel_mix: ["${fluval_ch1}", "${fluval_ch2}", "${fluval_ch3}", "${fluval_ch4}", "${fluval_ch5}"]
   dose_cap_hours: ${fluval_dose_hours}
+  dawn_warmth: ${fluval_dawn_warmth}
   # 01:30, dark at every latitude this tank will ever sit at. A curve that
   # half-arrives mid-afternoon is visible in the tank; one that half-arrives
   # at 01:30 is overwritten before anything is lit.

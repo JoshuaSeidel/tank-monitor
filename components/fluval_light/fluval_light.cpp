@@ -88,6 +88,49 @@ std::vector<uint8_t> FluvalLight::spp_command_(const std::vector<std::pair<uint8
 // ---------------------------------------------------------------------
 // The curve
 // ---------------------------------------------------------------------
+// ---------------------------------------------------------------------
+// Per-channel levels at one minute: the mix, scaled by the sun, warmed
+// ---------------------------------------------------------------------
+// Until now every channel got the same sun fraction, so the lamp changed
+// brightness through the day and never changed colour. Real low sun is
+// redder, the Chihiros has always done this on the 75 gal, and a fixture
+// with a dedicated amber emitter and two blue ones can obviously do it
+// too -- the flat ramp was a limitation of this bridge, not of the lamp.
+//
+// Mirrors chihiros daylight.h warm(): the shift is full at the horizon and
+// gone by 12 degrees of elevation, then renormalised through the channels'
+// luminous weights so it moves colour WITHOUT moving brightness. That
+// renormalisation is what stops a warm sunrise from also being a dim one.
+std::vector<uint8_t> FluvalLight::levels_at_(const tank_monitor::daylight::Plan &plan, int m, float frac) {
+  std::vector<uint8_t> out(this->channel_count_, 0);
+  const double h = tank_monitor::daylight::elev_at(plan, m);
+  const float s = this->warmth_ * (1.0f - tank_monitor::daylight::smoothstep(0.0f, 12.0f, (float) h));
+
+  float base = 0.0f, shifted = 0.0f;
+  for (uint8_t c = 0; c < this->channel_count_; c++) {
+    const float full = c < this->mix_.size() ? this->mix_[c] : 0.0f;
+    const float k = 1.0f + CH_WARM[c] * s;
+    base += full * CH_LUMINOUS[c];
+    shifted += full * k * CH_LUMINOUS[c];
+  }
+  const float norm = shifted > 0.0f ? base / shifted : 1.0f;
+
+  for (uint8_t c = 0; c < this->channel_count_; c++) {
+    const float full = c < this->mix_.size() ? this->mix_[c] : 0.0f;
+    const float k = 1.0f + CH_WARM[c] * s;
+    // Clamped at the channel's own full value, never at 100: the mix IS
+    // the ceiling, so a warm lift can rebalance the day but can never make
+    // any emitter brighter than its configured noon level.
+    long v = lroundf(full * frac * k * norm);
+    if (v < 0)
+      v = 0;
+    if (v > (long) full)
+      v = (long) full;
+    out[c] = (uint8_t) v;
+  }
+  return out;
+}
+
 std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   std::vector<uint8_t> blob;
 #ifdef USE_TIME
@@ -165,13 +208,10 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   // either way. These are the numbers actually written to the fixture.
   std::vector<uint8_t> peak_levels(this->channel_count_, 0);
   for (int m : minutes) {
-    const float f = tank_monitor::daylight::frac_at(plan, m);
-    for (uint8_t c = 0; c < this->channel_count_; c++) {
-      const uint8_t full = c < this->mix_.size() ? this->mix_[c] : 0;
-      const int lvl = (int) lroundf(f * full);
-      if (lvl > peak_levels[c])
-        peak_levels[c] = (uint8_t) (lvl > 100 ? 100 : lvl);
-    }
+    std::vector<uint8_t> lv = this->levels_at_(plan, m, tank_monitor::daylight::frac_at(plan, m));
+    for (uint8_t c = 0; c < this->channel_count_; c++)
+      if (lv[c] > peak_levels[c])
+        peak_levels[c] = lv[c];
   }
   human += "peak ";
   for (uint8_t c = 0; c < this->channel_count_; c++) {
@@ -189,15 +229,10 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     const float frac = dark ? 0.0f : tank_monitor::daylight::frac_at(plan, m);
     blob.push_back((uint8_t) (m / 60));
     blob.push_back((uint8_t) (m % 60));
-    for (uint8_t c = 0; c < this->channel_count_; c++) {
-      const uint8_t full = c < this->mix_.size() ? this->mix_[c] : 0;
-      int lvl = (int) lroundf(frac * full);
-      if (lvl < 0)
-        lvl = 0;
-      if (lvl > 100)
-        lvl = 100;
-      blob.push_back((uint8_t) lvl);
-    }
+    std::vector<uint8_t> lv =
+        dark ? std::vector<uint8_t>(this->channel_count_, 0) : this->levels_at_(plan, m, frac);
+    for (uint8_t c = 0; c < this->channel_count_; c++)
+      blob.push_back(lv[c]);
     snprintf(buf, sizeof(buf), "%02d:%02d=%.0f%% ", m / 60, m % 60, frac * 100.0f);
     human += buf;
   }

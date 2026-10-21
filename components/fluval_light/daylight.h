@@ -148,6 +148,17 @@ inline float frac_at(const Plan &p, int m) {
 
 inline double elev_at(const Plan &p, int m) { return elevation(p.mid + (time_t) m * 60, p.lat, p.lon); }
 
+// Cubic ease, 0 below a and 1 above b. Same function as the Chihiros copy,
+// because the warm shift it drives has to behave identically on both tanks.
+inline float smoothstep(float a, float b, float x) {
+  if (x <= a)
+    return 0.0f;
+  if (x >= b)
+    return 1.0f;
+  const float t = (x - a) / (b - a);
+  return t * t * (3.0f - 2.0f * t);
+}
+
 // cap_min > 0 scales the whole day down to that many full-equivalent
 // minutes if the natural day delivers more; 0 = natural.
 inline Plan plan(time_t local_midnight_utc, double lat, double lon, float expo, int cap_min, float th) {
