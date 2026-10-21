@@ -241,8 +241,17 @@ inline std::vector<int> pick_minutes(const Plan &p, int step, int edge, int edge
     std::sort(ms.begin(), ms.end());
     if ((int) ms.size() <= max_pts || tries == 5)
       return ms;
-    step *= 2;
-    edge *= 2;
+    // Spend the midday resolution first. Doubling step AND edge together
+    // (as the Chihiros copy does, where 24 points make it moot) overshoots
+    // badly against a 12-point cap: the first pass over budget coarsened
+    // the twilight too and dropped to 8 points, leaving 4 slots unused and
+    // a sunset of two segments. Midday is a plateau where a missing point
+    // costs almost nothing; dawn and dusk are where the curve and the
+    // colour actually move.
+    if (tries % 2 == 0)
+      step *= 2;
+    else
+      edge *= 2;
   }
   return ms;
 }

@@ -166,31 +166,60 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     return blob;
   }
 
-  // Clip the lit window before any points are chosen. frac_at() already
-  // returns 0 outside d.dawn..d.dusk, so moving those two values IS the
-  // clip -- the curve keeps the sun's shape and simply starts later and
-  // ends earlier, rather than being squashed into the window, which would
-  // make a midwinter day and a midsummer day look identical.
+  // ---------------------------------------------------------------------
+  // A shorter day, with a real sunset
+  // ---------------------------------------------------------------------
+  // The first version of this simply moved d.dusk in, and the day ended
+  // wherever the curve happened to be: 97% at 14:00, dark at 14:57. The
+  // natural dusk taper was cut off along with the afternoon, which is a
+  // fine way to end a photoperiod and a poor way to end a day.
+  //
+  // Instead the evening is COMPRESSED, not truncated. Clock minutes after
+  // solar noon are mapped onto solar minutes spanning noon to the real
+  // civil dusk, so the lamp replays the actual sunset -- its shape, its
+  // colour shift, its long dim tail -- just faster. The morning is left
+  // alone and runs at true solar speed, because that half of the day is
+  // not short of time and dawn is the half worth having real.
+  //
+  // `sel` is the clipped copy used only to CHOOSE point times. `plan`
+  // stays natural, because frac_at() returns 0 outside d.dawn..d.dusk and
+  // the remapped minutes deliberately run past the clipped end.
+  auto sel = plan;
+  int lit_end = plan.d.dusk;
+  bool compress = false;
   if (this->photoperiod_min_ > 0 && plan.d.dusk - plan.d.dawn > this->photoperiod_min_) {
-    // Taken off the END, not split either side of solar noon. Centring is
-    // the tidier-looking rule and it is wrong here: an 8 h window centred
-    // on a 12:51 noon starts at 08:51, after the CO2 has been running an
-    // hour, and puts peak light AFTER the gas stops at 12:00. Keeping the
-    // real dawn and ending early leaves the bright hours inside the carbon
-    // window, which is the whole reason for capping the day.
-    plan.d.dusk = plan.d.dawn + this->photoperiod_min_;
-    // dose_h was integrated over the natural day in plan(); re-integrate
-    // over what will actually be lit, or the reported daily light is for a
-    // day this lamp is no longer running.
-    double sum = 0.0;
-    for (int m = plan.d.dawn; m <= plan.d.dusk; m++)
-      sum += tank_monitor::daylight::frac_at(plan, m);
-    plan.dose_h = (float) (sum / 60.0);
-    ESP_LOGI(TAG, "Photoperiod capped to %d min: lit %02d:%02d-%02d:%02d", this->photoperiod_min_,
-             plan.d.dawn / 60, plan.d.dawn % 60, plan.d.dusk / 60, plan.d.dusk % 60);
+    lit_end = plan.d.dawn + this->photoperiod_min_;
+    sel.d.dusk = lit_end;
+    // Only compress if there is an afternoon left to compress into. A
+    // photoperiod that ends before solar noon has no evening at all, and
+    // the honest thing then is the plain clip.
+    compress = lit_end > plan.d.noon;
+    ESP_LOGI(TAG, "Photoperiod %d min: lit %02d:%02d-%02d:%02d, evening %s", this->photoperiod_min_,
+             plan.d.dawn / 60, plan.d.dawn % 60, lit_end / 60, lit_end % 60,
+             compress ? "compressed from the real sunset" : "clipped (ends before noon)");
   }
 
-  auto minutes = tank_monitor::daylight::pick_minutes(plan, this->step_, this->edge_, 120, PRO_MAX_POINTS);
+  // Clock minute -> the solar minute whose sun we show at it.
+  auto solar_at = [&](int m) -> int {
+    if (!compress || m <= plan.d.noon)
+      return m;
+    const long nat = plan.d.dusk - plan.d.noon;
+    const long cut = lit_end - plan.d.noon;
+    long v = plan.d.noon + (long) (m - plan.d.noon) * nat / cut;
+    return (int) (v > plan.d.dusk ? plan.d.dusk : v);
+  };
+
+  if (this->photoperiod_min_ > 0) {
+    // dose_h was integrated over the natural day. Re-integrate over what
+    // is actually lit, through the same mapping, or the reported daily
+    // light describes a day this lamp no longer runs.
+    double sum = 0.0;
+    for (int m = plan.d.dawn; m <= lit_end; m++)
+      sum += tank_monitor::daylight::frac_at(plan, solar_at(m));
+    plan.dose_h = (float) (sum / 60.0);
+  }
+
+  auto minutes = tank_monitor::daylight::pick_minutes(sel, this->step_, this->edge_, 120, PRO_MAX_POINTS);
   if (minutes.size() < PRO_MIN_POINTS) {
     ESP_LOGW(TAG, "Only %u curve points, fixture needs %u -- not pushing", (unsigned) minutes.size(), PRO_MIN_POINTS);
     return blob;
@@ -232,7 +261,8 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   // either way. These are the numbers actually written to the fixture.
   std::vector<uint8_t> peak_levels(this->channel_count_, 0);
   for (int m : minutes) {
-    std::vector<uint8_t> lv = this->levels_at_(plan, m, tank_monitor::daylight::frac_at(plan, m));
+    const int sm = solar_at(m);
+    std::vector<uint8_t> lv = this->levels_at_(plan, sm, tank_monitor::daylight::frac_at(plan, sm));
     for (uint8_t c = 0; c < this->channel_count_; c++)
       if (lv[c] > peak_levels[c])
         peak_levels[c] = lv[c];
@@ -250,11 +280,14 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     // at civil twilight the model genuinely returns a fraction that rounds
     // to 1%, and 1% all night is the entire complaint.
     const bool dark = (i == 0 || i == last_i);
-    const float frac = dark ? 0.0f : tank_monitor::daylight::frac_at(plan, m);
+    // The clock minute is what the lamp is told; the solar minute is what
+    // the sun is read at. They diverge after noon on a compressed evening.
+    const int sm = solar_at(m);
+    const float frac = dark ? 0.0f : tank_monitor::daylight::frac_at(plan, sm);
     blob.push_back((uint8_t) (m / 60));
     blob.push_back((uint8_t) (m % 60));
     std::vector<uint8_t> lv =
-        dark ? std::vector<uint8_t>(this->channel_count_, 0) : this->levels_at_(plan, m, frac);
+        dark ? std::vector<uint8_t>(this->channel_count_, 0) : this->levels_at_(plan, sm, frac);
     for (uint8_t c = 0; c < this->channel_count_; c++)
       blob.push_back(lv[c]);
     snprintf(buf, sizeof(buf), "%02d:%02d=%.0f%% ", m / 60, m % 60, frac * 100.0f);
