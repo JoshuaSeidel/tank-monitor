@@ -93,17 +93,17 @@ substitutions:
   fluval_longitude: "-76.7"
   # Full-equivalent hours per day. Scales BRIGHTNESS, not the photoperiod --
   # the lamp still runs civil dawn to civil dusk.
-  fluval_dose_hours: "7.0"
+  fluval_dose_hours: "0"
   # Per-emitter level at solar noon, 0-100, on the fixture's REAL channels
   # (FluvalConnect spectral data via fluvalble):
   #   ch1 violet  ch2 deep blue  ch3 cool white  ch4 neutral  ch5 warm amber
   # Same luminous output as the old flat 75s to within 0.2%, so the midday
   # lux check is unchanged; this is a spectrum change, not a brightness one.
-  fluval_ch1: "55"
-  fluval_ch2: "15"
-  fluval_ch3: "35"
-  fluval_ch4: "80"
-  fluval_ch5: "80"
+  fluval_ch1: "36"
+  fluval_ch2: "14"
+  fluval_ch3: "20"
+  fluval_ch4: "45"
+  fluval_ch5: "45"
   # Warm shift at low sun, matching the 75 gal's Dawn Warmth 100.
   fluval_dawn_warmth: "100"
 

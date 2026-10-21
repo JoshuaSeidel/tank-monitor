@@ -60,34 +60,36 @@ substitutions:
   #   ch2  deep blue             ch5  warm white / amber
   #   ch3  cool cyan-white
   #
-  # ch1 is the PINK emitter, not a violet one, and that distinction got
-  # this mix wrong once already. Its XYZ gives X/Z = 0.56 against the true
-  # blue channel's 0.17 -- 3.3x the long-wavelength content -- so it is the
-  # classic red + royal-blue plant diode, and it is where this fixture's
-  # ONLY deep red lives. A first pass cut it to 25 as though it were just
-  # more blue, which quietly removed the most photosynthetically useful
-  # light the lamp makes from a planted tank.
+  # The 75 gal's settings, on this fixture's emitters. Not a mix designed
+  # from scratch -- that was tried twice and neither attempt was something
+  # anyone could see. The Chihiros runs W45 / R36 / G20 / B14 and it looks
+  # right, so map it role for role and stop inventing:
   #
-  # So: whites carry the day, pink is restored as the red source, and the
-  # anti-algae restraint is spent on ch2 -- the one channel that really is
-  # just blue -- instead of on the plants' red. Shape follows the 75 gal's
-  # W45/R36/G20/B14: white-dominant with red close behind.
+  #   R 36 -> ch1  pink          the only red this fixture makes
+  #   B 14 -> ch2  blue
+  #   G 20 -> ch3  cool white
+  #   W 45 -> ch4  neutral white  and  ch5 warm white
   #
-  # Chosen to hold the SAME luminous output as the old flat 75/75/75/75/75
-  # placeholder, within 0.2%, using each channel's measured Y. The midday
-  # lux check (45-55 lx) should therefore still read the same -- this is a
-  # spectrum change, deliberately not a brightness change.
-  fluval_ch1: "55"
-  fluval_ch2: "15"
-  fluval_ch3: "35"
-  fluval_ch4: "80"
-  fluval_ch5: "80"
+  # ch1 is PINK, not violet, and that matters: its XYZ gives X/Z = 0.56
+  # against the true blue channel's 0.17, so it is the red + royal-blue
+  # plant diode and the only place this lamp has deep red. An earlier mix
+  # cut it as though it were more blue, which quietly took the red out of
+  # a planted tank.
+  #
+  # This also settles the brightness. The whites land at 45, the same
+  # drive the 75 gal uses, where they were at 69-80 -- which is why the
+  # nano read brighter than the 75 gal across the room.
+  fluval_ch1: "36"
+  fluval_ch2: "14"
+  fluval_ch3: "20"
+  fluval_ch4: "45"
+  fluval_ch5: "45"
   # Warm shift at low sun, percent, matching the 75 gal's Dawn Warmth 100.
   # Full at the horizon, gone by 12 degrees of elevation.
   fluval_dawn_warmth: "100"
   # Full-equivalent hours per day. Scales brightness, NOT the photoperiod.
   # 7.0 matches the 75 gal's Phase 2.
-  fluval_dose_hours: "7.0"
+  fluval_dose_hours: "0"
   fluval_mac: "C6:E2:28:EF:62:84"
 
 # A BLE client needs the tracker up, but this board is not a proxy and has
