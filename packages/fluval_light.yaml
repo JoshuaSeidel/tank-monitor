@@ -60,20 +60,28 @@ substitutions:
   #   ch2  deep blue             ch5  warm white / amber
   #   ch3  cool cyan-white
   #
-  # White-led, with blue and violet held back -- a planted tank wants the
-  # photons, and this one runs CO2 with a possible hair-algae start, where
-  # heavy blue is the last thing to add. The warm and neutral whites carry
-  # the day; violet is a seasoning.
+  # ch1 is the PINK emitter, not a violet one, and that distinction got
+  # this mix wrong once already. Its XYZ gives X/Z = 0.56 against the true
+  # blue channel's 0.17 -- 3.3x the long-wavelength content -- so it is the
+  # classic red + royal-blue plant diode, and it is where this fixture's
+  # ONLY deep red lives. A first pass cut it to 25 as though it were just
+  # more blue, which quietly removed the most photosynthetically useful
+  # light the lamp makes from a planted tank.
+  #
+  # So: whites carry the day, pink is restored as the red source, and the
+  # anti-algae restraint is spent on ch2 -- the one channel that really is
+  # just blue -- instead of on the plants' red. Shape follows the 75 gal's
+  # W45/R36/G20/B14: white-dominant with red close behind.
   #
   # Chosen to hold the SAME luminous output as the old flat 75/75/75/75/75
   # placeholder, within 0.2%, using each channel's measured Y. The midday
   # lux check (45-55 lx) should therefore still read the same -- this is a
   # spectrum change, deliberately not a brightness change.
-  fluval_ch1: "25"
-  fluval_ch2: "35"
-  fluval_ch3: "45"
-  fluval_ch4: "85"
-  fluval_ch5: "85"
+  fluval_ch1: "55"
+  fluval_ch2: "15"
+  fluval_ch3: "35"
+  fluval_ch4: "80"
+  fluval_ch5: "80"
   # Warm shift at low sun, percent, matching the 75 gal's Dawn Warmth 100.
   # Full at the horizon, gone by 12 degrees of elevation.
   fluval_dawn_warmth: "100"

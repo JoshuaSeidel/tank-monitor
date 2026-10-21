@@ -99,11 +99,11 @@ substitutions:
   #   ch1 violet  ch2 deep blue  ch3 cool white  ch4 neutral  ch5 warm amber
   # Same luminous output as the old flat 75s to within 0.2%, so the midday
   # lux check is unchanged; this is a spectrum change, not a brightness one.
-  fluval_ch1: "25"
-  fluval_ch2: "35"
-  fluval_ch3: "45"
-  fluval_ch4: "85"
-  fluval_ch5: "85"
+  fluval_ch1: "55"
+  fluval_ch2: "15"
+  fluval_ch3: "35"
+  fluval_ch4: "80"
+  fluval_ch5: "80"
   # Warm shift at low sun, matching the 75 gal's Dawn Warmth 100.
   fluval_dawn_warmth: "100"
 
