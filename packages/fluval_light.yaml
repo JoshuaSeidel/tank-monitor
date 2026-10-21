@@ -90,11 +90,16 @@ substitutions:
   # Full-equivalent hours per day. Scales brightness, NOT the photoperiod.
   # 7.0 matches the 75 gal's Phase 2.
   fluval_dose_hours: "0"
-  # Ceiling on the LIT WINDOW, taken off the end of the day.
-  # 8 h: an established, shallow, CO2-injected nano. The natural day
-  # here is 11.8 h and reaches ~16 h in June, which on this tank is
-  # 6.75 h of daily light with the gas already off.
-  fluval_photoperiod_hours: "8"
+  # Ceiling on the LIT WINDOW, taken off the end of the day. 0 = the
+  # natural day, civil dawn to civil dusk, which is what this tank runs.
+  #
+  # Was 8 h for part of 2026-10-21, to keep the bright hours inside the
+  # 07:30-12:00 carbon window. It did that, and it also put the tank dark
+  # from 14:57 -- every evening, which is when it actually gets looked at.
+  # An aquarium is not only a growth chamber and that was not a trade to
+  # make quietly. Back to the full day by request; the CO2 gap gets
+  # answered on the CO2 side instead.
+  fluval_photoperiod_hours: "0"
   fluval_mac: "C6:E2:28:EF:62:84"
 
 # A BLE client needs the tracker up, but this board is not a proxy and has
