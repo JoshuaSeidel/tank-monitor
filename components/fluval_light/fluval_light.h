@@ -57,6 +57,12 @@ static const uint8_t MESH_OPCODE_CLOCK = 0xCD;
 
 static const uint8_t KEY_MODE = 1;
 static const uint8_t KEY_POWER = 2;
+// Channels are keys 3..7, one uint 0-100 per emitter, in the same order a
+// Pro schedule record lists them. Writing them directly is the only way to
+// find out which physical emitter each one drives: the fixture documents
+// neither the order nor the colours, and a Pro readback only ever echoes
+// what we wrote.
+static const uint8_t KEY_CHANNEL_FIRST = 3;
 static const uint8_t KEY_PRO_SCHEDULE = 13;
 
 static const uint8_t MODE_MANUAL = 0;
@@ -114,6 +120,11 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   void sync_clock();
   void set_mode(uint8_t mode);
   void set_power(bool on);
+  // Drive the emitters directly, 0-100 each, and switch the lamp to Manual
+  // so they are actually visible. Callable from a YAML lambda as
+  // id(fluval)->set_channels({100, 0, 0, 0, 0}). NOT part of the daily
+  // path: the schedule lives in the fixture and this is a bench tool.
+  void set_channels(const std::vector<uint8_t> &levels);
   // Ask the lamp what it currently holds. The reply arrives as a notify.
   void read_params();
 

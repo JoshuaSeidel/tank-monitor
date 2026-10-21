@@ -301,6 +301,34 @@ void FluvalLight::set_mode(uint8_t mode) {
   this->queue_({SPP_COMMAND_HEADER, 0xA1, KEY_MODE, v[0]}, "mode");
 }
 
+void FluvalLight::set_channels(const std::vector<uint8_t> &levels) {
+  // Manual first, and as its own frame. In Professional the fixture runs
+  // its stored curve and ignores a direct level write, so sending the
+  // levels alone looks exactly like a lamp that did not hear them.
+  std::vector<uint8_t> m;
+  cbor_uint_(m, MODE_MANUAL);
+  this->queue_({SPP_COMMAND_HEADER, 0xA1, KEY_MODE, m[0]}, "mode=manual");
+
+  // Hand-built rather than through spp_command_(), which encodes every
+  // value as a byte string. Channels are plain uints.
+  const size_t n = levels.size() < this->channel_count_ ? levels.size() : this->channel_count_;
+  std::vector<uint8_t> f;
+  f.push_back(SPP_COMMAND_HEADER);
+  f.push_back(0xA0 | (uint8_t) n);
+  std::string human;
+  char b[8];
+  for (size_t i = 0; i < n; i++) {
+    const uint8_t lvl = levels[i] > 100 ? 100 : levels[i];
+    cbor_uint_(f, (uint32_t) (KEY_CHANNEL_FIRST + i));
+    cbor_uint_(f, lvl);
+    snprintf(b, sizeof(b), "%s%u", i ? "/" : "", lvl);
+    human += b;
+  }
+  ESP_LOGI(TAG, "Manual levels %s -- lamp is OUT of its schedule until a curve is pushed", human.c_str());
+  this->queue_(f, "channels");
+  this->publish_status_("manual " + human);
+}
+
 void FluvalLight::read_params() {
   this->queue_({SPP_READ_PARAMS[0], SPP_READ_PARAMS[1]}, "read params");
 }

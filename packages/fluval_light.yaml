@@ -136,6 +136,71 @@ button:
       - fluval_light.sync_clock:
           id: fluval
 
+  # ---------------------------------------------------------------------
+  # Which emitter is which
+  # ---------------------------------------------------------------------
+  # The channel mix is five equal numbers because the fixture documents
+  # neither the order of its emitters nor their colours, and a Pro
+  # schedule readback only ever echoes what we wrote. Equal drive on five
+  # DIFFERENT emitters is not a neutral white -- it is simply a balance
+  # nobody chose, which is why the nano reads so differently from the 75
+  # gal's deliberate W45/R36/G20/B14.
+  #
+  # These five buttons light one emitter at a time at full, in Manual
+  # mode. Press one, look at the tank, write down the colour. Five presses
+  # and the order is known, after which fluval_ch1..ch5 above can be a
+  # real spectrum instead of a placeholder.
+  #
+  # The lamp stays OUT of its schedule until "Fluval Resume Schedule" is
+  # pressed. Best done in daylight, when an hour off-schedule costs the
+  # plants nothing.
+  - platform: template
+    name: "Fluval Identify Ch1"
+    icon: "mdi:numeric-1-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(fluval)->set_channels({100, 0, 0, 0, 0});'
+
+  - platform: template
+    name: "Fluval Identify Ch2"
+    icon: "mdi:numeric-2-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(fluval)->set_channels({0, 100, 0, 0, 0});'
+
+  - platform: template
+    name: "Fluval Identify Ch3"
+    icon: "mdi:numeric-3-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(fluval)->set_channels({0, 0, 100, 0, 0});'
+
+  - platform: template
+    name: "Fluval Identify Ch4"
+    icon: "mdi:numeric-4-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(fluval)->set_channels({0, 0, 0, 100, 0});'
+
+  - platform: template
+    name: "Fluval Identify Ch5"
+    icon: "mdi:numeric-5-circle"
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(fluval)->set_channels({0, 0, 0, 0, 100});'
+
+  # The way back. Rebuilds today's curve and returns the lamp to
+  # Professional, which is the mode that actually runs a stored schedule --
+  # an identify press leaves it in Manual, where it will sit at one colour
+  # indefinitely.
+  - platform: template
+    name: "Fluval Resume Schedule"
+    icon: "mdi:calendar-sync"
+    entity_category: config
+    on_press:
+      - fluval_light.push_curve:
+          id: fluval
+
   # Hand the fixture back to its own Auto schedule -- the one programmed
   # from the Fluval Connect app. The way out if a pushed curve is wrong
   # and you want the tank lit correctly tonight rather than after a
