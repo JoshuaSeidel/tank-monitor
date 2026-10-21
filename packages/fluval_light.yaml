@@ -79,17 +79,22 @@ substitutions:
   # This also settles the brightness. The whites land at 45, the same
   # drive the 75 gal uses, where they were at 69-80 -- which is why the
   # nano read brighter than the 75 gal across the room.
-  fluval_ch1: "36"
-  fluval_ch2: "14"
-  fluval_ch3: "20"
-  fluval_ch4: "45"
-  fluval_ch5: "45"
+  fluval_ch1: "48"
+  fluval_ch2: "16"
+  fluval_ch3: "24"
+  fluval_ch4: "60"
+  fluval_ch5: "60"
   # Warm shift at low sun, percent, matching the 75 gal's Dawn Warmth 100.
   # Full at the horizon, gone by 12 degrees of elevation.
   fluval_dawn_warmth: "100"
   # Full-equivalent hours per day. Scales brightness, NOT the photoperiod.
   # 7.0 matches the 75 gal's Phase 2.
   fluval_dose_hours: "0"
+  # Ceiling on the LIT WINDOW, taken off the end of the day.
+  # 8 h: an established, shallow, CO2-injected nano. The natural day
+  # here is 11.8 h and reaches ~16 h in June, which on this tank is
+  # 6.75 h of daily light with the gas already off.
+  fluval_photoperiod_hours: "8"
   fluval_mac: "C6:E2:28:EF:62:84"
 
 # A BLE client needs the tracker up, but this board is not a proxy and has
@@ -114,6 +119,7 @@ fluval_light:
   channel_count: 5
   channel_mix: ["${fluval_ch1}", "${fluval_ch2}", "${fluval_ch3}", "${fluval_ch4}", "${fluval_ch5}"]
   dose_cap_hours: ${fluval_dose_hours}
+  photoperiod_hours: ${fluval_photoperiod_hours}
   dawn_warmth: ${fluval_dawn_warmth}
   # 01:30, dark at every latitude this tank will ever sit at. A curve that
   # half-arrives mid-afternoon is visible in the tank; one that half-arrives

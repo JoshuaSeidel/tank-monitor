@@ -166,6 +166,30 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
     return blob;
   }
 
+  // Clip the lit window before any points are chosen. frac_at() already
+  // returns 0 outside d.dawn..d.dusk, so moving those two values IS the
+  // clip -- the curve keeps the sun's shape and simply starts later and
+  // ends earlier, rather than being squashed into the window, which would
+  // make a midwinter day and a midsummer day look identical.
+  if (this->photoperiod_min_ > 0 && plan.d.dusk - plan.d.dawn > this->photoperiod_min_) {
+    // Taken off the END, not split either side of solar noon. Centring is
+    // the tidier-looking rule and it is wrong here: an 8 h window centred
+    // on a 12:51 noon starts at 08:51, after the CO2 has been running an
+    // hour, and puts peak light AFTER the gas stops at 12:00. Keeping the
+    // real dawn and ending early leaves the bright hours inside the carbon
+    // window, which is the whole reason for capping the day.
+    plan.d.dusk = plan.d.dawn + this->photoperiod_min_;
+    // dose_h was integrated over the natural day in plan(); re-integrate
+    // over what will actually be lit, or the reported daily light is for a
+    // day this lamp is no longer running.
+    double sum = 0.0;
+    for (int m = plan.d.dawn; m <= plan.d.dusk; m++)
+      sum += tank_monitor::daylight::frac_at(plan, m);
+    plan.dose_h = (float) (sum / 60.0);
+    ESP_LOGI(TAG, "Photoperiod capped to %d min: lit %02d:%02d-%02d:%02d", this->photoperiod_min_,
+             plan.d.dawn / 60, plan.d.dawn % 60, plan.d.dusk / 60, plan.d.dusk % 60);
+  }
+
   auto minutes = tank_monitor::daylight::pick_minutes(plan, this->step_, this->edge_, 120, PRO_MAX_POINTS);
   if (minutes.size() < PRO_MIN_POINTS) {
     ESP_LOGW(TAG, "Only %u curve points, fixture needs %u -- not pushing", (unsigned) minutes.size(), PRO_MIN_POINTS);

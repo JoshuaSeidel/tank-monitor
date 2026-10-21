@@ -137,6 +137,15 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   // scales brightness, never duration -- the lamp still runs dawn to
   // dusk, just dimmer, which is how the Chihiros does it too.
   void set_dose_cap_minutes(int v) { this->cap_min_ = v; }
+  // Hard ceiling on the LIT WINDOW in minutes, clipped symmetrically about
+  // solar noon. 0 = the natural day, whatever the latitude gives.
+  //
+  // dose_cap scales brightness and leaves the day long; this shortens the
+  // day itself. They answer different problems and the nano needs this
+  // one: its CO2 runs 07:30-12:00, so a natural 11.8 h day leaves 6.75 h
+  // lit with no carbon available -- which is a description of how to grow
+  // algae rather than plants.
+  void set_photoperiod_minutes(int v) { this->photoperiod_min_ = v; }
   void set_curve_step(int v) { this->step_ = v; }
   void set_curve_edge_step(int v) { this->edge_ = v; }
   void set_push_hour(int v) { this->push_hour_ = v; }
@@ -199,6 +208,7 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   float warmth_{1.0f};
   std::vector<uint8_t> mix_;
   int cap_min_{0};
+  int photoperiod_min_{0};
   int step_{60};
   int edge_{30};
   int push_hour_{1};

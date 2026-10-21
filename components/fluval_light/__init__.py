@@ -13,6 +13,7 @@ CONF_CHANNEL_MIX = "channel_mix"
 CONF_DAYLIGHT_EXPONENT = "daylight_exponent"
 CONF_DAWN_WARMTH = "dawn_warmth"
 CONF_DOSE_CAP_HOURS = "dose_cap_hours"
+CONF_PHOTOPERIOD_HOURS = "photoperiod_hours"
 CONF_CURVE_STEP = "curve_step"
 CONF_CURVE_EDGE_STEP = "curve_edge_step"
 CONF_PUSH_HOUR = "push_hour"
@@ -76,6 +77,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_DOSE_CAP_HOURS, default=0.0): cv.float_range(
                 min=0.0, max=24.0
             ),
+            # Ceiling on the lit window, clipped about solar noon. Shortens
+            # the DAY; dose_cap_hours dims it. 0 = whatever the sun gives.
+            cv.Optional(CONF_PHOTOPERIOD_HOURS, default=0.0): cv.float_range(
+                min=0.0, max=24.0
+            ),
             cv.Optional(CONF_CURVE_STEP, default=60): cv.int_range(min=5, max=240),
             cv.Optional(CONF_CURVE_EDGE_STEP, default=30): cv.int_range(min=5, max=120),
             # Hour of the nightly push, at :30. Must be dark: a curve that
@@ -114,6 +120,7 @@ async def to_code(config):
     # Hours on the face, minutes inside -- the solar integral is a sum of
     # per-minute levels, so minutes is the unit that needs no rounding.
     cg.add(var.set_dose_cap_minutes(int(round(config[CONF_DOSE_CAP_HOURS] * 60))))
+    cg.add(var.set_photoperiod_minutes(int(round(config[CONF_PHOTOPERIOD_HOURS] * 60))))
     cg.add(var.set_curve_step(config[CONF_CURVE_STEP]))
     cg.add(var.set_curve_edge_step(config[CONF_CURVE_EDGE_STEP]))
     cg.add(var.set_push_hour(config[CONF_PUSH_HOUR]))
