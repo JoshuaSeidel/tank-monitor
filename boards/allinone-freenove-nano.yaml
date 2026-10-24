@@ -157,11 +157,6 @@ sensor:
     id: tds_voltage
     update_interval: 500ms
     attenuation: 12db
-    # Hardware oversampling, as on the 75 gal. The S3's internal ADC is
-    # noisy on its own and the radio's transmit bursts land on the supply
-    # as short spikes; averaging 16 conversions per reading costs nothing
-    # and the 75 gal has run both probes this way without trouble.
-    samples: 16
     raw: false
     internal: true
     filters:
@@ -179,19 +174,6 @@ sensor:
     id: ph_voltage
     update_interval: 1s
     attenuation: 12db
-    # Same 16-sample oversampling as the 75 gal, which reads an identical
-    # Gravity SEN0169-V2 on an identical GPIO1 and holds +/-0.03 pH.
-    #
-    # Worth being clear about what this does NOT fix. On 2026-10-24 the
-    # nano's existing probe on the XIAO swung 3.41 to 10.71 inside seventy
-    # minutes while the 75 gal sat at 7.50-7.56 over the same two hours.
-    # Water with KH 5 cannot move seven pH units in minutes, so that is
-    # electrical, and it is specific to that probe, its cable, its ground
-    # or its Gravity board -- not to the ADC, which the 75 gal proves is
-    # good enough. Moving the probe to this board will not fix it on its
-    # own. Bench the probe in pH 7.00 buffer away from the tank before
-    # trusting it here, and do not arm the pH floor cutoff until it holds.
-    samples: 16
     raw: false
     internal: true
     filters:
