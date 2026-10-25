@@ -1,3 +1,17 @@
+# =====================================================================
+# RETIRED 2026-10-25 -- DO NOT FLASH. The Fluval bridge moved onto the
+# nano's all-in-one, tank-monitor-allinone-nano-remote.yaml, which holds
+# the lamp itself. The lamp accepts ONE BLE connection: a second board
+# running this config would fight the controller for it, and the symptom
+# is not a clean failure but a light that intermittently ignores its
+# schedule.
+#
+# This board (the WROOM-32) has been powered off since 2026-10-25 13:32.
+# Leave it off, and delete its "Tank Monitor Fluval" device from the MQTT
+# integration so nothing points at it.
+#
+# Kept for its history and its comments only.
+# =====================================================================
 # NANO TANK light bridge -- Fluval Plant 4.0 over BLE. Put THIS file in the
 # ESPHome dashboard.
 #

@@ -1,3 +1,16 @@
+# =====================================================================
+# RETIRED 2026-10-25 -- DO NOT FLASH. The nano runs on ONE board now,
+# tank-monitor-allinone-nano-remote.yaml (Freenove ESP32-S3), which is the
+# controller, the pH probe, the panel's BLE server AND the Fluval light.
+#
+# This wrapper still carries device_name: tank-monitor-s3. Flashing it now
+# would put a SECOND device on that name -- same MQTT prefix, same
+# discovery ids, same mDNS host, same LWT -- and the two boards would
+# overwrite each other's entities as fast as they appear. The all-in-one's
+# own notes spell this out; this banner is so you never get that far.
+#
+# Kept for its history and its comments only.
+# =====================================================================
 # XIAO ESP32-S3 controller. Put THIS in the ESPHome dashboard.
 #
 # Everything below packages: is pulled from git on every build. The one file
