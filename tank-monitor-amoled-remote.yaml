@@ -22,12 +22,18 @@
 # s3_ble_mac -- the nano controller's BLE address
 # ---------------------------------------------------------------------
 # ESPHome's ble_client can only address a peer by MAC; there is no name- or
-# service-based connect. The controller (tank-monitor-s3, built from
-# tank-monitor-xiao-remote.yaml) publishes its own as "Controller BLE MAC"
-# (sensor.tank_monitor_s3_controller_ble_mac), read from the running BLE
-# stack. The value below is that sensor on 2026-10-06, and is the address
-# this panel was already linked to that day (sensor.tank_monitor_round_ble_target,
-# binary_sensor.tank_monitor_round_controller_link on).
+# service-based connect. The controller (tank-monitor-s3, now built from
+# tank-monitor-allinone-nano-remote.yaml) publishes its own as "Controller
+# BLE MAC" (sensor.tank_monitor_s3_controller_ble_mac), read from the running
+# BLE stack.
+#
+# 2026-10-25: the nano moved from the XIAO to the Freenove all-in-one. New
+# chip, new BLE MAC, and this panel sat with Controller Link off showing
+# zeros for everything -- TDS 0 ppm being the one that gets noticed. The old
+# address was E0:72:A1:F7:D6:86 (the XIAO, correct from 2026-10-06 until the
+# swap). Nothing was wrong with the panel or with MQTT: the controller's own
+# entities read fine throughout, because the panel is a BLE client and the
+# address it was dialling no longer answered.
 #
 # A new controller chip means a new MAC: read the sensor (or the boot log
 # line "[esp32_ble:...] ESP-IDF BLE MAC address: ...") and change it here.
@@ -43,7 +49,8 @@ substitutions:
   device_name: tank-monitor-round
   friendly_name: Tank Monitor Round
   # The nano's controller, tank-monitor-s3 -- see "s3_ble_mac" above.
-  s3_ble_mac: "E0:72:A1:F7:D6:86"
+  # 2026-10-25: the Freenove all-in-one. Was E0:72:A1:F7:D6:86 (the XIAO).
+  s3_ble_mac: "A4:CB:8F:DE:79:26"
   # chemistry.yaml derives its MQTT prefix from device_name. This panel
   # predates that, and Home Assistant publishes the nano tank's tests under
   # the original prefix -- pin it so nothing changes here.
