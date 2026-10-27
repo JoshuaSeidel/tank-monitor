@@ -364,6 +364,17 @@ binary_sensor:
     entity_category: diagnostic
     lambda: "return id(controller).is_fan_stalled();"
 
+  # The thermal model is not learning: Heater / Fan Not Responding, Probes
+  # Disagree, a missing probe or a hold is on, or cleared less than an hour
+  # ago. A dead actuator's relay time is not heat; learning from it is what
+  # put Tank Time Constant on its ceiling after the 2026-10-22 strip-off.
+  - platform: template
+    trigger_on_initial_state: true
+    name: "Learning Paused"
+    icon: mdi:brain
+    entity_category: diagnostic
+    lambda: "return id(controller).is_learning_paused();"
+
   # The control probe and the cross-check probe have disagreed by more than
   # the band for five minutes, and the controller has cut the heater until
   # they agree again. One of them is lying and there is no way to know

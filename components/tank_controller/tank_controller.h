@@ -268,6 +268,9 @@ class TankController : public PollingComponent {
   // Control and cross-check probes have disagreed for DISAGREE_MS; heater
   // is off until they agree again. Always false with no cross-check probe.
   bool is_probe_disagreement() const { return this->probe_disagreement_; }
+  // RLS is not learning: an actuator or probe fault is on, or cleared less
+  // than LEARN_FAULT_SETTLE_MS ago. See "Learning pauses on a fault".
+  bool is_learning_paused() const { return this->learn_paused_; }
   // Peak-to-peak temperature swing over the last hour, in degC.
   // NAN until there is enough history to mean anything.
   float get_swing() const;
@@ -355,6 +358,29 @@ class TankController : public PollingComponent {
   TankPhysics physics_{0.0f, 0.0f, 0.0f, COVER_UNKNOWN, PLACEMENT_ROOM};
   bool physics_active_{false};
   bool physics_pending_{false};
+  // One-shot (tank_ka_edge_check_v1): a stored ka within KA_EDGE_FRAC of its
+  // band edge goes back to the physics prior on the first valid reading.
+  bool ka_edge_pending_{false};
+
+  // Learning pauses on a fault. learn_fault_ms_ is the last tick a fault was
+  // on (0 = none since boot); learning resumes LEARN_FAULT_SETTLE_MS later.
+  uint32_t learn_fault_ms_{0};
+  bool learn_paused_{false};
+  const char *learn_pause_why_{""};
+  void note_learn_fault_(uint32_t now, const char *why, bool rollback);
+  // The model as it was, every SNAPSHOT_EVERY_MS while learning, so a fault
+  // can take back what was learned while the loop wound up to it.
+  struct ModelSnapshot {
+    uint32_t ms;
+    ThermalModel model;
+    float stale, bias, resid_var;
+  };
+  static const uint8_t N_SNAPSHOTS = 16;
+  ModelSnapshot snaps_[N_SNAPSHOTS]{};
+  uint8_t snap_n_{0};
+  uint8_t snap_head_{0};  // next slot to write
+  void take_snapshot_(uint32_t now);
+  void rollback_model_(uint32_t now);
   float ka_min_{0.001f};
   float ka_max_{0.2f};
   float ka_prior_{0.015f};

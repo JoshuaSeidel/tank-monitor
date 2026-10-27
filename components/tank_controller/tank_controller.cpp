@@ -61,6 +61,37 @@ static const float DISAGREE_BAND_MAX = DISAGREE_BAND_MAX_F * 5.0f / 9.0f;
 // channel, or the outlet. It cannot detect a weak fan, only an absent
 // one; the learned fan gain is the sensitive measure.
 static const uint32_t FAN_STALL_MS = 2700000;      // 45 minutes
+
+// Learning pauses on a fault.
+//
+// Heater Not Responding means the relays switch and the water does not
+// answer -- on 2026-10-22 the 75's relay power strip was off for ~22 h. The
+// learning regressor is the DELIVERED relay time, so every window of that
+// night told RLS "this much heat went in" while none did, and the cheapest
+// way to explain heat that vanished was a smaller loss coefficient: ka fell
+// until Tank Time Constant sat on its 2042 min ceiling, where it stayed for
+// five days. A fan that does not cool, a probe pair that disagrees, a probe
+// that is gone and a hold (fill / water change) are the same kind of lie.
+//
+// So while any of them is on, nothing learns -- no RLS step, no centre step,
+// no stale/bias/health update -- and for LEARN_FAULT_SETTLE_MS after it
+// clears: the stall flag drops whenever the commanded duty dips under 90 %
+// and takes HEAT_STALL_MS to come back, so a still-dead heater flickers
+// (10-22: off 10:20, on 10:40, off 12:40, ...), and a revived one leaves a
+// recovery transient. The open window is discarded on entry.
+//
+// And it is retroactive. The flag only rises after the duty has sat at 90 %
+// for the stall time, and the loop takes about two hours to wind up to that
+// against a dead heater -- windows that already learned the lie. On entry
+// the model goes back to its snapshot from at least FAULT_ROLLBACK_MS
+// earlier (tools/thermal_model_sim.py --dead-heater: without this the pause
+// alone still lets ka reach the ceiling before the flag).
+static const uint32_t LEARN_FAULT_SETTLE_MS = 3600000;  // 60 minutes
+static const uint32_t SNAPSHOT_EVERY_MS = 900000;       // 15 minutes
+static const uint32_t FAULT_ROLLBACK_MS = 10800000;     // 3 hours
+// One-shot on this firmware: ka this close to its band edge (in time
+// constant) is the dead-heater night's residue, not a measurement.
+static const float KA_EDGE_FRAC = 0.05f;
 static const float FAN_STALL_FALL = 0.05f;         // degC
 
 // Residual EMA weight. Feeds the Model Bias diagnostic only -- see the
@@ -818,6 +849,31 @@ void TankController::setup() {
     ESP_LOGW(TAG, "SETTINGS NOT RESTORED: %s", this->restore_status_.c_str());
   }
 
+  // One-shot: a ka within KA_EDGE_FRAC of either band edge goes back to the
+  // physics prior (see "Learning pauses on a fault" -- the 10-22 dead-heater
+  // night left the 75 on its 2042 min ceiling). Applied on the first valid
+  // reading, with physics_pending_'s mechanism (reset_param_: c re-expressed
+  // so the forecast does not step, ka's covariance back to the prior).
+  {
+    static constexpr uint32_t KA_EDGE_MARKER = 0x4B414531;  // "KAE1"
+    auto edge_pref = global_preferences->make_preference<uint32_t>(fnv1_hash("tank_ka_edge_check_v1"));
+    uint32_t done = 0;
+    if (!edge_pref.load(&done) || done != KA_EDGE_MARKER) {
+      const float tau = this->get_time_constant();
+      const float tau_hi = 1.0f / this->ka_min_, tau_lo = 1.0f / this->ka_max_;
+      const bool near_edge = this->model_.updates > 0 && !std::isnan(tau) &&
+                             (tau >= tau_hi * (1.0f - KA_EDGE_FRAC) || tau <= tau_lo * (1.0f + KA_EDGE_FRAC));
+      if (near_edge && !this->physics_pending_) {
+        this->ka_edge_pending_ = true;
+        ESP_LOGW(TAG, "Tank Time Constant %.0f min is within %.0f%% of its band edge (%.0f-%.0f min): ka goes back "
+                      "to the physics prior on the first reading",
+                 tau, KA_EDGE_FRAC * 100.0f, tau_lo, tau_hi);
+      }
+      done = KA_EDGE_MARKER;
+      edge_pref.save(&done);
+    }
+  }
+
   // The ambient probe's own update interval is unknown here, so freshness
   // is judged by when it last published, not by polling its state.
   if (this->ambient_sensor_ != nullptr)
@@ -1377,6 +1433,80 @@ bool TankController::project_bounds_() {
   return active;
 }
 
+void TankController::note_learn_fault_(uint32_t now, const char *why, bool rollback) {
+  this->learn_fault_ms_ = now;
+  this->learn_pause_why_ = why;
+  if (this->learn_paused_)
+    return;
+  this->learn_paused_ = true;
+  this->reset_learn_window_();
+  if (rollback) {
+    // A stall flag rises only after the loop has wound up against the dead
+    // actuator; what was learned meanwhile goes too.
+    const float tau_was = this->get_time_constant();
+    this->rollback_model_(now);
+    ESP_LOGW(TAG, "Learning paused: %s. Model rolled back past the wind-up (Tank Time Constant %.0f -> %.0f min); "
+                  "resumes %" PRIu32 " min after the fault clears",
+             why, tau_was, this->get_time_constant(), LEARN_FAULT_SETTLE_MS / 60000);
+  } else {
+    ESP_LOGW(TAG, "Learning paused: %s; resumes %" PRIu32 " min after it clears", why, LEARN_FAULT_SETTLE_MS / 60000);
+  }
+}
+
+void TankController::take_snapshot_(uint32_t now) {
+  if (this->snap_n_ > 0) {
+    const uint8_t last = (this->snap_head_ + N_SNAPSHOTS - 1) % N_SNAPSHOTS;
+    if (now - this->snaps_[last].ms < SNAPSHOT_EVERY_MS)
+      return;
+  }
+  ModelSnapshot &s = this->snaps_[this->snap_head_];
+  s.ms = now;
+  s.model = this->model_;
+  s.stale = this->stale_;
+  s.bias = this->bias_;
+  s.resid_var = this->resid_var_;
+  this->snap_head_ = (this->snap_head_ + 1) % N_SNAPSHOTS;
+  if (this->snap_n_ < N_SNAPSHOTS)
+    this->snap_n_++;
+}
+
+void TankController::rollback_model_(uint32_t now) {
+  // The newest snapshot at least FAULT_ROLLBACK_MS old -- else the oldest
+  // there is -- re-expressed at today's reference (rebase_), so the forecast
+  // does not step and sync_reference_() carries on from where it is.
+  // Snapshots newer than it learned the fault too and are dropped.
+  if (this->snap_n_ == 0)
+    return;
+  int pick = -1;
+  for (uint8_t k = 0; k < this->snap_n_; k++) {  // oldest to newest
+    const uint8_t idx = (this->snap_head_ + N_SNAPSHOTS - this->snap_n_ + k) % N_SNAPSHOTS;
+    if (pick < 0 || now - this->snaps_[idx].ms >= FAULT_ROLLBACK_MS)
+      pick = idx;
+    if (now - this->snaps_[idx].ms < FAULT_ROLLBACK_MS)
+      break;
+  }
+  const ModelSnapshot &s = this->snaps_[pick];
+  const float cur_ref = this->model_.t_ref;
+  const uint8_t mode = this->model_.ref_mode;
+  this->model_ = s.model;
+  this->model_.ref_mode = mode;
+  this->stale_ = s.stale;
+  this->bias_ = s.bias;
+  this->resid_var_ = s.resid_var;
+  this->rebase_(cur_ref);
+  this->clamp_model_();
+  // Keep only what is at or before the restored one.
+  uint8_t keep = 0;
+  for (uint8_t k = 0; k < this->snap_n_; k++) {
+    const uint8_t idx = (this->snap_head_ + N_SNAPSHOTS - this->snap_n_ + k) % N_SNAPSHOTS;
+    keep++;
+    if (idx == pick)
+      break;
+  }
+  this->snap_head_ = (pick + 1) % N_SNAPSHOTS;
+  this->snap_n_ = keep;
+}
+
 void TankController::reset_learn_window_() {
   this->learn_anchor_temp_ = NAN;
   this->learn_anchor_cross_ = NAN;
@@ -1843,6 +1973,7 @@ void TankController::update() {
       if (!this->safety_tripped_)
         ESP_LOGE(TAG, "No temperature for %" PRIu32 "s - shutting the heater down", SENSOR_TIMEOUT_MS / 1000);
       this->safety_tripped_ = true;
+      this->note_learn_fault_(now, "no temperature probe", false);
       this->state_text_ = "fault: no probe";
       this->apply_outputs_(0.0f, 0.0f);
     }
@@ -1875,6 +2006,16 @@ void TankController::update() {
     }
     this->apply_physics_(true, true, "Tank physics applied to the stored model");
   }
+  if (this->ka_edge_pending_) {
+    this->ka_edge_pending_ = false;
+    const float tau_was = this->get_time_constant();
+    this->reset_param_(2, t, this->recent_fraction_(true));
+    this->clamp_model_();
+    this->save_state_();
+    ESP_LOGW(TAG, "ka reset: Tank Time Constant %.0f -> %.0f min (physics prior; band %s). It was on the band edge, "
+                  "learned through the 2026-10-22 dead-heater night; it relearns from the next excursion",
+             tau_was, this->get_time_constant(), this->band_text_);
+  }
   if (since_valid > HISTORY_WIPE_MS) {
     ESP_LOGW(TAG, "Gap of %" PRIu32 "s in readings - discarding swing history", since_valid / 1000);
     this->history_idx_ = 0;
@@ -1897,6 +2038,7 @@ void TankController::update() {
   // one of those checks would call that a fault. Reading validity above
   // still runs, so the gap logic does not fire when the hold ends.
   if (this->hold_) {
+    this->note_learn_fault_(now, "hold (fill / water change)", false);
     this->state_text_ = "hold";
     this->apply_outputs_(0.0f, 0.0f);
     return;
@@ -1922,6 +2064,7 @@ void TankController::update() {
           ESP_LOGE(TAG, "Probes disagree: control %.2f degF, cross-check %.2f degF for %" PRIu32 " min - heater off",
                    t * 9.0f / 5.0f + 32.0f, b * 9.0f / 5.0f + 32.0f, DISAGREE_MS / 60000);
         this->probe_disagreement_ = true;
+        this->note_learn_fault_(now, "probes disagree", false);
         this->state_text_ = "fault: probes disagree";
         this->integral_ = 0.0f;
         this->apply_outputs_(0.0f, 0.0f);
@@ -1978,6 +2121,19 @@ void TankController::update() {
     this->fan_stall_since_ms_ = 0;
     this->fan_stalled_ = false;
   }
+
+  // --- learning pause (see "Learning pauses on a fault") ------------------
+  if (this->heater_stalled_)
+    this->note_learn_fault_(now, "heater not responding", true);
+  if (this->fan_stalled_)
+    this->note_learn_fault_(now, "fan not responding", true);
+  if (this->learn_paused_ && now - this->learn_fault_ms_ >= LEARN_FAULT_SETTLE_MS) {
+    this->learn_paused_ = false;
+    ESP_LOGW(TAG, "Learning resumed: no fault (last: %s) for %" PRIu32 " min", this->learn_pause_why_,
+             LEARN_FAULT_SETTLE_MS / 60000);
+  }
+  if (!this->learn_paused_ && this->learning_enabled_)
+    this->take_snapshot_(now);
 
   if (this->safety_tripped_) {
     ESP_LOGI(TAG, "Temperature probe is back");
@@ -2041,7 +2197,7 @@ void TankController::update() {
     if (this->fan_relay_ != nullptr && this->fan_relay_->has_state())
       this->acc_fan_ = clampf((float) (this->relay_on_ms_(false, now) - this->anchor_fan_on_ms_) / window_ms, 0.0f, 1.0f);
     const float dev_avg = this->acc_dev_;
-    if (this->learning_enabled_) {
+    if (this->learning_enabled_ && !this->learn_paused_) {
       this->learn_(window_min, rate);
       this->update_centre_(dev_avg, window_min);
     }

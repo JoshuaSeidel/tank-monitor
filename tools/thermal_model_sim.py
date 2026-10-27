@@ -32,13 +32,16 @@ Three firmwares:
          relay duty as the regressor, ka centred so it only learns from
          excitation, Q on ka = 0, and the demand debounced so one probe
          step cannot toggle it: latched sign guard / fan deadband and a
-         play operator on the proportional term; debounce=False is ca952fb)
+         play operator on the proportional term; debounce=False is ca952fb;
+         learning paused on Heater/Fan Not Responding, plus a rollback past
+         the wind-up -- fault_pause=False is 88ef4b0)
 
     python3 tools/thermal_model_sim.py              # full table, a few minutes
     python3 tools/thermal_model_sim.py --quick      # shorter runs
     python3 tools/thermal_model_sim.py --measure    # tau from the real history
     python3 tools/thermal_model_sim.py --replay     # real history through NEW
     python3 tools/thermal_model_sim.py --relay      # relay drive before/after: delivered vs commanded
+    python3 tools/thermal_model_sim.py --dead-heater  # 22 h with the heater's power off: learning paused?
 
 Needs numpy. Nothing here is imported by the firmware.
 """
@@ -119,6 +122,19 @@ KA_EXCITE = f32(0.3 * 5 / 9)
 F = lambda c: float(c) * 9 / 5 + 32
 C = lambda f: (f - 32) * 5 / 9
 CMIN_TO_FH = 108.0
+# update()'s stall detectors and the learning pause on an actuator fault
+HEAT_STALL_MS = 1200000      # 20 min at >= 90 % duty ...
+HEAT_STALL_RISE = 0.05       # ... without this rise, degC: "Heater Not Responding"
+FAN_STALL_MS = 2700000
+FAN_STALL_FALL = 0.05
+LEARN_FAULT_SETTLE_MS = 3600000   # learning stays paused this long after a fault clears
+# A fault is only flagged once the actuator has sat at >= 90 % for the stall
+# time, and the loop takes ~2 h to wind up to that: the windows before the
+# flag already learned from heat that never arrived. On the flag the model
+# goes back to its snapshot from at least FAULT_ROLLBACK_MS earlier.
+SNAPSHOT_EVERY_MS = 900000        # 15 min
+N_SNAPSHOTS = 16                  # 4 h of history
+FAULT_ROLLBACK_MS = 10800000      # 3 h
 
 
 def clampf(v, lo, hi):
@@ -162,8 +178,17 @@ class Controller:
 
     def __init__(self, variant, setpoint_f, max_tau=None, phys=None, fan_available=True, cross=True,
                  ambient=False, ambient_timeout_min=180, full_scale_lux=3000.0, response_time=20.0,
-                 fan_deadband_f=0.25, disagree_band_f=8.0, relay=True, centre=True, debounce=True):
+                 fan_deadband_f=0.25, disagree_band_f=8.0, relay=True, centre=True, debounce=True,
+                 fault_pause=True):
         self.v = variant
+        # fault_pause: learning stops while Heater/Fan Not Responding is on and
+        # for LEARN_FAULT_SETTLE_MS after (this firmware). False = 88ef4b0 and
+        # before: RLS kept learning as if the dead heater's relay time was heat.
+        self.fault_pause = fault_pause and variant == 'new'
+        self.heat_stall_since = 0; self.heat_stall_t = float('nan'); self.heater_stalled = False
+        self.fan_stall_since = 0; self.fan_stall_t = float('nan'); self.fan_stalled = False
+        self.fault_ms = None; self.learn_paused = False; self.paused_windows = 0
+        self.snaps = []; self.rollbacks = 0
         self.new = variant == 'new'
         # debounce: hysteresis on the rules that forbid an actuator (sign
         # guard, fan deadband) and a play operator on the proportional
@@ -333,6 +358,25 @@ class Controller:
             self.theta[2] = self.theta_prior(2)
         self.integral = old.integral; self.heater = old.heater; self.fan = old.fan
         self.light_slot = old.light_slot; self.light_w = old.light_w
+
+    def rollback(self, now):
+        """The newest snapshot at least FAULT_ROLLBACK_MS old (else the oldest),
+        re-expressed at today's reference so the forecast does not step."""
+        if not self.snaps:
+            return
+        pick = self.snaps[0]
+        for sn in self.snaps:
+            if now - sn[0] >= FAULT_ROLLBACK_MS:
+                pick = sn
+        cur_ref = self.t_ref
+        (_, th, P, upd, tref, _mode, stale, bias, rv) = pick
+        self.theta = [f32(v) for v in th]; self.P = [[f32(v) for v in r] for r in P]
+        self.updates = upd; self.t_ref = tref
+        self.stale = stale; self.bias = bias; self.resid_var = rv
+        if not math.isnan(cur_ref):
+            self.rebase(cur_ref)
+        self.snaps = [sn for sn in self.snaps if sn[0] <= pick[0]]
+        self.rollbacks += 1
 
     def set_ka_variance(self, target):
         P = self.P
@@ -623,6 +667,37 @@ class Controller:
         if first and w < 30:
             self.light_w[slot] = f32(w + 1)
 
+        # --- stall detectors (update(): judged on the duty already commanded)
+        if self.heater >= 0.9:
+            if self.heat_stall_since == 0:
+                self.heat_stall_since = now; self.heat_stall_t = t
+            elif now - self.heat_stall_since > HEAT_STALL_MS:
+                self.heater_stalled = (t - self.heat_stall_t) < HEAT_STALL_RISE
+                self.heat_stall_since = now; self.heat_stall_t = t
+        else:
+            self.heat_stall_since = 0; self.heater_stalled = False
+        if self.fan >= 0.9:
+            if self.fan_stall_since == 0:
+                self.fan_stall_since = now; self.fan_stall_t = t
+            elif now - self.fan_stall_since > FAN_STALL_MS:
+                self.fan_stalled = (self.fan_stall_t - t) < FAN_STALL_FALL
+                self.fan_stall_since = now; self.fan_stall_t = t
+        else:
+            self.fan_stall_since = 0; self.fan_stalled = False
+        if self.fault_pause:
+            if self.heater_stalled or self.fan_stalled:
+                self.fault_ms = now
+            paused = self.fault_ms is not None and now - self.fault_ms < LEARN_FAULT_SETTLE_MS
+            if paused and not self.learn_paused:
+                self.anchor_t = float('nan')      # the open window saw the fault: drop it
+                self.rollback(now)
+            self.learn_paused = paused
+            if not paused and (not self.snaps or now - self.snaps[-1][0] >= SNAPSHOT_EVERY_MS):
+                self.snaps.append((now, [f32(v) for v in self.theta], [[f32(v) for v in r] for r in self.P],
+                                   self.updates, self.t_ref, self.ref_mode, self.stale, self.bias, self.resid_var))
+                if len(self.snaps) > N_SNAPSHOTS:
+                    self.snaps.pop(0)
+
         ref_now = self.t_ref if self.v != 'old' else OLD_TEMP_REF
         if not self.relay:
             self.acc[0] = f32(self.acc[0] + self.heater)
@@ -652,8 +727,11 @@ class Controller:
                 self.acc[0] = f32(clampf((self.h_on_total - self.anchor_h_on) / wsec, 0.0, 1.0))
                 self.acc[1] = f32(clampf((self.f_on_total - self.anchor_f_on) / wsec, 0.0, 1.0))
             dev_avg = self.acc[2]
-            self.learn(rate)
-            self.update_centre(dev_avg, wmin)
+            if self.learn_paused:
+                self.paused_windows += 1
+            else:
+                self.learn(rate)
+                self.update_centre(dev_avg, wmin)
             self.acc = [f32(0)] * 4; self.acc_n = 0
             self.anchor_t = t; self.anchor_x = x; self.anchor_ms = now
             self.anchor_h_on = self.h_on_total; self.anchor_f_on = self.f_on_total
@@ -820,7 +898,11 @@ def real_room_f(tmin):
 
 
 def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_probe=False,
-             sp_changes=(), room='real', room_step_day=None, start_day_metrics=2.0, events=(), window=None):
+             sp_changes=(), room='real', room_step_day=None, start_day_metrics=2.0, events=(), window=None,
+             dead_heater=None):
+    """dead_heater=(start_day, hours): the relays keep switching but no heat
+    reaches the water -- the 75's relay power strip, off 2026-10-22 08:59 to
+    10-23 ~07:00."""
     rng = random.Random(seed)
     T = C(plant['setpoint_f'])
     cab = None
@@ -906,7 +988,8 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
                 cab += dcab * 5 / 60.0
             else:
                 air = room_c
-            h_eff += (h_on - h_eff) * 5 / 60.0
+            dead = dead_heater is not None and dead_heater[0] <= day < dead_heater[0] + dead_heater[1] / 24.0
+            h_eff += ((0.0 if dead else h_on) - h_eff) * 5 / 60.0
             dT = plant['kh'] * h_eff - plant['kf'] * f_on - (T - air) / tau + plant['kl'] * light + c0
             T += dT * 5 / 60.0
         q = lambda v: round(v / 0.0625) * 0.0625
@@ -1172,6 +1255,29 @@ def replay(phys=PHYS_75, centre=True, verbose=True):
     return out
 
 
+def dead_heater(days=7.0):
+    """2026-10-22: the 75's relay power strip off for ~22 h. The relays kept
+    switching, so the delivered-duty regressor said heat while none arrived.
+    OLD (fault_pause=False) is 88ef4b0; NEW pauses learning on Heater Not
+    Responding and rolls the model back past the loop's wind-up."""
+    d0, hrs = 3.375, 22.0
+    print(f"Dead heater: relays switching, no heat, day {d0} (09:00) for {hrs:.0f} h. "
+          "tau in min; band 446-2042, physics prior 954")
+    print("scenario                      tau before  peak  flag->  end of dead  +1 day  end   rollbacks paused-windows")
+    for tau in (1000, 800):
+        p = plant_for('75', tau)
+        for amb in (True, False):
+            for fp in (False, True):
+                c = Controller('new', p['setpoint_f'], phys=PHYS_75, ambient=amb, fault_pause=fp)
+                c, rec = simulate(c, p, days, ambient_probe=amb, dead_heater=(d0, hrs))
+                at = lambda d: next(rec['tau'][i] for i, t in enumerate(rec['t']) if t >= d)
+                win = [rec['tau'][i] for i, t in enumerate(rec['t']) if d0 <= t <= d0 + hrs / 24]
+                label = f"75 tau={tau}{' +zig' if amb else ''} {'NEW' if fp else 'OLD 88ef4b0'}"
+                print(f"{label:30s} {at(d0 - 0.01):8.0f} {max(win):6.0f} {at(d0 + 2.5 / 24):6.0f} "
+                      f"{at(d0 + hrs / 24):10.0f} {at(d0 + hrs / 24 + 1):7.0f} {rec['tau'][-1]:5.0f} "
+                      f"{c.rollbacks:6d} {c.paused_windows:10d}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--quick', action='store_true')
@@ -1179,7 +1285,11 @@ def main():
     ap.add_argument('--measure', action='store_true')
     ap.add_argument('--replay', action='store_true')
     ap.add_argument('--relay', action='store_true', help='only the relay-drive before/after table')
+    ap.add_argument('--dead-heater', action='store_true', help='only the 22 h dead-heater before/after table')
     a = ap.parse_args()
+    if a.dead_heater:
+        dead_heater()
+        return
     if a.measure:
         measure()
         return
@@ -1256,6 +1366,7 @@ def main():
     _, rec = simulate(Controller('new', 77.0, phys=PHYS_75), p, days, sp_changes=((3.0, 79.0), (4.5, 77.0)))
     row("75 tau=800 NEW sp 77/79/77", summarize(rec, days, true_tau=800))
     actuators(days)
+    dead_heater()
     replay()
 
 
