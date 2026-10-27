@@ -676,11 +676,37 @@ void TankController::setup() {
   // persists the defaults and resets ka (and kh, given a wattage) to the
   // physics prior on the first valid reading: physics_pending_.
   this->physics_pref_ = global_preferences->make_preference<TankPhysics>(fnv1_hash("tank_physics_v1"));
+  // Every load below that fails is named, logged and left on its default --
+  // never silently. RESTORE_MARKER is persisted by the first boot that runs
+  // this check: before it, a missing setpoint / deadband / band may just
+  // never have been set from Home Assistant (those are only written when
+  // changed), so that boot persists the defaults and says "never stored".
+  // After it, a missing item is a lost one: WARNING, and reported in
+  // "Controller Settings Restored".
+  static constexpr uint32_t RESTORE_MARKER = 0x54435231;  // "TCR1"
+  auto marker_pref = global_preferences->make_preference<uint32_t>(fnv1_hash("tank_restore_marker_v1"));
+  uint32_t marker = 0;
+  const bool first_check = !marker_pref.load(&marker) || marker != RESTORE_MARKER;
+  std::string lost, never;
+  auto note_lost = [&](const char *what) {
+    std::string &to = first_check ? never : lost;
+    if (!to.empty())
+      to += ", ";
+    to += what;
+    if (first_check) {
+      ESP_LOGI(TAG, "Stored %s: none yet - using the default", what);
+    } else {
+      ESP_LOGW(TAG, "Stored %s did not restore - using the default", what);
+    }
+  };
+
   TankPhysics ph{};
   bool physics_first = true;
   if (this->physics_pref_.load(&ph) && !std::isnan(ph.tank_gal)) {
     this->physics_ = ph;
     physics_first = false;
+  } else {
+    note_lost("tank physics");
   }
   if (this->physics_.cover >= N_COVERS)
     this->physics_.cover = COVER_UNKNOWN;
@@ -740,23 +766,57 @@ void TankController::setup() {
       migrated = true;
       ESP_LOGW(TAG, "Migrating thermal model from fixed %.1f degF reference (%" PRIu32 " learning steps kept)",
                LEGACY_TEMP_REF * 9.0f / 5.0f + 32.0f, this->model_.updates);
+    } else {
+      note_lost("thermal model (back to the physics prior)");
     }
   }
   LightProfile light{};
   if (this->light_pref_.load(&light) && !std::isnan(light.slot[0]))
     this->light_ = light;
+  else
+    note_lost("light heat profile");
 
+  // Missing scalars are persisted at their defaults, so the next boot can
+  // tell a lost value from one that was never set.
   float sp = NAN;
-  if (this->setpoint_pref_.load(&sp) && !std::isnan(sp))
+  if (this->setpoint_pref_.load(&sp) && !std::isnan(sp)) {
     this->setpoint_ = clampf(sp, this->min_temp_, this->max_temp_);
+  } else {
+    note_lost("setpoint");
+    this->setpoint_pref_.save(&this->setpoint_);
+  }
 
   float db = NAN;
-  if (this->fan_deadband_pref_.load(&db) && !std::isnan(db))
+  if (this->fan_deadband_pref_.load(&db) && !std::isnan(db)) {
     this->fan_deadband_ = clampf(db, 0.0f, FAN_DEADBAND_MAX);
+  } else {
+    note_lost("fan deadband");
+    this->fan_deadband_pref_.save(&this->fan_deadband_);
+  }
 
   float dz = NAN;
-  if (this->disagree_band_pref_.load(&dz) && !std::isnan(dz))
+  if (this->disagree_band_pref_.load(&dz) && !std::isnan(dz)) {
     this->disagree_band_ = clampf(dz, 0.0f, DISAGREE_BAND_MAX);
+  } else {
+    note_lost("probe disagreement band");
+    this->disagree_band_pref_.save(&this->disagree_band_);
+  }
+
+  if (first_check) {
+    marker = RESTORE_MARKER;
+    marker_pref.save(&marker);
+  }
+  if (lost.empty()) {
+    this->restore_status_ = never.empty() ? "ok" : "ok (first check; none stored yet, defaults kept: " + never + ")";
+    if (this->restore_status_.size() > 250)
+      this->restore_status_ = this->restore_status_.substr(0, 247) + "...";
+    ESP_LOGI(TAG, "Stored settings restored: %s", this->restore_status_.c_str());
+  } else {
+    this->restore_status_ = "defaults for " + lost + " (did not restore)";
+    if (this->restore_status_.size() > 250)
+      this->restore_status_ = this->restore_status_.substr(0, 247) + "...";
+    ESP_LOGW(TAG, "SETTINGS NOT RESTORED: %s", this->restore_status_.c_str());
+  }
 
   // The ambient probe's own update interval is unknown here, so freshness
   // is judged by when it last published, not by polling its state.

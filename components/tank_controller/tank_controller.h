@@ -3,6 +3,8 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/preferences.h"
+
+#include <string>
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/output/float_output.h"
@@ -121,6 +123,10 @@ class TankController : public PollingComponent {
   void setup() override;
   void update() override;
   void dump_config() override;
+  // A reflash or an OTA reboot persists the learned model then, rather than
+  // losing up to SAVE_INTERVAL_MS of learning. Runs before the preference
+  // syncer's own on_shutdown (BUS priority, so later in the reverse order).
+  void on_shutdown() override { this->save_state_(); }
   float get_setup_priority() const override { return setup_priority::LATE; }
 
   void set_temperature_sensor(sensor::Sensor *s) { this->temp_sensor_ = s; }
@@ -246,6 +252,9 @@ class TankController : public PollingComponent {
   bool is_ambient_reference() const { return this->model_.ref_mode == REF_AMBIENT; }
   // "room: <source>" in ambient mode, otherwise which setpoint fallback.
   const char *get_reference_text() const;
+  // What setup() restored from flash: "ok", or which stored items were
+  // missing and came back as defaults. For "Controller Settings Restored".
+  const std::string &get_restore_status() const { return this->restore_status_; }
   float get_predicted_light_load() const { return this->predicted_light_; }
   bool is_safety_tripped() const { return this->safety_tripped_; }
   // Heater commanded near full for a long stretch with no temperature
@@ -324,6 +333,7 @@ class TankController : public PollingComponent {
   ESPPreferenceObject fan_deadband_pref_;
   ESPPreferenceObject disagree_band_pref_;
   ESPPreferenceObject physics_pref_;
+  std::string restore_status_{"not checked yet"};
 
   float setpoint_{25.0f};
   // Overwritten from config before setup() and from flash during it; the

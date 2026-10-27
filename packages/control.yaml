@@ -378,6 +378,16 @@ binary_sensor:
     lambda: "return id(controller).is_probe_disagreement();"
 
 text_sensor:
+  # What the controller's setup() restored from flash: "ok", or which stored
+  # items (physics, thermal model, setpoint, ...) came back as defaults.
+  # Anything but "ok" after a flash means learning or a setting was lost.
+  - platform: template
+    name: "Controller Settings Restored"
+    icon: mdi:content-save-check
+    entity_category: diagnostic
+    update_interval: 300s
+    lambda: "return {id(controller).get_restore_status()};"
+
   # The band Tank Time Constant may move in, and where physics expects it,
   # from Tank Volume / Water Volume / Tank Cover / Tank Placement.
   - platform: template

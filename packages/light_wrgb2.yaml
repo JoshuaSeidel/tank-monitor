@@ -10,7 +10,7 @@
 # TUNING NEEDS NO FLASH. The phase table is stored in flash memory, not
 # compiled in: "Light White/Red/Green/Blue/Ramp/On Time/Off Time" edit the
 # selected phase, save it, and push it within a couple of seconds. The
-# numbers in light_seed_defaults are first-boot defaults and what "Reset
+# numbers in light_seed_table are first-boot defaults and what "Reset
 # Light Phase to Defaults" restores -- nothing else.
 #
 # Needs from the including build:
@@ -256,11 +256,11 @@ globals:
     initial_value: '0'
   # Learned plateau lux. Persisted: a reboot should not forget what "on"
   # looks like. Zeroed on a phase change, because the new phase is a
-  # different brightness.
+  # different brightness. NAN until restored (see RESTORED SETTINGS).
   - id: light_learned_lux
     type: float
     restore_value: true
-    initial_value: '0.0'
+    initial_value: 'NAN'
   - id: light_mismatch_min
     type: int
     restore_value: false
@@ -283,33 +283,43 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  # ---------------------------------------------------------------------
+  # RESTORED SETTINGS -- and how a lost one is caught
+  # ---------------------------------------------------------------------
+  # ESPHome restores a global by loading its stored bytes; when that load
+  # fails (nothing stored yet, a size change, an NVS fault) it silently keeps
+  # initial_value. So every restored setting here starts from a value it can
+  # never legitimately hold (-1, NAN), and light_validate_settings checks
+  # each one at boot: a value still on its sentinel, or out of range, did not
+  # restore. It is logged at WARNING, replaced by its default, and named in
+  # "Light Settings Restored". Defaults are the user's standing requirement:
+  # every lit phase FOLLOWS THE SUN (a real dawn-to-dusk day), daily light
+  # uncapped. Nothing is ever downgraded on the strength of a missing value.
+  #
+  # The storage keys are ESPHome's: md5 of the global's id. Renaming an id,
+  # or changing its type or array length, is a new key -- the old value is
+  # orphaned and the setting comes back as its default (and is reported as
+  # such). Do neither without a migration.
+  #
   # THE PHASE TABLE, stored in flash so it is tuned from Home Assistant or the
   # board's own page and survives reboots and reflashes -- changing a
   # brightness never needs a build. Five phases x seven fields, in select
-  # order: [on_min, off_min, ramp, W, R, G, B]. Zero until first boot seeds
-  # it from light_seed_defaults, which is the ONLY place default values are
-  # written down.
+  # order: [on_min, off_min, ramp, W, R, G, B]. A row that did not restore
+  # (or is out of range) is re-seeded from light_seed_table, which is the
+  # ONLY place default values are written down.
   - id: light_table
     type: std::array<int, 35>
     restore_value: true
-  - id: light_table_seeded
-    type: bool
-    restore_value: true
-    initial_value: 'false'
+    initial_value: '[] { std::array<int, 35> a; a.fill(-1); return a; }()'
   # DAILY-LIGHT CAP, per phase, in select order, minutes of
   # FULL-BRIGHTNESS-EQUIVALENT light ("Light Full Brightness Hours"). 0 =
   # natural (default). Whether a phase follows the sun is light_sun_follow.
-  # (Historically: >0 meant "follows the sun" and was a plateau length, then
-  # a daily target; light_daylight_migrated converted that.) Kept apart from
-  # light_table so adding it did not discard the stored table. Seeded by
-  # light_seed_sun, the only place its defaults live.
+  # Kept apart from light_table so adding it did not discard the stored
+  # table.
   - id: light_sun_plateau
     type: std::array<int, 5>
     restore_value: true
-  - id: light_sun_seeded
-    type: bool
-    restore_value: true
-    initial_value: 'false'
+    initial_value: 'std::array<int, 5>{-1, -1, -1, -1, -1}'
   # The selected phase follows the sun: lp_on/off/ramp are computed, not
   # read from the table. lp_sun_day is the day of year they were computed
   # for (-1 = not yet), so the minute tick recomputes after midnight and
@@ -322,37 +332,54 @@ globals:
     type: int
     restore_value: false
     initial_value: '-1'
-  # "Light Full Brightness Hours" used to be the plateau length; it is now
-  # the day's full-equivalent light. Boards that stored the old meaning are
-  # re-seeded once (only the phases that follow the sun) by on_boot.
-  - id: light_dose_migrated
-    type: bool
-    restore_value: true
-    initial_value: 'false'
   # Per phase: 1 = follows the sun (the daylight curve / single fade from
-  # today's sun), 0 = the table's fixed times. Used to be implied by
-  # light_sun_plateau > 0; light_sun_plateau is now the optional daily-light
-  # cap (0 = natural). light_daylight_migrated converts a board once.
+  # today's sun), 0 = the table's fixed times. Phase 0 (Off) never does.
+  # Written ONLY by an explicit "Light Follows Sun" turn on/off after boot,
+  # by "Reset Light Phase to Defaults", and by light_validate_settings when
+  # the stored value is missing (-> 1). In particular NOT by the switch's own
+  # setup: see the switch.
   - id: light_sun_follow
     type: std::array<int, 5>
     restore_value: true
-  - id: light_daylight_migrated
-    type: bool
+    initial_value: 'std::array<int, 5>{-1, -1, -1, -1, -1}'
+  # Backup of the "Light Phase" select's index. The select restores itself
+  # from its own preference; if that fails it comes up on its initial option
+  # (Phase 1) with nothing to say so. This copy lets the boot check notice
+  # and put the stored phase back. -1 = never written.
+  - id: light_phase_saved
+    type: int
     restore_value: true
-    initial_value: 'false'
+    initial_value: '-1'
   # Board-wide shape settings (see THE DAYLIGHT CURVE).
   - id: light_day_expo
     type: float
     restore_value: true
-    initial_value: '0.5'
+    initial_value: 'NAN'
   - id: light_dawn_warmth
     type: int
     restore_value: true
-    initial_value: '100'
+    initial_value: '-1'
   - id: light_curve_edge
     type: int
     restore_value: true
-    initial_value: '30'
+    initial_value: '-1'
+  # Set at the end of on_boot. The Follows Sun actions refuse to act before
+  # it: whatever ESPHome does with a switch during setup, it cannot rewrite
+  # light_sun_follow.
+  - id: light_boot_done
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Written by the first boot that runs light_validate_settings; see there.
+  - id: light_store_marker
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # What the boot check found, for "Light Settings Restored".
+  - id: light_restore_status
+    type: std::string
+    restore_value: false
+    initial_value: '"not checked yet"'
   # Today's resolved day (sun events, curve, bright window).
   - id: lp_plan
     type: chihiros::daylight::Plan
@@ -383,12 +410,12 @@ globals:
   - id: light_bright_pct
     type: int
     restore_value: true
-    initial_value: '65'
+    initial_value: '-1'
   # Spacing of the points written to the lamp, minutes.
   - id: light_curve_step
     type: int
     restore_value: true
-    initial_value: '60'
+    initial_value: '-1'
   # The resolved curve for the selected phase (light_select_phase).
   #   lp_curve      the lamp runs the multi-point daylight curve (else one scene)
   #   lp_peak       today's peak, fraction of full (<1 only under a cap)
@@ -452,47 +479,20 @@ globals:
 # file if it moves.
 
 # List form: a mapping on_boot in a package can be dropped when packages
-# merge. Late priority, so the select has already restored its option. This
-# only resolves the phase; the push itself happens on connect.
+# merge. Late priority, so the select has already restored its option and
+# every global has loaded. This only checks the stored settings and resolves
+# the phase; the push itself happens on connect.
 esphome:
   on_boot:
     - priority: -100
       then:
-        - if:
-            condition:
-              lambda: return !id(light_table_seeded);
-            then:
-              - script.execute:
-                  id: light_seed_defaults
-                  only: -1
-              - script.wait: light_seed_defaults
-        # Boards seeded before follow-the-sun existed have a table but no
-        # sun settings; give them the defaults without touching the table.
-        - if:
-            condition:
-              lambda: return !id(light_sun_seeded);
-            then:
-              - script.execute:
-                  id: light_seed_sun
-                  only: -1
-              - script.wait: light_seed_sun
-        # light_sun_plateau has meant three things: a plateau length, then a
-        # daily-light target, now an optional cap. Once per board: a phase
-        # that had a value follows the sun, and the cap starts off (natural).
-        - if:
-            condition:
-              lambda: return !id(light_daylight_migrated);
-            then:
-              - lambda: |-
-                  for (int ph = 0; ph < 5; ph++) {
-                    id(light_sun_follow)[ph] = (ph > 0 && id(light_sun_plateau)[ph] > 0) ? 1 : 0;
-                    ESP_LOGI("light", "phase %d: %s the sun, daily-light cap off (was %d min)", ph,
-                             id(light_sun_follow)[ph] ? "follows" : "does not follow", id(light_sun_plateau)[ph]);
-                    id(light_sun_plateau)[ph] = 0;
-                  }
-                  id(light_dose_migrated) = true;
-                  id(light_daylight_migrated) = true;
+        - script.execute: light_validate_settings
+        - script.wait: light_validate_settings
         - script.execute: light_select_phase
+        - text_sensor.template.publish:
+            id: light_restore_text
+            state: !lambda return id(light_restore_status);
+        - lambda: id(light_boot_done) = true;
 
 select:
   - platform: template
@@ -510,6 +510,9 @@ select:
       - "Phase 4 - Mature"
     on_value:
       then:
+        # At setup this runs before the globals load, so the stored backup
+        # overwrites it; light_validate_settings compares the two.
+        - lambda: id(light_phase_saved) = (int) i;
         - script.execute: light_select_phase
         - lambda: |-
             // New phase, new brightness: what "lit" looked like before no
@@ -576,7 +579,7 @@ script:
   # old ceiling was the bottom of the right band. Writes every phase (only: -1) on first boot, or just
   # one phase for "Reset Light Phase to Defaults". After that the stored
   # table (light_table) is the truth and these numbers are never read.
-  - id: light_seed_defaults
+  - id: light_seed_table
     parameters:
       only: int
     then:
@@ -592,8 +595,17 @@ script:
             if (only != -1 && ph != only) continue;
             for (int f = 0; f < 7; f++) id(light_table)[ph * 7 + f] = defaults[ph * 7 + f];
           }
-          id(light_table_seeded) = true;
           ESP_LOGI("light", "phase defaults written (%s)", only < 0 ? "all" : "one phase");
+
+  # "Reset Light Phase to Defaults": the table row and the sun settings.
+  - id: light_seed_defaults
+    parameters:
+      only: int
+    then:
+      - script.execute:
+          id: light_seed_table
+          only: !lambda return only;
+      - script.wait: light_seed_table
       - script.execute:
           id: light_seed_sun
           only: !lambda return only;
@@ -615,9 +627,186 @@ script:
             id(light_sun_follow)[ph] = ph > 0 ? 1 : 0;
             id(light_sun_plateau)[ph] = 0;
           }
-          id(light_sun_seeded) = true;
-          id(light_dose_migrated) = true;
-          id(light_daylight_migrated) = true;
+
+  # BOOT CHECK of every restored setting (see RESTORED SETTINGS). Runs once,
+  # from on_boot, after all globals have loaded and before anything acts on
+  # them. A field still on its sentinel did not restore; one out of range is
+  # corrupt. Either is replaced by its default, logged at WARNING and named
+  # in light_restore_status. It never turns a stored "follows the sun" off:
+  # the only value it writes to light_sun_follow is 1 (or 0 for the Off
+  # phase, which cannot follow).
+  - id: light_validate_settings
+    then:
+      - lambda: |-
+          // light_store_marker is written at the end of the first boot that
+          // runs this check. Before it, a setting on its sentinel may simply
+          // never have been stored: ESPHome only writes a global once it
+          // differs from its initial value, and these were sitting on their
+          // (equal) old defaults. So on that boot a sentinel is "never
+          // stored, default kept" (INFO); on every later boot it is a lost
+          // setting (WARNING, and reported).
+          static constexpr uint32_t MARKER = 0x4C535431;   // "LST1"
+          const bool first_check = id(light_store_marker) != MARKER;
+          std::string lost, fixed, never;
+          int n_lost = 0, n_checked = 0;
+          auto add = [](std::string &to, const char *what) {
+            if (!to.empty()) to += ", ";
+            to += what;
+          };
+          // A value on its sentinel (did not load) or out of range (corrupt).
+          auto bad = [&](bool sentinel, const char *what, const char *then) {
+            if (sentinel) {
+              if (first_check) {
+                add(never, what);
+                ESP_LOGI("light", "settings: %s: none stored yet; %s", what, then);
+                return;
+              }
+              add(lost, what);
+            } else {
+              add(fixed, what);
+            }
+            ESP_LOGW("light", "settings: %s: %s; %s", what, sentinel ? "DID NOT RESTORE" : "out of range", then);
+          };
+          auto in = [](int v, int lo, int hi) { return v >= lo && v <= hi; };
+
+          // Per-phase arrays are reported once per array, listing phases:
+          // "follow-sun phases 3,4".
+          struct Group { std::string missing, corrupt; };
+          auto mark = [](std::string &list, int ph) {
+            if (!list.empty()) list += ",";
+            list += (char) ('0' + ph);
+          };
+          auto report = [&](Group &g, const char *what, const char *then) {
+            std::string label;
+            if (!g.missing.empty()) {
+              label = std::string(what) + (g.missing.size() > 1 ? " phases " : " phase ") + g.missing;
+              bad(true, label.c_str(), then);
+            }
+            if (!g.corrupt.empty()) {
+              label = std::string(what) + (g.corrupt.size() > 1 ? " phases " : " phase ") + g.corrupt;
+              bad(false, label.c_str(), then);
+            }
+          };
+
+          // The phase table, row by row.
+          {
+            Group g;
+            auto &t = id(light_table);
+            for (int ph = 0; ph < 5; ph++) {
+              const int b = ph * 7;
+              bool sentinel = true;
+              for (int f = 0; f < 7; f++) sentinel = sentinel && t[b + f] == -1;
+              bool ok = in(t[b], 0, 1439) && in(t[b + 1], 0, 1439) && in(t[b + 2], 0, 150);
+              for (int f = 3; f < 7; f++) ok = ok && in(t[b + f], 0, 100);
+              n_checked++;
+              if (ok) continue;
+              if (sentinel) { mark(g.missing, ph); n_lost++; } else mark(g.corrupt, ph);
+              id(light_seed_table).execute(ph);
+            }
+            report(g, "table", "phase defaults written");
+          }
+
+          // Follow the sun. Missing or garbage -> follows (every lit phase).
+          {
+            Group g;
+            for (int ph = 0; ph < 5; ph++) {
+              int &v = id(light_sun_follow)[ph];
+              n_checked++;
+              if (ph == 0) {                   // the Off phase never follows
+                if (v == -1) n_lost++;
+                v = 0;
+                continue;
+              }
+              if (v == 0 || v == 1) continue;
+              if (v == -1) { mark(g.missing, ph); n_lost++; } else mark(g.corrupt, ph);
+              v = 1;
+            }
+            report(g, "follow-sun", "follows the sun (the default)");
+          }
+
+          // Daily-light cap. Missing or garbage -> 0, the natural day.
+          {
+            Group g;
+            for (int ph = 0; ph < 5; ph++) {
+              int &v = id(light_sun_plateau)[ph];
+              n_checked++;
+              if (in(v, 0, 12 * 60)) continue;
+              if (v == -1) { mark(g.missing, ph); n_lost++; } else mark(g.corrupt, ph);
+              v = 0;
+            }
+            report(g, "cap", "cap off (natural day)");
+          }
+
+          // Board-wide shape settings.
+          auto check_int = [&](int &v, int lo, int hi, int def, const char *what) {
+            n_checked++;
+            if (in(v, lo, hi)) return;
+            if (v == -1) n_lost++;
+            bad(v == -1, what, "default kept");
+            v = def;
+          };
+          n_checked++;
+          {
+            float &e = id(light_day_expo);
+            if (std::isnan(e) || e < 0.3f || e > 1.0f) {
+              if (std::isnan(e)) n_lost++;
+              bad(std::isnan(e), "daylight exponent", "default 0.5");
+              e = 0.5f;
+            }
+          }
+          check_int(id(light_dawn_warmth), 0, 100, 100, "dawn warmth");
+          check_int(id(light_curve_edge), 15, 60, 30, "curve edge step");
+          check_int(id(light_curve_step), 30, 120, 60, "curve step");
+          check_int(id(light_bright_pct), 50, 90, 65, "bright threshold");
+
+          // Learned state, not settings: a loss costs a relearn, not the day.
+          if (std::isnan(id(light_learned_lux)) || id(light_learned_lux) < 0.0f) {
+            if (first_check) ESP_LOGI("light", "settings: learned lux: none stored yet; relearning");
+            else ESP_LOGW("light", "settings: learned lux did not restore; relearning");
+            id(light_learned_lux) = 0.0f;
+          }
+          if (!in(id(light_curve_off_day), -1, 366)) id(light_curve_off_day) = -1;
+          if (!in(id(light_shape_last), -1, 1)) id(light_shape_last) = -1;
+
+          // The phase select restores itself; its backup copy says what it
+          // should have restored to.
+          {
+            auto idx = id(light_phase).active_index();
+            const int sel = idx.has_value() ? (int) *idx : -1;
+            const int saved = id(light_phase_saved);
+            if (in(saved, 0, 4) && sel != saved) {
+              ESP_LOGW("light", "settings: Light Phase came up as %d but %d was stored; putting %d back",
+                       sel, saved, saved);
+              add(fixed, "phase (put back from its backup)");
+              auto call = id(light_phase).make_call();
+              call.set_index(saved);
+              call.perform();
+            } else if (!in(saved, 0, 4) && sel >= 0) {
+              id(light_phase_saved) = sel;
+            }
+          }
+
+          std::string st;
+          if (n_lost == n_checked) {
+            st = "defaults (nothing stored: first boot or storage erased)";
+          } else if (lost.empty() && fixed.empty()) {
+            st = "ok";
+            if (!never.empty()) st += " (first check; none stored yet, defaults kept: " + never + ")";
+          } else {
+            st = "defaults for ";
+            st += lost.empty() ? fixed : lost;
+            st += lost.empty() ? " (out of range)" : " (did not restore)";
+            if (!lost.empty() && !fixed.empty()) st += "; corrected " + fixed + " (out of range)";
+          }
+          if (st.size() > 250) st = st.substr(0, 247) + "...";
+          id(light_restore_status) = st;
+          id(light_store_marker) = MARKER;
+          if (lost.empty() && fixed.empty() && n_lost < n_checked)
+            ESP_LOGI("light", "settings restored: %s; follows sun (phases 1-4): %d %d %d %d", st.c_str(),
+                     id(light_sun_follow)[1], id(light_sun_follow)[2], id(light_sun_follow)[3], id(light_sun_follow)[4]);
+          else
+            ESP_LOGW("light", "SETTINGS NOT RESTORED: %s; follows sun (phases 1-4): %d %d %d %d", st.c_str(),
+                     id(light_sun_follow)[1], id(light_sun_follow)[2], id(light_sun_follow)[3], id(light_sun_follow)[4]);
 
   # Resolve the selected phase from the stored table into lp_*. "Off
   # (cycling)" is manual mode at 0 whatever its stored values say: the lamp
@@ -888,23 +1077,59 @@ script:
 switch:
   # The selected phase follows the sun (on) or runs the table's fixed On/Off
   # Time and Ramp (off). Not available on "Off (cycling)".
+  #
+  # restore_mode: DISABLED is load-bearing. A template switch's default is
+  # ALWAYS_OFF, and ESPHome's TemplateSwitch::setup() acts on it: it calls
+  # turn_off(), which RUNS turn_off_action -- every boot. The phase select
+  # (and the globals) are already set up by then, so that wrote 0 into
+  # light_sun_follow for the active phase: the 75 came up on fixed
+  # 09:00-16:00 times after the 2026-10-27 17:11 reflash. (Same trap as
+  # "Adaptive Learning" in packages/control.yaml.) The state lives in
+  # light_sun_follow, so the switch has nothing to restore: DISABLED, and
+  # the actions also refuse to run before on_boot has finished, so no
+  # future change to switch setup can write the flag either.
   - platform: template
     name: "Light Follows Sun"
     id: light_ctl_follow
     icon: mdi:sun-clock
+    restore_mode: DISABLED
     lambda: |-
       auto i = id(light_phase).active_index();
-      return i.has_value() && *i > 0 && *i < 5 && id(light_sun_follow)[*i] != 0;
+      return i.has_value() && *i > 0 && *i < 5 && id(light_sun_follow)[*i] == 1;
     turn_on_action:
-      - lambda: |-
-          auto i = id(light_phase).active_index();
-          if (i.has_value() && *i > 0 && *i < 5) id(light_sun_follow)[*i] = 1;
-      - script.execute: light_changed
+      - if:
+          condition:
+            lambda: return id(light_boot_done);
+          then:
+            - lambda: |-
+                auto i = id(light_phase).active_index();
+                if (i.has_value() && *i > 0 && *i < 5) {
+                  id(light_sun_follow)[*i] = 1;
+                  ESP_LOGI("light", "phase %d now follows the sun", (int) *i);
+                }
+            - script.execute: light_changed
+          else:
+            - logger.log:
+                level: WARN
+                tag: light
+                format: "Light Follows Sun: turn on during boot ignored (the stored setting stands)"
     turn_off_action:
-      - lambda: |-
-          auto i = id(light_phase).active_index();
-          if (i.has_value() && *i > 0 && *i < 5) id(light_sun_follow)[*i] = 0;
-      - script.execute: light_changed
+      - if:
+          condition:
+            lambda: return id(light_boot_done);
+          then:
+            - lambda: |-
+                auto i = id(light_phase).active_index();
+                if (i.has_value() && *i > 0 && *i < 5) {
+                  id(light_sun_follow)[*i] = 0;
+                  ESP_LOGW("light", "phase %d no longer follows the sun: fixed On/Off Time from now on", (int) *i);
+                }
+            - script.execute: light_changed
+          else:
+            - logger.log:
+                level: WARN
+                tag: light
+                format: "Light Follows Sun: turn off during boot ignored (the stored setting stands)"
 
   # Enables/disables the client. On = hold the link. Only light_release
   # turns it off, and only for a bounded time.
@@ -1659,6 +1884,18 @@ sensor:
       return NAN;
 
 text_sensor:
+  # What the boot check of the stored light settings found
+  # (light_validate_settings): "ok", or which settings came back as their
+  # defaults and why. Anything but "ok" after a flash means a setting was
+  # lost and replaced -- look at it before the evening.
+  - platform: template
+    id: light_restore_text
+    name: "Light Settings Restored"
+    icon: mdi:content-save-check
+    entity_category: diagnostic
+    update_interval: never
+    lambda: return id(light_restore_status);
+
   # Why the lamp link last ended: the radio's own disconnect reason, as the
   # board's GATT layer saw it (packages/ble_link_v3.yaml's ble_link_guard),
   # or that the disconnect was never reported and the watchdog found it.

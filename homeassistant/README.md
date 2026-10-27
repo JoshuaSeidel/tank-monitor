@@ -113,6 +113,7 @@ other section there. This is *not* on the `aquarium-tank` dashboard that
 | `number…light_curve_step` / `…light_curve_edge_step` | Point spacing through midday (60 min) and within 2 h of dawn/dusk (30 min); ≤ 24 points |
 | `sensor…light_bright_start` / `…light_bright_end` | The bright window (HH:MM), `--:--` on the off phase. The CO2 schedule keys off these |
 | `sensor…light_expected_level` | Brightness the lamp should be at now, % of the phase's full values |
+| `sensor…light_settings_restored` | Boot check of the stored light settings: `ok`, or which ones came back as their defaults and why. Anything but `ok` after a flash = a setting was lost and replaced |
 | `sensor…light_expected_lux` | Learned lux × expected level: what lamp lux should read now |
 | `sensor…light_daily_light` | Full-equivalent hours of today's natural day |
 | `sensor…light_curve_peak` | Today's peak, % of full (under 100 only when the cap bites) |
@@ -172,9 +173,10 @@ not measured) and every channel clamped at its full value. 0 % turns it off.
 look, strongest right around sunrise and sunset.)
 
 **Total light is natural.** No target: the day gives what the sun gives.
-Light Full Brightness Hours is now an optional cap (0 = off, the default; the
-first boot of this firmware sets every phase to 0 and turns Follows Sun on for
-any phase that had a value). Natural totals at g 0.5, Phase-full equivalent:
+Light Full Brightness Hours is now an optional cap (0 = off, the default).
+A lit phase follows the sun unless Follows Sun is turned off by hand; a
+setting that fails to restore after a flash comes back as follows-sun /
+uncapped and is named in Light Settings Restored. Natural totals at g 0.5, Phase-full equivalent:
 
 | Day | Civil dawn – dusk | Lit | Noon sun | Daily light | Bright ≥65 % | CO2 (lead 90, stop 90) |
 |---|---|---|---|---|---|---|
