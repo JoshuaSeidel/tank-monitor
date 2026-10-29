@@ -3931,6 +3931,11 @@ lvgl:
                 text: --
                 text_font: f18
                 text_color: 0xF8FAFC
+            - label:
+                id: w_t75_d_co2_n
+                text: ''
+                text_font: f12
+                text_color: 0x64748B
         - obj:
             x: 214
             y: 88
@@ -3960,27 +3965,27 @@ lvgl:
                 text_font: f12
                 text_color: 0x10B981
         - label:
-            x: 412
+            x: 430
             y: 16
             text: 󰕥
             text_font: icon18
             text_color: 0x10B981
         - label:
-            x: 436
+            x: 454
             y: 18
             text: SAFETY & SYSTEM
             text_font: f12
             text_color: 0xCBD5E1
         - label:
             id: w_t75_d_safe2
-            x: 412
+            x: 430
             y: 52
             text: --
             text_font: f18
             text_color: 0xF8FAFC
         - label:
             id: w_t75_d_ctrl
-            x: 412
+            x: 430
             y: 92
             text: ''
             text_font: f11
@@ -5338,6 +5343,11 @@ lvgl:
                 text: --
                 text_font: f18
                 text_color: 0xF8FAFC
+            - label:
+                id: w_t16_d_co2_n
+                text: ''
+                text_font: f12
+                text_color: 0x64748B
         - obj:
             x: 214
             y: 88
@@ -5367,27 +5377,27 @@ lvgl:
                 text_font: f12
                 text_color: 0x10B981
         - label:
-            x: 412
+            x: 430
             y: 16
             text: 󰕥
             text_font: icon18
             text_color: 0x10B981
         - label:
-            x: 436
+            x: 454
             y: 18
             text: SAFETY & SYSTEM
             text_font: f12
             text_color: 0xCBD5E1
         - label:
             id: w_t16_d_safe2
-            x: 412
+            x: 430
             y: 52
             text: --
             text_font: f18
             text_color: 0xF8FAFC
         - label:
             id: w_t16_d_ctrl
-            x: 412
+            x: 430
             y: 92
             text: ''
             text_font: f11
@@ -6971,7 +6981,11 @@ interval:
                 txt(id(w_t75_d_sun), "Civil Dawn (%s) – Dusk (%s)", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
               txt(id(w_t75_d_co2), "%s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
               col(id(w_t75_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
-              txt(id(w_t75_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+              // Schedule notes from Home Assistant: "(Schedule off)", "(7:31–3:10)".
+              const std::string &cn = id(ha_co2_note_t75), &bn = id(ha_bubbler_note_t75);
+              if (cn.empty()) txt(id(w_t75_d_co2_n), "%s", ""); else txt(id(w_t75_d_co2_n), "(%s)", cn.c_str());
+              if (bn.empty()) txt(id(w_t75_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+              else txt(id(w_t75_d_bub), "Bubbler: %s (%s)", bub < 0 ? "--" : (bub ? "ON" : "OFF"), bn.c_str());
               col(id(w_t75_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
               lv_label_set_text(id(w_t75_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
               col(id(w_t75_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);
@@ -7284,7 +7298,11 @@ interval:
                 txt(id(w_t16_d_sun), "Civil Dawn (%s) – Dusk (%s)", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
               txt(id(w_t16_d_co2), "%s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
               col(id(w_t16_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
-              txt(id(w_t16_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+              // Schedule notes from Home Assistant: "(Schedule off)", "(7:31–3:10)".
+              const std::string &cn = id(ha_co2_note_t16), &bn = id(ha_bubbler_note_t16);
+              if (cn.empty()) txt(id(w_t16_d_co2_n), "%s", ""); else txt(id(w_t16_d_co2_n), "(%s)", cn.c_str());
+              if (bn.empty()) txt(id(w_t16_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+              else txt(id(w_t16_d_bub), "Bubbler: %s (%s)", bub < 0 ? "--" : (bub ? "ON" : "OFF"), bn.c_str());
               col(id(w_t16_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
               lv_label_set_text(id(w_t16_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
               col(id(w_t16_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);

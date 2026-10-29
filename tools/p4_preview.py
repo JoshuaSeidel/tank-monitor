@@ -106,6 +106,8 @@ id(wc_batt_low) = false; id(wc_volume) = 62; id(wc_online) = true;
 id(wc_last_start) = epoch - 5 * 86400;
 id(ha_co2_t75) = 0; id(ha_bubbler_t75) = 1; id(ha_co2_t16) = 1; id(ha_bubbler_t16) = 1;
 id(ha_livestock_days) = 142;
+id(ha_co2_note_t75) = "Schedule off"; id(ha_bubbler_note_t75) = "24/7";
+id(ha_co2_note_t16) = "7:30–12:00"; id(ha_bubbler_note_t16) = "Off 7:30–5:00";
 id(redraw_charts) = true;
 if (s == "home" || s == "t75" || s == "t16" || s == "wc") {
   id(ro_flowing) = s != "home";

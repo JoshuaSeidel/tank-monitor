@@ -10,7 +10,9 @@
 #   tank-monitor-s3/sensor/water_ph/state  the nano's pH. Its BLE frame is
 #                                          v2 and does not carry pH.
 #   tank-monitor-panel/ha/*                retained states Home Assistant
-#                                          publishes for this panel
+#                                          publishes for this panel: CO2,
+#                                          bubbler, their schedule notes,
+#                                          livestock days
 #                                          (automation "Aquarium -- publish
 #                                          panel state to MQTT")
 #   tank-monitor-panel/alert/<tag>         one retained message per active
@@ -127,6 +129,20 @@ globals:
     type: int
     restore_value: false
     initial_value: '-1'
+  # Schedule notes, composed in Home Assistant: the CO2 window ("7:31–3:10")
+  # or "Schedule off"; the bubbler's pause ("Off 7:31–6:10") or "24/7".
+  - id: ha_co2_note_t75
+    type: std::string
+    restore_value: false
+  - id: ha_bubbler_note_t75
+    type: std::string
+    restore_value: false
+  - id: ha_co2_note_t16
+    type: std::string
+    restore_value: false
+  - id: ha_bubbler_note_t16
+    type: std::string
+    restore_value: false
   - id: ha_livestock_days
     type: float
     restore_value: false
@@ -242,6 +258,14 @@ mqtt:
       then: [lambda: 'id(ha_co2_t16) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
     - topic: tank-monitor-panel/ha/bubbler_t16
       then: [lambda: 'id(ha_bubbler_t16) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/ha/co2_note_t75
+      then: [lambda: 'id(ha_co2_note_t75) = x;']
+    - topic: tank-monitor-panel/ha/bubbler_note_t75
+      then: [lambda: 'id(ha_bubbler_note_t75) = x;']
+    - topic: tank-monitor-panel/ha/co2_note_t16
+      then: [lambda: 'id(ha_co2_note_t16) = x;']
+    - topic: tank-monitor-panel/ha/bubbler_note_t16
+      then: [lambda: 'id(ha_bubbler_note_t16) = x;']
     - topic: tank-monitor-panel/alert/+
       then:
         - lambda: |-

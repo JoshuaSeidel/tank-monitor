@@ -561,14 +561,15 @@ def detail_page(T):
             icon(None, "co2", 18, "cyan", x=214, y=16),
             label(None, "CO2 & AERATION", "f12", "text2", x=238, y=18),
             row(None, 214, 48, h=28, gap=6, kids=[
-                label(None, "CO2:", "f18", "label"), label(f"{w}_d_co2", "--", "f18")]),
+                label(None, "CO2:", "f18", "label"), label(f"{w}_d_co2", "--", "f18"),
+                label(f"{w}_d_co2_n", "", "f12", "muted")]),
             row(None, 214, 88, h=24, gap=6, kids=[
                 icon(f"{w}_d_bub_i", "check", 18, "green"),
                 label(f"{w}_d_bub", "", "f12", "green")]),
-            icon(None, "shield", 18, "green", x=412, y=16),
-            label(None, "SAFETY & SYSTEM", "f12", "text2", x=436, y=18),
-            label(f"{w}_d_safe2", "--", "f18", x=412, y=52),
-            label(f"{w}_d_ctrl", "", "f11", "muted", x=412, y=92),
+            icon(None, "shield", 18, "green", x=430, y=16),
+            label(None, "SAFETY & SYSTEM", "f12", "text2", x=454, y=18),
+            label(f"{w}_d_safe2", "--", "f18", x=430, y=52),
+            label(f"{w}_d_ctrl", "", "f11", "muted", x=430, y=92),
         ]),
     ]
     return {"id": f"w_page_{t}", "bg_color": COL["canvas"], "scrollable": False,
@@ -1259,7 +1260,11 @@ UPDATE_TANK = r"""
       txt(id(w_@T@_d_sun), "Civil Dawn (%s) – Dusk (%s)", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
     txt(id(w_@T@_d_co2), "%s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
     col(id(w_@T@_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
-    txt(id(w_@T@_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+    // Schedule notes from Home Assistant: "(Schedule off)", "(7:31–3:10)".
+    const std::string &cn = id(ha_co2_note_@T@), &bn = id(ha_bubbler_note_@T@);
+    if (cn.empty()) txt(id(w_@T@_d_co2_n), "%s", ""); else txt(id(w_@T@_d_co2_n), "(%s)", cn.c_str());
+    if (bn.empty()) txt(id(w_@T@_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+    else txt(id(w_@T@_d_bub), "Bubbler: %s (%s)", bub < 0 ? "--" : (bub ? "ON" : "OFF"), bn.c_str());
     col(id(w_@T@_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
     lv_label_set_text(id(w_@T@_d_bub_i), bub == 1 ? "@ICON_CHECK@" : "@ICON_MINUSC@");
     col(id(w_@T@_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);
