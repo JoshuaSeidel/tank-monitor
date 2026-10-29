@@ -80,8 +80,8 @@ id(t75_stamp) = epoch;
 // ---- nano
 id(t16_temp) = 74.4f; id(t16_sp) = 74.5f; id(t16_swing) = 0.5f; id(t16_drift) = -0.01f;
 id(t16_conf) = 98; id(t16_heat) = 0; id(t16_heat_on) = false; id(t16_fan) = 0;
-id(t16_fan_on) = false; id(t16_fault) = false; id(t16_learn) = true; id(t16_tds) = 262;
-id(t16_tds_mean) = 260; id(t16_lux) = 280; id(t16_ph) = 7.21f; id(t16_ph_ms) = now;
+id(t16_fan_on) = false; id(t16_fault) = false; id(t16_learn) = true; id(t16_tds) = 341;
+id(t16_tds_mean) = 341; id(t16_lux) = 280; id(t16_ph) = 7.12f; id(t16_ph_ms) = now;
 id(t16_stamp_ms) = now; id(t16_stamp) = epoch;
 // ---- 24 h history: gentle daily curves
 for (int i = 0; i < 96; i++) {
@@ -92,8 +92,8 @@ for (int i = 0; i < 96; i++) {
   id(t75_hist_ph)[i] = 7.30f - 0.12f * d;
   id(t16_hist_temp)[i] = 74.5f + 0.2f * sinf(i / 12.0f);
   id(t16_hist_temp_b)[i] = NAN;
-  id(t16_hist_tds)[i] = 250 + i * 0.12f;
-  id(t16_hist_ph)[i] = 7.15f + 0.08f * d;
+  id(t16_hist_tds)[i] = 339 + i * 0.03f + (i % 5) * 0.4f;
+  id(t16_hist_ph)[i] = 7.12f + 0.09f * d;
 }
 id(t75_hist_n) = 96; id(t16_hist_n) = 96;
 // ---- feeds
@@ -124,7 +124,7 @@ if (s == "stale") {
 if (s == "night") { id(night_on) = true; id(t75_lux) = 0; id(t16_lux) = 0; }
 """
 
-PAGE_FOR = {"t75": "page_t75", "t16": "page_t16", "wc": "page_wc"}
+PAGE_FOR = {"t75": "w_page_t75", "t16": "w_page_t16", "wc": "w_page_wc"}
 
 
 

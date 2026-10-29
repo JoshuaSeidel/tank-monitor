@@ -8,17 +8,24 @@ layout and one detail-screen layout; writing those twice by hand is how one
 tank ends up with a fix the other never got.
 
 The design is design/p4-panel/ (Gemini 3.8, approved 2026-10-29, revised by
-REVISION-1.md): DESIGN.md has every colour, size and radius used below.
+REVISION-1.md). Positions below are measured off the mockup screenshots in
+design/p4-panel/shots/; DESIGN.md has the colours, sizes and radii.
+tools/p4_preview.py renders this UI on the desktop for comparison.
 
 How the UI works
-  - Widgets are built once, here, with neutral styles.
-  - ONE interval lambda (every second) writes every label, bar, colour and
-    flag from the globals in panel_p4_tank.yaml / panel_p4_feeds.yaml. State
-    styling (stale, critical, night) is decided there, from data, every
-    tick, so no widget can be left in a stale style by a missed event.
+  - Widgets are built once, here, with neutral styles. Every widget id
+    starts with w_ so it can never collide with a data global.
+  - ONE interval lambda (every second) writes every label, bar, colour,
+    position and flag from the globals in panel_p4_tank.yaml and
+    panel_p4_feeds.yaml. State styling (stale, critical, night, the
+    compact layout under the alert banner) is decided there, from data,
+    every tick, so no widget can be left in a stale style by a missed event.
   - Values that are not known render as "--", never as a plausible number.
+    Copy the mockups invented (light %, "CO2 off (Nov)") is left out: the
+    panel only says what it has data for.
 """
 
+import re
 from pathlib import Path
 
 import yaml
@@ -49,7 +56,7 @@ C = {
     "amber": 0xFBBF24, "amber_bg": 0x291B07, "amber_border": 0xD97706,
     "red": 0xEF4444, "red_bg": 0x2D0E12, "red_border": 0xDC2626,
     "stale_text": 0x64748B, "stale_border": 0x475569, "stale_bg": 0x0E141B,
-    "track": 0x0F172A,
+    "track": 0x0F172A, "violet": 0x818CF8,
 }
 
 
@@ -65,33 +72,46 @@ COL = {k: Hex(v) for k, v in C.items()}
 ICON = {
     "fish": "\U000F023A", "fire": "\U000F0238", "fan": "\U000F0210",
     "bt": "\U000F00AF", "bt_off": "\U000F00B2", "wifi": "\U000F05A9",
-    "wifi_off": "\U000F05AA", "alert": "\U000F0026", "octagon": "\U000F0029",
-    "check": "\U000F05E0", "chevron": "\U000F0142", "back": "\U000F004D",
     "minus": "\U000F0374", "plus": "\U000F0415", "brain": "\U000F09D1",
     "sun": "\U000F0599", "night": "\U000F0594", "co2": "\U000F07E4",
-    "bubbles": "\U000F05E3", "swap": "\U000F0BCE", "battery": "\U000F0079",
-    "battery_alert": "\U000F0083", "filter": "\U000F0232", "water": "\U000F058C",
-    "ha": "\U000F07D0", "heart": "\U000F05F6", "clock": "\U000F0150",
-    "restart": "\U000F0709", "thermo": "\U000F050F", "water_minus": "\U000F1506",
-    "water_plus": "\U000F150A",
+    "bubbles": "\U000F05E3", "swap": "\U000F04E1", "battery": "\U000F12A3",
+    "filter": "\U000F0232", "water": "\U000F058C", "ha": "\U000F07D0",
+    "shield": "\U000F0565", "check": "\U000F05E1", "minus_circle": "\U000F0377",
+    "refresh": "\U000F0450", "play": "\U000F040D", "plus_circle": "\U000F0419",
+    "radio": "\U000F043E",
 }
 
 TANKS = [
     # t: id prefix from the wrapper's vars; dual: second probe + gradient.
-    # TDS/pH bands are the owner's targets (memory, 2026-09/10):
-    #   75 gal: TDS 200-225, alert 260, never >300; pH 7.0-7.5.
-    #   nano:   TDS under 300 (no lower bound set); pH >= 7.0 (emerald
-    #           dwarf danios are the binding constraint; no upper bound set).
-    # NaN = "no bound", drawn open-ended to the scale edge.
-    dict(t="t75", name="75 GALLON", title="75 Gallon", tag="75 GAL", dual=True,
-         water="62 gal", ph_src="Controller probe (BLE)",
-         tds_lo=200, tds_hi=225, tds_alert=260, tds_min=150, tds_max=320,
-         ph_lo=7.0, ph_hi=7.5, ph_min=6.4, ph_max=8.0, card_x=14),
-    dict(t="t16", name="NANO", title="Nano", tag="SPEC 16", dual=False,
-         water="14 gal", ph_src="Controller probe (Wi-Fi)",
-         tds_lo="NAN", tds_hi=300, tds_alert=300, tds_min=150, tds_max=420,
-         ph_lo=7.0, ph_hi="NAN", ph_min=6.4, ph_max=8.0, card_x=518),
+    # 75 gal targets are the owner's (memory, 2026-09/10): TDS 200-225,
+    # alert 260, never >300; pH 7.0-7.5.
+    # Nano targets come from its own history (HA statistics, 2026-09-05 to
+    # 2026-10-29, daily 1 h TDS means): after the cycle it has lived at
+    # 336-391 ppm, ~336-378 just after a water change, drifting up 1-2 ppm a
+    # day to ~380-390 before the next one; nothing since the cycle has
+    # reached 400 (the early-September cycle peaked at 431). So: target
+    # 330-390, above 390 = a change is due, alert at 410. pH from the
+    # calibrated probe (2026-10-24..29): 6.97-7.32; 7.0 is the emerald dwarf
+    # danios' floor, 7.4 sits just above anything the probe has seen.
+    dict(t="t75", name="75 GALLON", tag="COMMUNITY", dual=True,
+         water="~62 GAL", ph_title="WATER PH LEVEL", ph_tile="WATER PH",
+         tds_lo=200, tds_hi=225, tds_alert=260, tds_max=300, tds_scale=(150, 320),
+         ph_lo=7.0, ph_hi=7.5, ph_scale=(6.8, 7.8), card_x=14),
+    dict(t="t16", name="FLUVAL SPEC 16", tag="16 GAL • ~14 GAL WATER", dual=False,
+         water="~14 GAL (16 GAL TANK)", ph_title="WATER PH (WI-FI)", ph_tile="PH (WI-FI)",
+         tds_lo=330, tds_hi=390, tds_alert=410, tds_max="NAN", tds_scale=(280, 450),
+         ph_lo=7.0, ph_hi=7.4, ph_scale=(6.8, 7.8), card_x=518),
 ]
+
+# Home-card layouts: block positions relative to the card. NORMAL is the
+# mockup's home screen; COMPACT is screen 5, where the alert banner pushes
+# the cards down.
+LAYOUT = {
+    "normal": dict(card=(66, 406), head=12, lost=10, hero=(64, 92), act=(178, 52),
+                   met=(248, 84), sep=350, foot=358, details=355, reconn=370),
+    "compact": dict(card=(122, 356), head=8, lost=8, hero=(48, 80), act=(138, 52),
+                    met=(200, 80), sep=292, foot=300, details=304, reconn=314),
+}
 
 # ------------------------------------------------------------ widget helpers
 
@@ -108,7 +128,8 @@ def _base(i, x=None, y=None, w=None, h=None, align=None, **st):
 
 
 def box(i, x, y, w, h, bg="card1", border="border", radius=12, bw=1, kids=(), align=None, **st):
-    d = _base(i, x, y, w, h, align, bg_color=COL[bg], bg_opa="COVER",
+    st.setdefault("bg_opa", "COVER")
+    d = _base(i, x, y, w, h, align, bg_color=COL[bg],
               border_color=COL[border], border_width=bw, radius=radius,
               pad_all=0, scrollable=False, scrollbar_mode="OFF", **st)
     if kids:
@@ -121,15 +142,36 @@ def label(i, text, font, color="text", x=None, y=None, w=None, align=None, **st)
     return {"label": d}
 
 
-def icon(i, name, size=18, color="cyan", x=None, y=None, align=None):
-    return label(i, ICON[name], f"icon{size}", color, x, y, align=align)
+def icon(i, name, size=18, color="cyan", x=None, y=None, align=None, **st):
+    return label(i, ICON[name], f"icon{size}", color, x, y, align=align, **st)
 
 
-def pill(i, text, color="green", bg="green_bg", border="green_border", font="f11",
-         x=None, y=None, align=None, h=24):
-    return box(i, x, y, "SIZE_CONTENT", h, bg=bg, border=border, radius=20,
-               align=align, pad_left=10, pad_right=10,
-               kids=[label(f"{i}_l", text, font, color, align="CENTER")])
+def row(i, x, y, kids, gap=8, align=None, h=28, w="SIZE_CONTENT", **st):
+    d = _base(i, x, y, w, h, align, bg_opa="TRANSP", border_width=0, pad_all=0,
+              scrollable=False, scrollbar_mode="OFF",
+              layout={"type": "FLEX", "flex_flow": "ROW", "pad_column": gap,
+                      "flex_align_main": "START", "flex_align_cross": "CENTER",
+                      "flex_align_track": "CENTER"},
+              widgets=list(kids), **st)
+    return {"obj": d}
+
+
+def pill(i, kids, bg="card2", border="border_act", h=24, x=None, y=None, align=None,
+         gap=6, pad=10, radius=20, **st):
+    """A rounded box that sizes itself around a row of children."""
+    d = _base(i, x, y, "SIZE_CONTENT", h, align, bg_color=COL[bg], bg_opa="COVER",
+              border_color=COL[border], border_width=1, radius=radius,
+              pad_left=pad, pad_right=pad, pad_top=0, pad_bottom=0,
+              scrollable=False, scrollbar_mode="OFF",
+              layout={"type": "FLEX", "flex_flow": "ROW", "pad_column": gap,
+                      "flex_align_main": "CENTER", "flex_align_cross": "CENTER",
+                      "flex_align_track": "CENTER"},
+              widgets=list(kids), **st)
+    return {"obj": d}
+
+
+def dot(i, color="cyan", size=8):
+    return box(i, None, None, size, size, bg=color, border=color, radius=size, bw=0)
 
 
 def button(i, x, y, w, h, kids, bg="btn", border="border_act", radius=8, align=None, **actions):
@@ -141,27 +183,17 @@ def button(i, x, y, w, h, kids, bg="btn", border="border_act", radius=8, align=N
     return {"button": d}
 
 
-def row(i, x, y, kids, gap=10, align=None, h=40, w="SIZE_CONTENT"):
-    d = _base(i, x, y, w, h, align, bg_opa="TRANSP", border_width=0, pad_all=0,
-              scrollable=False, scrollbar_mode="OFF",
-              layout={"type": "FLEX", "flex_flow": "ROW", "pad_column": gap,
-                      "flex_align_main": "START", "flex_align_cross": "CENTER",
-                      "flex_align_track": "CENTER"},
-              widgets=list(kids))
-    return {"obj": d}
-
-
 def track(i, x, y, w):
     """Target-range bar: track, the target band, and a value marker."""
     return box(i, x, y, w, 6, bg="track", border="track", radius=3, bw=0, kids=[
         box(f"{i}_band", 0, 0, 10, 6, bg="band", border="green_border", radius=3),
-        box(f"{i}_mark", 0, -2, 4, 10, bg="green", border="green", radius=2, bw=0),
+        box(f"{i}_mark", 0, -2, 6, 10, bg="green", border="green", radius=3, bw=0),
     ])
 
 
-def bar(i, x, y, w, color, align=None):
-    d = _base(i, x, y, w, 8, align, min_value=0, max_value=100, value=0,
-              bg_color=COL["track"], radius=4,
+def bar(i, x, y, w, color, align=None, h=8):
+    d = _base(i, x, y, w, h, align, min_value=0, max_value=100, value=0,
+              bg_color=COL["track"], radius=4, border_width=1, border_color=COL["border2"],
               indicator={"bg_color": COL[color], "radius": 4})
     return {"bar": d}
 
@@ -169,136 +201,200 @@ def bar(i, x, y, w, color, align=None):
 def show_page(page):
     return [{"lvgl.page.show": {"id": page, "animation": "NONE"}}]
 
+
+def back_button():
+    return button(None, 16, 10, 92, 44, on_click=show_page("w_page_home"), kids=[
+        row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+            label(None, "←", "f15", "text2"), label(None, "Home", "f13")])])
+
 # ----------------------------------------------------------------- top bar
 
 
 def top_bar():
     return [
-        box("logo", 16, 12, 32, 32, bg="cyan_bg", border="cyan_deep", radius=8,
+        box("w_logo", 18, 16, 32, 32, bg="cyan_bg", border="cyan_deep", radius=8,
             kids=[icon(None, "fish", 18, "cyan", align="CENTER")]),
-        label("brand", "TANK MONITOR", "f15", x=60, y=19),
-        pill("status_pill", "ALL SYSTEMS NORMAL", font="f13", align="TOP_MID", y=12, h=32),
-        row("top_right", -12, 8, align="TOP_RIGHT", h=40, kids=[
-            pill("mqtt_pill", "MQTT", "text2", "card1", "border", font="f12", h=30),
-            pill("ble_pill", "BLE 2/2", "text2", "card1", "border", font="f12", h=30),
-            label("clock_lbl", "--:--", "f18"),
-            label("date", "", "f12", "label"),
+        label("w_brand", "TANK MONITOR", "f15", x=60, y=23),
+        pill("w_status", [dot("w_status_dot", "green"), label("w_status_l", "", "f13", "green")],
+             bg="green_bg", border="green_border", h=30, x=262, y=17, pad=14),
+        row("w_top_right", -16, 16, align="TOP_RIGHT", h=32, gap=12, kids=[
+            pill("w_mqtt_pill", [icon("w_mqtt_i", "wifi", 18, "label"),
+                                 label("w_mqtt_l", "MQTT", "f12", "text2")],
+                 bg="card1", border="border_act", h=26, radius=6, pad=8),
+            pill("w_ble_pill", [icon("w_ble_i", "bt", 18, "label"),
+                                label("w_ble_l", "BLE", "f12", "text2")],
+                 bg="card1", border="border_act", h=26, radius=6, pad=8),
+            pill("w_wake", [icon(None, "sun", 18, "amber"),
+                            label(None, "WAKE SCREEN", "f13", "amber", text_decor="UNDERLINE")],
+                 bg="card1", border="border_act", h=34, radius=8, pad=14, hidden=True),
+            label("w_clock", "--:--", "f18"),
+            label("w_date", "", "f12", "label"),
         ]),
-        # Alert banner: covers the brand and status pill while any alert is
-        # active. Hidden until the update lambda finds one.
-        box("alert_banner", 8, 4, 820, 48, bg="red_bg", border="red_border", radius=10,
-            hidden=True, kids=[
-                icon("alert_icon", "octagon", 24, "red", x=14, align="LEFT_MID"),
-                label("alert_title", "", "f15", x=50, y=6, w=560, long_mode="DOT"),
-                label("alert_msg", "", "f12", "text2", x=50, y=26, w=560, long_mode="DOT"),
-                button("alert_btn", -8, 0, 180, 36, align="RIGHT_MID", bg="red_border",
-                       border="red", kids=[label("alert_btn_l", "OPEN", "f13", align="CENTER")],
-                       on_click=[{"if": {
-                           "condition": {"lambda": "return id(alert_target) == 1;"},
-                           "then": show_page("page_t75"),
-                           "else": [{"if": {
-                               "condition": {"lambda": "return id(alert_target) == 2;"},
-                               "then": show_page("page_t16")}}]}}]),
-            ]),
     ]
+
+
+def alert_banner():
+    # Screen 5: a full-width bar under the top bar; the cards move down
+    # (LAYOUT["compact"]) while it shows.
+    return box("w_alert", 14, 58, 996, 56, bg="red_bg", border="red_border", radius=10,
+               hidden=True, kids=[
+                   box("w_alert_disc", 16, 0, 32, 32, bg="red", border="red", radius=16,
+                       bw=0, align="LEFT_MID",
+                       kids=[label(None, "!", "f18", "text", align="CENTER")]),
+                   label("w_alert_title", "", "f15", x=62, y=9, w=740, long_mode="DOT"),
+                   label("w_alert_msg", "", "f12", "text2", x=62, y=31, w=740, long_mode="DOT"),
+                   button("w_alert_btn", -8, 0, 162, 42, align="RIGHT_MID", bg="red",
+                          border="red", kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                              label(None, "→", "f15"),
+                              label("w_alert_btn_l", "OPEN", "f13")])],
+                          on_click=[{"if": {
+                              "condition": {"lambda": "return id(alert_target) == 1;"},
+                              "then": show_page("w_page_t75"),
+                              "else": [{"if": {
+                                  "condition": {"lambda": "return id(alert_target) == 2;"},
+                                  "then": show_page("w_page_t16")}}]}}]),
+               ])
 
 # --------------------------------------------------------------- home cards
 
 
 def tank_card(T):
-    t, X = T["t"], T["card_x"]
-    hero_kids = [
-        label(f"{t}_temp", "--", "f58", x=14, y=16),
-        label(f"{t}_unit", "°F", "f26", "cyan", x=140, y=40),
-        box(f"{t}_sp_box", -12, 12, "SIZE_CONTENT", 26, bg="card1", border="border_act",
-            radius=8, align="TOP_RIGHT", pad_left=10, pad_right=10,
-            kids=[label(f"{t}_sp", "Setpoint --", "f13", "label", align="CENTER")]),
-        label(f"{t}_probes", "", "f12", "label", align="TOP_RIGHT", x=-12, y=48),
-        label(f"{t}_drift", "", "f12", "green", align="TOP_RIGHT", x=-12, y=68),
-    ]
-    act = lambda k, x, w, ic, cap, color: box(  # noqa: E731
-        f"{t}_{k}_tile", x, 156, w, 58, bg="card3", border="border", radius=8, kids=[
-            icon(f"{t}_{k}_icon", ic, 18, "muted", x=12, align="LEFT_MID"),
-            label(f"{t}_{k}_cap", cap, "f11", "label", x=42, y=10),
-            label(f"{t}_{k}_val", "--", "f15", x=42, y=28),
-            bar(f"{t}_{k}_bar", -12, 0, 48, color, align="RIGHT_MID"),
+    t, X, L = T["t"], T["card_x"], LAYOUT["normal"]
+    w = f"w_{t}"
+    hero = box(f"{w}_hero", 16, L["hero"][0], 460, L["hero"][1], bg="card2", border="border2",
+               radius=10, kids=[
+                   label(f"{w}_temp", "--", "f58", x=16, align="LEFT_MID", y=2),
+                   label(f"{w}_unit", "°F", "f26", "cyan", x=150, y=40),
+                   pill(f"{w}_sp", [label(f"{w}_sp_k", "Setpoint:", "f13", "text"),
+                                    label(f"{w}_sp_v", "--", "f13", "cyan"),
+                                    label(f"{w}_sp_s", "", "f12", "label")],
+                        bg="card1", border="border_act", h=26, radius=6, pad=10, gap=6,
+                        align="TOP_RIGHT", x=-14, y=10),
+                   row(f"{w}_probe_row", -14, 40, align="TOP_RIGHT", h=22, gap=8, kids=[
+                       label(f"{w}_probes", "", "f12", "label"),
+                       pill(f"{w}_grad", [label(f"{w}_grad_l", "", "f12", "cyan")],
+                            bg="card1", border="cyan_deep", h=20, radius=4, pad=6,
+                            hidden=not T["dual"]),
+                   ]),
+                   label(f"{w}_drift", "", "f12", "green", align="TOP_RIGHT", x=-14, y=64),
+               ])
+    act = lambda k, x, wd, ic, color: box(  # noqa: E731
+        f"{w}_{k}", x, L["act"][0], wd, L["act"][1], bg="card3", border="border", radius=8,
+        kids=[
+            icon(f"{w}_{k}_i", ic, 18, "muted", x=12, align="LEFT_MID"),
+            label(f"{w}_{k}_cap", "", "f11", "label", x=38, y=8),
+            label(f"{w}_{k}_val", "--", "f15", x=38, y=25),
+            bar(f"{w}_{k}_bar", -12, 13, 36, color, align="TOP_RIGHT"),
         ])
-    metric = lambda k, x, w, cap, unit: box(  # noqa: E731
-        f"{t}_{k}_tile", x, 226, w, 88, bg="card3", border="border", radius=8, kids=[
-            label(f"{t}_{k}_cap", cap, "f11", "label", x=12, y=10),
-            label(f"{t}_{k}_tgt", "", "f11", "label", align="TOP_RIGHT", x=-12, y=10),
-            label(f"{t}_{k}_val", "--", "f26", x=12, y=30),
-            label(f"{t}_{k}_unit", unit, "f13", "label", x=80, y=42),
-            label(f"{t}_{k}_side", "", "f12", "cyan", align="TOP_RIGHT", x=-12, y=40),
-            track(f"{t}_{k}_trk", 12, 70, w - 24),
+    metric = lambda k, x, wd, cap, unit: box(  # noqa: E731
+        f"{w}_{k}", x, L["met"][0], wd, L["met"][1], bg="card3", border="border", radius=8,
+        kids=[
+            label(f"{w}_{k}_cap", cap, "f11", "label", x=12, y=10),
+            label(f"{w}_{k}_tgt", "", "f11", "label", align="TOP_RIGHT", x=-12, y=10),
+            label(f"{w}_{k}_val", "--", "f26", x=12, y=27),
+            label(f"{w}_{k}_unit", unit, "f13", "label", x=80, y=40),
+            label(f"{w}_{k}_side", "", "f12", "cyan", align="TOP_RIGHT", x=-12, y=38),
+            track(f"{w}_{k}_trk", 12, 66, wd - 24),
         ])
-    return box(f"{t}_card", X, 66, 492, 406, bg="card1", border="border", radius=14, kids=[
-        row(f"{t}_head", 16, 8, h=36, gap=10, kids=[
-            label(f"{t}_title", T["name"], "f18"),
-            pill(f"{t}_tag", T["tag"], "label", "card2", "border_act", h=22),
-            box(f"{t}_stale", None, None, "SIZE_CONTENT", 22, bg="amber_bg",
-                border="amber_border", radius=20, pad_left=10, pad_right=10, hidden=True,
-                kids=[label(f"{t}_stale_l", "STALE", "f11", "amber", align="CENTER")]),
-        ]),
-        label(f"{t}_link", "BLE --", "f12", "cyan", align="TOP_RIGHT", x=-16, y=18),
-        box(f"{t}_hero", 16, 48, 460, 96, bg="card2", border="border2", radius=10, kids=hero_kids),
-        act("heat", 16, 222, "fire", "HEATER", "heat"),
-        act("fan", 250, 226, "fan", "COOLING FAN", "cyan"),
-        metric("tds", 16, 222, "TDS", "ppm"),
-        metric("ph", 250, 226, "PH", "pH"),
-        box(None, 16, 326, 460, 1, bg="border", border="border", radius=0, bw=0),
-        row(f"{t}_foot", 16, 340, h=40, gap=16, kids=[
-            label(f"{t}_f_lux", "-- lux", "f12", "label"),
-            label(f"{t}_f_co2", "CO2 --", "f12", "label"),
-            label(f"{t}_f_bub", "Bubbler --", "f12", "label"),
-            label(f"{t}_f_model", "Model --", "f12", "label"),
-        ]),
-        button(f"{t}_details", 382, 338, 94, 42, on_click=show_page(f"page_{t}"), kids=[
-            row(None, 0, 0, align="CENTER", gap=6, h=24, kids=[
-                label(None, "Details", "f13"), icon(None, "chevron", 18, "text2")])]),
-    ])
+    foot_item = lambda k, ic, color: row(None, None, None, h=24, gap=4, kids=[  # noqa: E731
+        icon(f"{w}_fi_{k}", ic, 18, color), label(f"{w}_f_{k}", "--", "f12", "label")])
+    return box(f"{w}_card", X, L["card"][0], 492, L["card"][1], bg="card1", border="border",
+               radius=14, kids=[
+                   row(f"{w}_head", 16, L["head"], h=36, gap=10, kids=[
+                       label(f"{w}_title", T["name"], "f18"),
+                       pill(f"{w}_tag", [label(None, T["tag"], "f11", "label")],
+                            bg="card2", border="border_act", h=20, radius=4, pad=8),
+                   ]),
+                   row(f"{w}_link", -16, L["head"] + 4, align="TOP_RIGHT", h=28, gap=6, kids=[
+                       dot(f"{w}_link_dot", "cyan"),
+                       label(f"{w}_link_l", "BLE --", "f12", "cyan"),
+                   ]),
+                   # Screen 6: the link-lost banner replaces the header row.
+                   box(f"{w}_lost", 16, L["lost"], 460, 44, bg="amber_bg", border="amber_border",
+                       radius=8, hidden=True, kids=[
+                           icon(None, "bt_off", 18, "amber", x=12, align="LEFT_MID"),
+                           label(f"{w}_lost_t", "BLUETOOTH LINK LOST", "f12", "amber", x=40, y=6),
+                           label(f"{w}_lost_s", "", "f11", "text2", x=40, y=24),
+                           pill(f"{w}_lost_p", [label(f"{w}_lost_pl", "STALE", "f12", "amber")],
+                                bg="amber_bg", border="amber", h=24, align="RIGHT_MID", x=-10),
+                       ]),
+                   hero,
+                   pill(f"{w}_frozen", [label(None, "STALE FROZEN DATA", "f11", "text2")],
+                        bg="border_act", border="border_act", h=18, radius=4, pad=8,
+                        x=30, y=L["hero"][0] - 9, hidden=True),
+                   act("heat", 16, 225, "fire", "heat"),
+                   act("fan", 250, 226, "fan", "cyan"),
+                   metric("tds", 16, 225, "TDS (PURITY)", "ppm"),
+                   metric("ph", 250, 226, T["ph_tile"], "pH"),
+                   box(f"{w}_sep", 16, L["sep"], 460, 1, bg="border", border="border", radius=0, bw=0),
+                   row(f"{w}_foot", 16, L["foot"], h=40, gap=14, kids=[
+                       foot_item("lux", "sun", "amber"), foot_item("co2", "co2", "muted"),
+                       foot_item("bub", "bubbles", "muted"), foot_item("model", "brain", "muted"),
+                   ]),
+                   button(f"{w}_details", 388, L["details"], 88, 38,
+                          on_click=show_page(f"w_page_{t}"), kids=[
+                              row(None, 0, 0, align="CENTER", gap=6, h=24, kids=[
+                                  label(None, "Details", "f13"), label(None, "›", "f15", "text2")])]),
+                   label(f"{w}_reconn", "Auto-reconnecting…", "f12", "muted", x=-16,
+                         align="TOP_RIGHT", y=L["reconn"], hidden=True),
+               ])
 
 
 def strip():
     return [
-        box("ro_card", 14, 484, 346, 104, bg="card1", border="border", radius=12, kids=[
+        box("w_ro_card", 14, 484, 346, 104, bg="card1", border="border", radius=12, kids=[
             icon(None, "filter", 18, "cyan", x=14, y=12),
             label(None, "RO FILTER OUTPUT", "f13", x=40, y=14),
-            pill("ro_pill", "--", "cyan", "cyan_bg", "cyan_deep", align="TOP_RIGHT", x=-12, y=10),
-            label("ro_val", "--", "f26", x=14, y=38),
-            label("ro_of", "/ -- gal", "f13", "label", x=70, y=48),
-            label("ro_pct", "", "f12", "label", align="TOP_RIGHT", x=-14, y=48),
-            bar("ro_bar", 14, 72, 318, "cyan_deep"),
-            label("ro_reached", "", "f11", "muted", x=14, y=84),
-            label("ro_total", "", "f11", "muted", align="TOP_RIGHT", x=-14, y=84),
+            pill("w_ro_pill", [label("w_ro_pill_l", "--", "f11", "cyan")], bg="cyan_bg",
+                 border="cyan_deep", h=20, radius=4, pad=8, align="TOP_RIGHT", x=-14, y=12),
+            label("w_ro_val", "--", "f26", x=14, y=38),
+            label("w_ro_of", "/ -- gal", "f13", "label", x=70, y=48),
+            label("w_ro_pct", "", "f12", "label", align="TOP_RIGHT", x=-14, y=48),
+            bar("w_ro_bar", 14, 72, 318, "cyan_deep", h=6),
+            label("w_ro_reached", "", "f11", "muted", x=14, y=84),
+            label("w_ro_total", "", "f11", "muted", align="TOP_RIGHT", x=-14, y=84),
         ]),
-        box("wc_card", 370, 484, 388, 104, bg="card1", border="border", radius=12, kids=[
+        box("w_wc_card", 370, 484, 388, 104, bg="card1", border="cyan_deep", radius=12, kids=[
             icon(None, "swap", 18, "cyan", x=14, y=12),
             label(None, "WATER CHANGE METER", "f13", x=40, y=14),
-            label("wc_batt_h", "--", "f12", "green", align="TOP_RIGHT", x=-14, y=14),
-            label("wc_last_h", "", "f12", "text2", x=14, y=46),
-            label("wc_mode_h", "", "f11", "muted", x=14, y=70),
-            button("wc_open", -14, 12, 150, 48, align="RIGHT_MID", bg="cyan_deep",
-                   border="cyan", on_click=show_page("page_wc"),
-                   kids=[label(None, "WATER CHANGE", "f13", align="CENTER")]),
+            row(None, -14, 10, align="TOP_RIGHT", h=24, gap=6, kids=[
+                icon("w_wc_batt_i", "battery", 18, "green"),
+                label("w_wc_batt", "--", "f12", "green"),
+                pill("w_wc_ready", [label("w_wc_ready_l", "--", "f11", "text2")],
+                     bg="card2", border="border_act", h=20, radius=4, pad=8),
+            ]),
+            label("w_wc_last", "", "f12", "text2", x=14, y=44),
+            label("w_wc_vol_h", "", "f11", "muted", x=14, y=62),
+            label("w_wc_mode_h", "", "f11", "muted", x=14, y=80),
+            button("w_wc_open", -14, 6, 152, 40, align="RIGHT_MID", bg="cyan_deep",
+                   border="cyan", on_click=show_page("w_page_wc"),
+                   kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                       icon(None, "play", 18, "text"), label(None, "START CHANGE", "f13")])]),
+            label("w_wc_flow_h", "", "f11", "muted", align="TOP_RIGHT", x=-14, y=80),
         ]),
-        box("ha_card", 770, 484, 240, 104, bg="card1", border="border", radius=12, kids=[
-            icon(None, "ha", 18, "cyan", x=14, y=12),
-            label(None, "HOME ASSISTANT", "f13", x=40, y=14),
-            label("ha_k1", "Days since loss", "f12", "label", x=14, y=44),
-            label("ha_v1", "--", "f12", "text", align="TOP_RIGHT", x=-14, y=44),
-            label("ha_k2", "Active alerts", "f12", "label", x=14, y=64),
-            label("ha_v2", "--", "f12", "text", align="TOP_RIGHT", x=-14, y=64),
-            label("ha_k3", "Civil dusk", "f12", "label", x=14, y=84),
-            label("ha_v3", "--", "f12", "text", align="TOP_RIGHT", x=-14, y=84),
+        box("w_ha_card", 770, 484, 240, 104, bg="card1", border="border", radius=12, kids=[
+            icon("w_ha_i", "ha", 18, "cyan", x=14, y=12),
+            label(None, "HOME ASSISTANT", "f12", x=38, y=15),
+            pill("w_ha_pill", [label("w_ha_pill_l", "--", "f11", "green")], bg="green_bg",
+                 border="green_border", h=20, radius=4, pad=6, align="TOP_RIGHT", x=-10, y=12),
+            label("w_ha_k1", "Livestock Loss:", "f12", "label", x=14, y=44),
+            label("w_ha_v1", "--", "f12", "green", align="TOP_RIGHT", x=-14, y=44),
+            label("w_ha_k2", "Civil Dusk:", "f12", "label", x=14, y=63),
+            label("w_ha_v2", "--", "f12", "text", align="TOP_RIGHT", x=-14, y=63),
+            label("w_ha_k3", "Active Alerts:", "f12", "label", x=14, y=82),
+            label("w_ha_v3", "--", "f12", "cyan", align="TOP_RIGHT", x=-14, y=82),
+            label("w_ha_alert", "", "f12", "red", x=14, y=50, w=212, long_mode="DOT", hidden=True),
         ]),
     ]
 
 # ------------------------------------------------------------- detail page
 
+PLOT_W, PLOT_H = 512, 148
+
 
 def detail_page(T):
     t, dual = T["t"], T["dual"]
+    w = f"w_{t}"
 
     def sp_step(delta):
         return [{"lambda": (
@@ -308,272 +404,297 @@ def detail_page(T):
             f"id({t}_sp_pending) = std::min(80.0f, std::max(70.0f, base));\n")},
             {"script.execute": f"{t}_send_sp"}]
 
-    probes = []
     if dual:
         probes = [
-            box(None, 16, 44, 166, 70, bg="card2", border="border2", radius=8, kids=[
+            box(None, 16, 46, 166, 70, bg="card2", border="border2", radius=8, kids=[
                 label(None, "PROBE A", "f11", "label", x=12, y=10),
-                label(f"{t}_d_pa", "--", "f26", x=12, y=30)]),
-            box(None, 194, 44, 166, 70, bg="card2", border="border2", radius=8, kids=[
+                label(f"{w}_d_pa", "--", "f26", x=12, y=30),
+                label(f"{w}_d_pa_u", "°F", "f15", "cyan", x=80, y=38)]),
+            box(None, 194, 46, 166, 70, bg="card2", border="border2", radius=8, kids=[
                 label(None, "PROBE B", "f11", "label", x=12, y=10),
-                label(f"{t}_d_pb", "--", "f26", x=12, y=30)]),
-            box(None, 16, 124, 344, 52, bg="card3", border="border", radius=8, kids=[
-                label(None, "A - B GRADIENT", "f11", "label", x=12, y=8),
-                label(f"{t}_d_grad", "--", "f15", "cyan", x=12, y=24),
-                label(f"{t}_d_drift", "", "f12", "green", align="RIGHT_MID", x=-12)]),
+                label(f"{w}_d_pb", "--", "f26", x=12, y=30),
+                label(f"{w}_d_pb_u", "°F", "f15", "cyan", x=80, y=38)]),
+            box(None, 16, 126, 344, 52, bg="card3", border="border", radius=8, kids=[
+                label(None, "Thermal Gradient (A − B)", "f12", "text2", x=14, y=8),
+                label(f"{w}_d_grad", "--", "f15", "cyan", x=14, y=26),
+                label(f"{w}_d_drift", "", "f12", "green", align="RIGHT_MID", x=-14)]),
         ]
     else:
         probes = [
-            box(None, 16, 44, 344, 70, bg="card2", border="border2", radius=8, kids=[
-                label(None, "WATER TEMPERATURE PROBE", "f11", "label", x=12, y=10),
-                label(f"{t}_d_pa", "--", "f26", x=12, y=30),
-                label(f"{t}_d_drift", "", "f12", "green", align="RIGHT_MID", x=-12)]),
-            box(None, 16, 124, 344, 52, bg="card3", border="border", radius=8, kids=[
-                label(None, "CONTROL BAND", "f11", "label", x=12, y=8),
-                label(f"{t}_d_grad", "--", "f15", "cyan", x=12, y=24)]),
+            box(None, 16, 46, 344, 116, bg="card2", border="border2", radius=8, kids=[
+                label(None, "PRIMARY TEMPERATURE PROBE", "f11", "label", x=14, y=14),
+                label(f"{w}_d_pa", "--", "f32", x=14, y=36),
+                label(f"{w}_d_pa_u", "°F", "f18", "cyan", x=100, y=48),
+                label(None, "Single probe", "f11", "muted", x=14, y=84),
+                pill(f"{w}_d_drift_box", [label(f"{w}_d_drift", "", "f12", "text2")],
+                     bg="card1", border="border_act", h=30, radius=6, pad=10,
+                     align="TOP_RIGHT", x=-14, y=36),
+                label(f"{w}_d_aligned", "", "f11", "green", align="TOP_RIGHT", x=-14, y=84),
+            ]),
         ]
 
-    act_row = lambda k, y, ic, cap, color: box(  # noqa: E731
-        f"{t}_d_{k}", 16, y, 344, 50, bg="card3", border="border", radius=8, kids=[
-            icon(f"{t}_d_{k}_icon", ic, 18, "muted", x=12, align="LEFT_MID"),
-            label(f"{t}_d_{k}_cap", cap, "f12", "label", x=42, y=8),
-            label(f"{t}_d_{k}_sub", "", "f11", "muted", x=42, y=27),
-            label(f"{t}_d_{k}_pct", "--", "f15", align="RIGHT_MID", x=-130),
-            bar(f"{t}_d_{k}_bar", -12, 0, 104, color, align="RIGHT_MID"),
+    act_row = lambda k, y, ic, color: box(  # noqa: E731
+        f"{w}_d_{k}", 16, y, 344, 50, bg="card3", border="border", radius=8, kids=[
+            icon(f"{w}_d_{k}_i", ic, 18, "muted", x=14, align="LEFT_MID"),
+            label(f"{w}_d_{k}_cap", "", "f12", "label", x=44, y=8),
+            label(f"{w}_d_{k}_sub", "", "f11", "muted", x=44, y=27),
+            label(f"{w}_d_{k}_pct", "--", "f15", align="RIGHT_MID", x=-96),
+            bar(f"{w}_d_{k}_bar", -14, 0, 76, color, align="RIGHT_MID"),
         ])
 
-    tab = lambda i, mode, x, w, text: button(  # noqa: E731
-        f"{t}_tab{i}", x, 12, w, 32, radius=8,
+    tab = lambda i, mode, x, wd, text: button(  # noqa: E731
+        f"{w}_tab{i}", x, 12, wd, 30, radius=6,
         on_click=[{"lambda": f"id({t}_chart_mode) = {mode}; id(redraw_charts) = true;"}],
-        kids=[label(f"{t}_tab{i}_l", text, "f12", align="CENTER")])
+        kids=[label(f"{w}_tab{i}_l", text, "f12", align="CENTER")])
 
-    plot_kids = [box(f"{t}_grid{i}", 0, 34 * i + 17, 532, 1, bg="border", border="border",
-                     radius=0, bw=0) for i in range(5)]
-    plot_kids += [
-        {"line": {"id": f"{t}_ln_sp", "points": ["0,0", "1,0"], "line_width": 2,
-                  "line_color": COL["green"], "line_opa": "70%"}},
-        {"line": {"id": f"{t}_ln_b", "points": ["0,0", "1,0"], "line_width": 2,
-                  "line_color": COL["cyan_deep"], "line_rounded": True}},
-        {"line": {"id": f"{t}_ln_a", "points": ["0,0", "1,0"], "line_width": 3,
-                  "line_color": COL["cyan"], "line_rounded": True}},
-        label(f"{t}_plot_empty", "Collecting history (one point every 15 min)", "f12",
-              "muted", align="CENTER"),
-    ]
+    legend_item = lambda k, color: row(f"{w}_lg_{k}", None, None, h=20, gap=6, kids=[  # noqa: E731
+        box(None, None, None, 14, 3, bg=color, border=color, radius=2, bw=0),
+        label(f"{w}_lg_{k}_l", "", "f11", "label")])
+
+    plot = box(f"{w}_plot", 16, 52, 576, 178, bg="canvas", border="border", radius=8, kids=[
+        *[label(f"{w}_yl{i}", "", "f11", "muted", x=10, y=10 + 37 * i - 7) for i in range(5)],
+        box(f"{w}_area", 52, 10, PLOT_W, PLOT_H, bg="canvas", border="canvas", radius=0, bw=0,
+            bg_opa="TRANSP", kids=[
+                *[box(None, 0, 37 * i, PLOT_W, 1, bg="border", border="border", radius=0, bw=0)
+                  for i in range(5)],
+                {"line": {"id": f"{w}_ln_sp", "points": ["0,0", "1,0"], "line_width": 2,
+                          "line_color": COL["green"], "line_opa": "70%"}},
+                {"line": {"id": f"{w}_ln_b", "points": ["0,0", "1,0"], "line_width": 2,
+                          "line_color": COL["violet"], "line_rounded": True}},
+                {"line": {"id": f"{w}_ln_a", "points": ["0,0", "1,0"], "line_width": 3,
+                          "line_color": COL["cyan"], "line_rounded": True}},
+                label(f"{w}_plot_empty", "Collecting history (one point every 15 min)",
+                      "f12", "muted", align="CENTER"),
+            ]),
+    ])
 
     widgets = [
-        button(f"{t}_home", 16, 10, 104, 44, on_click=show_page("page_home"), kids=[
-            row(None, 0, 0, align="CENTER", gap=6, h=24, kids=[
-                icon(None, "back", 18, "text2"), label(None, "Home", "f13")])]),
-        row(None, 136, 10, h=44, gap=12, kids=[
-            label(None, T["name"], "f18"),
-            box(f"{t}_d_link", None, None, "SIZE_CONTENT", 26, bg="card1", border="border_act",
-                radius=20, pad_left=10, pad_right=10,
-                kids=[label(f"{t}_d_link_l", "BLE --", "f12", "cyan", align="CENTER")]),
+        back_button(),
+        row(None, 122, 10, h=44, gap=14, kids=[
+            label(None, f"{T['name']} DETAIL", "f18"),
+            pill(f"{w}_d_link", [dot(f"{w}_d_link_dot", "cyan"),
+                                 label(f"{w}_d_link_l", "BLE --", "f12", "cyan")],
+                 bg="card1", border="border_act", h=26, radius=6, pad=10),
         ]),
         row(None, -16, 10, align="TOP_RIGHT", h=44, gap=10, kids=[
-            box(f"{t}_d_safety", None, None, "SIZE_CONTENT", 30, bg="green_bg",
-                border="green_border", radius=20, pad_left=12, pad_right=12,
-                kids=[label(f"{t}_d_safety_l", "SAFETY --", "f12", "green", align="CENTER")]),
-            box(None, None, None, "SIZE_CONTENT", 30, bg="card1", border="border_act",
-                radius=20, pad_left=12, pad_right=12,
-                kids=[label(None, f"WATER ~{T['water'].upper()}", "f12", "text2", align="CENTER")]),
+            pill(f"{w}_d_safety", [icon(f"{w}_d_safety_i", "shield", 18, "green"),
+                                   label(f"{w}_d_safety_l", "SAFETY --", "f12", "green")],
+                 bg="green_bg", border="green_border", h=28, radius=6, pad=10),
+            pill(None, [label(None, f"NET VOLUME: {T['water']}", "f12", "text2")],
+                 bg="card1", border="border_act", h=28, radius=6, pad=10),
         ]),
         # ---- setpoint card
-        box(None, 14, 66, 376, 204, bg="card1", border="border", radius=14, kids=[
-            label(None, "TEMPERATURE SETPOINT", "f13", "label", x=16, y=16),
-            label(f"{t}_d_swing", "", "f11", "cyan", align="TOP_RIGHT", x=-16, y=18),
-            box(None, 16, 44, 344, 84, bg="card2", border="border2", radius=10, kids=[
-                button(f"{t}_minus", 12, 0, 56, 56, align="LEFT_MID",
+        box(None, 14, 66, 376, 200, bg="card1", border="border", radius=14, kids=[
+            label(None, "TEMPERATURE SETPOINT CONTROL", "f12", "text2", x=16, y=16),
+            pill(f"{w}_d_swing", [label(f"{w}_d_swing_l", "", "f11", "cyan")], bg="card1",
+                 border="cyan_deep", h=22, radius=4, pad=6, align="TOP_RIGHT", x=-16, y=14),
+            box(None, 16, 42, 344, 80, bg="card2", border="border2", radius=10, kids=[
+                button(f"{w}_minus", 12, 0, 56, 56, align="LEFT_MID",
                        on_click=sp_step(-0.1), on_long_press_repeat=sp_step(-0.1),
                        kids=[icon(None, "minus", 24, "text", align="CENTER")]),
-                label(f"{t}_d_sp", "--", "f42", align="CENTER", y=-10),
-                label(f"{t}_d_band", "", "f12", "cyan", align="CENTER", y=26),
-                button(f"{t}_plus", -12, 0, 56, 56, align="RIGHT_MID",
+                label(f"{w}_d_sp", "--", "f42", align="CENTER", y=-8),
+                label(f"{w}_d_band", "", "f11", "cyan", align="CENTER", y=24),
+                button(f"{w}_plus", -12, 0, 56, 56, align="RIGHT_MID",
                        on_click=sp_step(0.1), on_long_press_repeat=sp_step(0.1),
                        kids=[icon(None, "plus", 24, "text", align="CENTER")]),
             ]),
-            box(None, 16, 138, 344, 56, bg="card3", border="cyan_deep", radius=10, kids=[
+            box(None, 16, 132, 344, 56, bg="cyan_bg", border="cyan_deep", radius=10, kids=[
                 icon(None, "brain", 24, "cyan", x=12, align="LEFT_MID"),
-                label(None, "Adaptive heating model", "f13", x=46, y=10),
-                label(f"{t}_d_conf", "Confidence --", "f11", "label", x=46, y=30),
-                button(f"{t}_learn", -8, 0, 128, 40, align="RIGHT_MID", radius=20,
+                label(None, "Adaptive Thermal Model", "f13", x=46, y=10),
+                label(f"{w}_d_conf", "Confidence --", "f11", "text2", x=46, y=30),
+                button(f"{w}_learn", -10, 0, 110, 38, align="RIGHT_MID", radius=19,
                        on_click=[{"lambda": f"id({t}_learn) = !id({t}_learn);"},
                                  {"script.execute": f"{t}_send_learn"}],
-                       kids=[label(f"{t}_learn_l", "LEARNING --", "f12", align="CENTER")]),
+                       kids=[label(f"{w}_learn_l", "LEARNING --", "f12", align="CENTER")]),
             ]),
         ]),
         # ---- probes + actuators card
-        box(None, 14, 282, 376, 306, bg="card1", border="border", radius=14, kids=[
-            label(None, "PROBES & HEATING" if dual else "PROBE & HEATING", "f13", "label", x=16, y=16),
+        box(None, 14, 278, 376, 310, bg="card1", border="border", radius=14, kids=[
+            label(None, "DUAL PROBES & ACTUATOR HARDWARE" if dual
+                  else "SINGLE PROBE & THERMAL ACTUATORS", "f12", "text2", x=16, y=17),
             label(None, "CONTROLLER BLE", "f11", "cyan", align="TOP_RIGHT", x=-16, y=18),
             *probes,
-            act_row("heat", 186, "fire", "HEATER", "heat"),
-            act_row("fan", 244, "fan", "COOLING FAN", "cyan"),
+            act_row("heat", 192, "fire", "heat"),
+            act_row("fan", 250, "fan", "cyan"),
         ]),
         # ---- TDS / pH
         box(None, 402, 66, 296, 116, bg="card1", border="border", radius=14, kids=[
-            label(None, "TDS", "f13", "label", x=16, y=14),
-            label(f"{t}_d_tds_st", "", "f12", "green", align="TOP_RIGHT", x=-16, y=16),
-            label(f"{t}_d_tds", "--", "f32", x=16, y=36),
-            label(f"{t}_d_tds_u", "ppm live", "f13", "label", x=96, y=52),
-            label(f"{t}_d_tds_m", "", "f13", "cyan", align="TOP_RIGHT", x=-16, y=50),
-            track(f"{t}_d_tds_trk", 16, 82, 264),
-            label(f"{t}_d_tds_tgt", "", "f11", "muted", x=16, y=94),
+            label(None, "TDS LIVE & 1-HOUR MEAN", "f12", "text2", x=16, y=14),
+            label(f"{w}_d_tds_st", "", "f12", "green", align="TOP_RIGHT", x=-16, y=15),
+            label(f"{w}_d_tds", "--", "f32", x=16, y=34),
+            label(f"{w}_d_tds_u", "ppm live", "f13", "label", x=96, y=50),
+            label(f"{w}_d_tds_m", "", "f13", "cyan", align="TOP_RIGHT", x=-16, y=48),
+            track(f"{w}_d_tds_trk", 16, 78, 264),
+            label(f"{w}_d_tds_t1", "", "f11", "muted", x=16, y=92),
+            label(f"{w}_d_tds_t2", "", "f11", "amber", align="TOP_MID", x=40, y=92),
+            label(f"{w}_d_tds_t3", "", "f11", "red", align="TOP_RIGHT", x=-16, y=92),
         ]),
         box(None, 710, 66, 300, 116, bg="card1", border="border", radius=14, kids=[
-            label(None, "PH", "f13", "label", x=16, y=14),
-            label(f"{t}_d_ph_st", "", "f12", "green", align="TOP_RIGHT", x=-16, y=16),
-            label(f"{t}_d_ph", "--", "f32", x=16, y=36),
-            label(None, "pH", "f13", "label", x=100, y=52),
-            label(f"{t}_d_ph_tgt", "", "f12", "text2", align="TOP_RIGHT", x=-16, y=50),
-            track(f"{t}_d_ph_trk", 16, 82, 268),
-            label(None, T["ph_src"], "f11", "muted", x=16, y=94),
+            label(None, T["ph_title"], "f12", "text2", x=16, y=14),
+            label(f"{w}_d_ph_st", "", "f12", "green", align="TOP_RIGHT", x=-16, y=15),
+            label(f"{w}_d_ph", "--", "f32", x=16, y=34),
+            label(f"{w}_d_ph_u", "pH", "f13", "label", x=100, y=50),
+            label(f"{w}_d_ph_tgt", "", "f13", "text", align="TOP_RIGHT", x=-16, y=48),
+            track(f"{w}_d_ph_trk", 16, 78, 268),
+            label(f"{w}_d_ph_t1", "", "f11", "muted", x=16, y=92),
+            label(f"{w}_d_ph_t2", "", "f11", "muted", align="TOP_MID", y=92),
+            label(f"{w}_d_ph_t3", "", "f11", "muted", align="TOP_RIGHT", x=-16, y=92),
         ]),
         # ---- 24 h chart
-        box(None, 402, 192, 608, 266, bg="card1", border="border", radius=14, kids=[
-            tab(0, 0, 16, 120, "Temperature"),
-            tab(1, 1, 144, 70, "TDS"),
-            tab(2, 2, 222, 60, "pH"),
-            label(f"{t}_legend", "", "f11", "label", align="TOP_RIGHT", x=-16, y=22),
-            *[label(f"{t}_yl{i}", "", "f11", "muted", x=12, y=56 + 34 * i + 10) for i in range(5)],
-            box(f"{t}_plot", 60, 56, 532, 170, bg="canvas", border="border", radius=8,
-                kids=plot_kids),
-            label(None, "-24 h", "f11", "muted", x=60, y=232),
-            label(None, "-18 h", "f11", "muted", x=60 + 133 - 14, y=232),
-            label(None, "-12 h", "f11", "muted", x=60 + 266 - 14, y=232),
-            label(None, "-6 h", "f11", "muted", x=60 + 399 - 12, y=232),
-            label(None, "Now", "f11", "cyan", x=60 + 532 - 26, y=232),
+        box(None, 402, 192, 608, 258, bg="card1", border="border", radius=14, kids=[
+            tab(0, 0, 16, 128, "Temperature (24h)"),
+            tab(1, 1, 150, 82, "TDS (24h)"),
+            tab(2, 2, 238, 72, "pH (24h)"),
+            row(None, -16, 13, align="TOP_RIGHT", h=26, gap=12, kids=[
+                legend_item("a", "cyan"), legend_item("b", "violet"), legend_item("sp", "green")]),
+            plot,
+            *[label(f"{w}_xl{i}", txt, "f11", "cyan" if i == 4 else "muted",
+                    x=16 + 52 + int(PLOT_W * i / 4) - (14 if i < 4 else 26), y=234)
+              for i, txt in enumerate(["-24h", "-18h", "-12h", "-6h", "Now"])],
         ]),
-        # ---- light / CO2 / controller
-        box(None, 402, 470, 608, 118, bg="card1", border="border", radius=14, kids=[
+        # ---- light / CO2 / safety
+        box(None, 402, 462, 608, 126, bg="card1", border="border", radius=14, kids=[
             icon(None, "sun", 18, "amber", x=16, y=16),
-            label(None, "LIGHT", "f12", "label", x=42, y=18),
-            label(f"{t}_d_lux", "--", "f18", x=16, y=48),
-            label(f"{t}_d_sun", "", "f11", "muted", x=16, y=80, w=180, long_mode="WRAP"),
-            icon(None, "co2", 18, "cyan", x=216, y=16),
-            label(None, "CO2 & AERATION", "f12", "label", x=242, y=18),
-            label(f"{t}_d_co2", "--", "f18", x=216, y=48),
-            label(f"{t}_d_bub", "", "f12", "label", x=216, y=80),
-            icon(None, "heart", 18, "green", x=416, y=16),
-            label(None, "CONTROLLER", "f12", "label", x=442, y=18),
-            label(f"{t}_d_safe2", "--", "f18", x=416, y=48),
-            label(f"{t}_d_model", "", "f12", "label", x=416, y=80),
+            label(None, "LIGHT & PHOTOPERIOD", "f12", "text2", x=40, y=18),
+            label(f"{w}_d_lux", "--", "f18", x=16, y=52),
+            label(f"{w}_d_sun", "", "f11", "muted", x=16, y=92, w=190, long_mode="WRAP"),
+            icon(None, "co2", 18, "cyan", x=214, y=16),
+            label(None, "CO2 & AERATION", "f12", "text2", x=238, y=18),
+            row(None, 214, 48, h=28, gap=6, kids=[
+                label(None, "CO2:", "f18", "label"), label(f"{w}_d_co2", "--", "f18")]),
+            row(None, 214, 88, h=24, gap=6, kids=[
+                icon(f"{w}_d_bub_i", "check", 18, "green"),
+                label(f"{w}_d_bub", "", "f12", "green")]),
+            icon(None, "shield", 18, "green", x=412, y=16),
+            label(None, "SAFETY & SYSTEM", "f12", "text2", x=436, y=18),
+            label(f"{w}_d_safe2", "--", "f18", x=412, y=52),
+            label(f"{w}_d_ctrl", "", "f11", "muted", x=412, y=92),
         ]),
     ]
-    return {"id": f"page_{t}", "bg_color": COL["canvas"], "scrollable": False,
+    return {"id": f"w_page_{t}", "bg_color": COL["canvas"], "scrollable": False,
             "widgets": widgets}
 
 # ------------------------------------------------------- water change page
 
 
 def wc_page():
-    pub = publish
     ro_step = lambda d: [  # noqa: E731
         {"lambda": (
             "float base = std::isnan(id(ro_target_pending)) ? id(ro_target) : id(ro_target_pending);\n"
             "if (std::isnan(base)) return;\n"
             f"id(ro_target_pending) = std::min(20.0f, std::max(0.5f, roundf((base + ({d})) * 2.0f) / 2.0f));\n")},
         {"script.execute": "ro_send_target"}]
-    return {"id": "page_wc", "bg_color": COL["canvas"], "scrollable": False, "widgets": [
-        button("wc_home", 16, 10, 104, 44, on_click=show_page("page_home"), kids=[
-            row(None, 0, 0, align="CENTER", gap=6, h=24, kids=[
-                icon(None, "back", 18, "text2"), label(None, "Home", "f13")])]),
-        row(None, 136, 10, h=44, gap=12, kids=[
-            label(None, "WATER CHANGE", "f18"),
-            box("wc_state", None, None, "SIZE_CONTENT", 30, bg="cyan_bg", border="cyan_deep",
-                radius=20, pad_left=12, pad_right=12,
-                kids=[label("wc_state_l", "--", "f12", "cyan", align="CENTER")]),
+    set_mode = lambda name, drain: [  # noqa: E731
+        publish("water-flow-change/select/mode/command", name),
+        {"lambda": f"id(wc_draining) = {'true' if drain else 'false'};"}]
+    stat = lambda x, cap, vid, sid, vcolor: [  # noqa: E731
+        label(None, cap, "f11", "label", x=x, y=12),
+        label(vid, "--", "f18", vcolor, x=x, y=32),
+        label(sid, "", "f11", "muted", x=x, y=58)]
+    return {"id": "w_page_wc", "bg_color": COL["canvas"], "scrollable": False, "widgets": [
+        back_button(),
+        row(None, 122, 10, h=44, gap=14, kids=[
+            label(None, "WATER CHANGE MANAGER", "f18"),
+            pill("w_wc_state", [dot("w_wc_state_dot", "cyan"),
+                                label("w_wc_state_l", "--", "f12", "cyan")],
+                 bg="cyan_bg", border="cyan_deep", h=30, pad=12),
         ]),
         row(None, -16, 10, align="TOP_RIGHT", h=44, gap=10, kids=[
-            box("wc_batt_pill", None, None, "SIZE_CONTENT", 30, bg="green_bg",
-                border="green_border", radius=20, pad_left=12, pad_right=12,
-                kids=[label("wc_batt_l", "Hose battery --", "f12", "green", align="CENTER")]),
-            box("wc_mqtt_pill", None, None, "SIZE_CONTENT", 30, bg="card1", border="border_act",
-                radius=20, pad_left=12, pad_right=12,
-                kids=[label("wc_mqtt_l", "MQTT --", "f12", "text2", align="CENTER")]),
+            pill("w_wc_batt_pill", [icon("w_wc_batt_pi", "battery", 18, "green"),
+                                    label("w_wc_batt_l", "Hose Batt: --", "f12", "green")],
+                 bg="green_bg", border="green_border", h=28, radius=6, pad=10),
+            pill("w_wc_mqtt_pill", [icon(None, "wifi", 18, "cyan"),
+                                    label("w_wc_mqtt_l", "MQTT --", "f12", "cyan")],
+                 bg="cyan_bg", border="cyan_deep", h=28, radius=6, pad=10),
         ]),
-        button("wc_drain", 14, 66, 306, 56, on_click=[
-            pub("water-flow-change/select/mode/command", "Draining"),
-            {"lambda": "id(wc_draining) = true;"}],
-            kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
-                icon(None, "water_minus", 18, "heat"),
-                label("wc_drain_l", "DRAINING", "f15")])]),
-        button("wc_fill", 330, 66, 306, 56, on_click=[
-            pub("water-flow-change/select/mode/command", "Refilling"),
-            {"lambda": "id(wc_draining) = false;"}],
-            kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
-                icon(None, "water_plus", 18, "cyan"),
-                label("wc_fill_l", "REFILLING", "f15")])]),
+        box(None, 14, 66, 622, 58, bg="card1", border="border", radius=12, kids=[
+            button("w_wc_drain", 4, 0, 304, 48, align="LEFT_MID", on_click=set_mode("Draining", True),
+                   kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                       icon("w_wc_drain_i", "radio", 18, "heat"),
+                       label("w_wc_drain_l", "MODE: DRAINING", "f15", "heat")])]),
+            button("w_wc_fill", -4, 0, 304, 48, align="RIGHT_MID", on_click=set_mode("Refilling", False),
+                   kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                       icon("w_wc_fill_i", "radio", 18, "label"),
+                       label("w_wc_fill_l", "SWITCH TO REFILL", "f15", "label")])]),
+        ]),
         box(None, 14, 134, 622, 388, bg="card1", border="border", radius=14, kids=[
-            label(None, "75 GALLON", "f13", "label", x=20, y=18),
-            label("wc_vol", "", "f12", "cyan", align="TOP_RIGHT", x=-20, y=20),
-            label("wc_big_cap", "WATER REMOVED THIS CHANGE", "f11", "heat", x=20, y=96),
-            label("wc_big", "--", "f58", x=20, y=116),
-            label("wc_big_u", "gal", "f26", "cyan", x=150, y=146),
-            label("wc_other", "", "f13", "label", x=20, y=186, w=300),
-            {"arc": {"id": "wc_arc", "x": -24, "y": 40, "align": "TOP_RIGHT",
-                     "width": 240, "height": 240, "rotation": 180, "start_angle": 0,
+            label(None, "SELECTED TANK: 75 GALLON", "f12", "text2", x=20, y=18),
+            label("w_wc_vol", "", "f11", "cyan", align="TOP_RIGHT", x=-20, y=20),
+            row(None, 20, 120, h=20, gap=4, kids=[
+                icon("w_wc_big_i", "water", 18, "heat"),
+                label("w_wc_big_cap", "WATER REMOVED THIS CHANGE", "f11", "heat")]),
+            label("w_wc_big", "--", "f58", x=20, y=142),
+            label("w_wc_big_u", "gal", "f26", "cyan", x=150, y=170),
+            {"arc": {"id": "w_wc_arc", "x": -46, "y": 110, "align": "TOP_RIGHT",
+                     "width": 200, "height": 200, "rotation": 180, "start_angle": 0,
                      "end_angle": 180, "min_value": 0, "max_value": 1000, "value": 0,
-                     "adjustable": False, "arc_width": 18, "arc_color": COL["btn"],
+                     "adjustable": False, "arc_width": 16, "arc_color": COL["btn"],
                      "arc_rounded": True,
-                     "indicator": {"arc_width": 18, "arc_color": COL["heat"], "arc_rounded": True},
+                     "indicator": {"arc_width": 16, "arc_color": COL["heat"], "arc_rounded": True},
                      "knob": {"bg_opa": "TRANSP", "pad_all": 0}}},
-            label("wc_pct", "--", "f32", align="TOP_RIGHT", x=-104, y=130),
-            label(None, "OF TANK CHANGED", "f11", "label", align="TOP_RIGHT", x=-92, y=172),
-            box(None, 20, 268, 582, 100, bg="card3", border="border", radius=10, kids=[
-                label(None, "FLOW", "f11", "label", x=16, y=14),
-                label("wc_rate", "--", "f18", "cyan", x=16, y=36),
-                label("wc_flowing", "", "f11", "muted", x=16, y=66),
-                label(None, "WATER ADDED", "f11", "label", x=210, y=14),
-                label("wc_added", "--", "f18", x=210, y=36),
-                label(None, "NET CHANGE", "f11", "label", x=404, y=14),
-                label("wc_net", "--", "f18", x=404, y=36),
-                label(None, "WATER REMOVED", "f11", "label", x=210, y=66),
-                label("wc_removed2", "--", "f11", "text2", x=310, y=66),
+            label("w_wc_pct", "--", "f32", align="TOP_RIGHT", x=-96, y=180),
+            label(None, "OF TANK CHANGED", "f11", "label", align="TOP_RIGHT", x=-96, y=218),
+            box(None, 20, 298, 582, 84, bg="card3", border="border", radius=10, kids=[
+                *stat(14, "REALTIME FLOW", "w_wc_rate", "w_wc_flowing", "cyan"),
+                *stat(204, "WATER ADDED", "w_wc_added", "w_wc_added_s", "text"),
+                *stat(394, "NET WATER CHANGE", "w_wc_net", "w_wc_net_s", "heat"),
             ]),
         ]),
-        button("wc_new", 14, 534, 622, 56, bg="card1", border="heat_border",
-               on_long_press=[pub("water-flow-change/button/new_water_change/command", "PRESS")],
+        button("w_wc_switch", 14, 534, 308, 56, on_click=[{"if": {
+            "condition": {"lambda": "return id(wc_draining);"},
+            "then": set_mode("Refilling", False), "else": set_mode("Draining", True)}}],
+            kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                icon(None, "swap", 18, "text2"),
+                label("w_wc_switch_l", "SWITCH MODE", "f13", "text2")])]),
+        button("w_wc_new", 334, 534, 302, 56, bg="card1", border="cyan_deep",
+               on_long_press=[publish("water-flow-change/button/new_water_change/command", "PRESS")],
                kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
-                   icon(None, "restart", 18, "heat"),
-                   label(None, "HOLD TO START A NEW WATER CHANGE", "f13", "heat")])]),
-        box(None, 648, 66, 362, 380, bg="card1", border="border", radius=14, kids=[
-            icon(None, "filter", 18, "cyan", x=18, y=18),
-            label(None, "RO FILTER", "f15", x=46, y=19),
-            box("ro_online_pill", -16, 14, "SIZE_CONTENT", 26, bg="cyan_bg", border="cyan_deep",
-                radius=20, align="TOP_RIGHT", pad_left=10, pad_right=10,
-                kids=[label("ro_online_l", "--", "f11", "cyan", align="CENTER")]),
-            box(None, 16, 56, 330, 112, bg="card2", border="border2", radius=10, kids=[
-                label(None, "THIS FILL", "f11", "label", x=14, y=12),
-                label("ro_d_flow", "", "f12", "cyan", align="TOP_RIGHT", x=-14, y=12),
-                label("ro_d_val", "--", "f32", x=14, y=34),
-                label("ro_d_of", "", "f13", "label", align="TOP_RIGHT", x=-14, y=52),
-                bar("ro_d_bar", 14, 88, 300, "cyan_deep"),
+                   icon(None, "refresh", 18, "cyan"),
+                   label(None, "NEW WATER CHANGE", "f13", "cyan"),
+                   label(None, "(hold)", "f11", "muted")])]),
+        box(None, 648, 66, 362, 384, bg="card1", border="border", radius=14, kids=[
+            icon(None, "filter", 18, "cyan", x=18, y=20),
+            label(None, "RO FILTER SYSTEM", "f15", x=46, y=21),
+            pill("w_ro_on", [label("w_ro_on_l", "--", "f11", "cyan")], bg="cyan_bg",
+                 border="cyan_deep", h=20, radius=4, pad=8, align="TOP_RIGHT", x=-16, y=20),
+            box(None, 16, 62, 330, 104, bg="card2", border="border2", radius=10, kids=[
+                label(None, "BATCH FILL VOLUME", "f11", "label", x=14, y=14),
+                label("w_ro_d_flow", "", "f12", "cyan", align="TOP_RIGHT", x=-14, y=14),
+                label("w_ro_d_val", "--", "f32", x=14, y=36),
+                label("w_ro_d_u", "gal", "f18", "cyan", x=80, y=48),
+                label("w_ro_d_of", "", "f13", "text2", align="TOP_RIGHT", x=-14, y=50),
+                bar("w_ro_d_bar", 14, 84, 300, "cyan_deep", h=6),
             ]),
-            label(None, "Target reached", "f12", "label", x=18, y=184),
-            label("ro_d_reached", "--", "f12", align="TOP_RIGHT", x=-18, y=184),
-            label(None, "Lifetime produced", "f12", "label", x=18, y=208),
-            label("ro_d_total", "--", "f12", align="TOP_RIGHT", x=-18, y=208),
-            label(None, "FILL TARGET", "f11", "label", x=18, y=240),
-            box(None, 16, 258, 330, 56, bg="card2", border="border2", radius=10, kids=[
-                button("ro_minus", 6, 0, 48, 44, align="LEFT_MID", on_click=ro_step(-0.5),
+            label(None, "Target Reached:", "f12", "label", x=18, y=184),
+            label("w_ro_d_reached", "--", "f12", align="TOP_RIGHT", x=-18, y=184),
+            label(None, "Flow State:", "f12", "label", x=18, y=206),
+            label("w_ro_d_state", "--", "f12", align="TOP_RIGHT", x=-18, y=206),
+            label(None, "Lifetime Total:", "f12", "label", x=18, y=228),
+            label("w_ro_d_total", "--", "f12", align="TOP_RIGHT", x=-18, y=228),
+            box(None, 16, 252, 330, 56, bg="card1", border="border_act", radius=8, kids=[
+                button("w_ro_minus", 6, 0, 48, 44, align="LEFT_MID", on_click=ro_step(-0.5),
                        kids=[icon(None, "minus", 18, "text", align="CENTER")]),
-                label("ro_d_tgt", "--", "f18", align="CENTER"),
-                button("ro_plus", -6, 0, 48, 44, align="RIGHT_MID", on_click=ro_step(0.5),
+                row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                    icon(None, "plus_circle", 18, "text2"),
+                    label("w_ro_d_tgt", "SET TARGET (--)", "f13", "text2")]),
+                button("w_ro_plus", -6, 0, 48, 44, align="RIGHT_MID", on_click=ro_step(0.5),
                        kids=[icon(None, "plus", 18, "text", align="CENTER")]),
             ]),
-            button("ro_reset", 16, 324, 330, 44,
-                   on_long_press=[pub("water-flow-ro/button/reset_fill/command", "PRESS")],
-                   kids=[label(None, "HOLD TO RESET FILL COUNTER", "f12", "text2", align="CENTER")]),
+            button("w_ro_reset", 16, 316, 330, 56, bg="card1",
+                   on_long_press=[publish("water-flow-ro/button/reset_fill/command", "PRESS")],
+                   kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
+                       icon(None, "refresh", 18, "text2"),
+                       label(None, "RESET FILL COUNTER", "f13", "text2"),
+                       label(None, "(hold)", "f11", "muted")])]),
         ]),
-        box(None, 648, 458, 362, 130, bg="card1", border="border", radius=14, kids=[
-            label(None, "HOSE METER", "f12", "label", x=18, y=16),
-            label(None, "Battery", "f12", "label", x=18, y=44),
-            label("wc_d_batt", "--", "f12", align="TOP_RIGHT", x=-18, y=44),
-            label(None, "Last change started", "f12", "label", x=18, y=70),
-            label("wc_d_last", "--", "f12", align="TOP_RIGHT", x=-18, y=70),
-            label(None, "75 Gallon water volume", "f12", "label", x=18, y=96),
-            label("wc_d_vol", "--", "f12", align="TOP_RIGHT", x=-18, y=96),
+        box(None, 648, 460, 362, 128, bg="card1", border="border", radius=14, kids=[
+            label(None, "SYSTEM & BATTERY CONTEXT", "f12", "text2", x=18, y=16),
+            label(None, "Hose Sensor Battery", "f12", "label", x=18, y=46),
+            label("w_wc_d_batt", "--", "f12", align="TOP_RIGHT", x=-18, y=46),
+            label(None, "Last Water Change", "f12", "label", x=18, y=72),
+            label("w_wc_d_last", "--", "f12", align="TOP_RIGHT", x=-18, y=72),
+            label(None, "75 Gallon Actual Volume", "f12", "label", x=18, y=98),
+            label("w_wc_d_vol", "--", "f12", align="TOP_RIGHT", x=-18, y=98),
         ]),
     ]}
 
@@ -583,7 +704,7 @@ UPDATE_COMMON = r"""
 // ---------------------------------------------------------------- helpers
 const uint32_t now_ms = millis();
 auto txt = [](lv_obj_t *o, const char *fmt, ...) {
-  char b[160];
+  char b[200];
   va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof(b), fmt, ap); va_end(ap);
   if (strcmp(lv_label_get_text(o), b) != 0) lv_label_set_text(o, b);
 };
@@ -592,50 +713,65 @@ auto bg = [](lv_obj_t *o, uint32_t fill, uint32_t border) {
   lv_obj_set_style_bg_color(o, lv_color_hex(fill), 0);
   lv_obj_set_style_border_color(o, lv_color_hex(border), 0);
 };
+auto fill = [](lv_obj_t *o, uint32_t c) { lv_obj_set_style_bg_color(o, lv_color_hex(c), 0); };
 auto show = [](lv_obj_t *o, bool on) {
   if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 };
+// "4m 12s", "38s", "2h 5m"
 auto age = [](uint32_t ms, char *b, size_t n) {
+  const uint32_t s = ms / 1000;
+  if (s < 60) snprintf(b, n, "%us", (unsigned) s);
+  else if (s < 3600) snprintf(b, n, "%um %us", (unsigned) (s / 60), (unsigned) (s % 60));
+  else snprintf(b, n, "%uh %um", (unsigned) (s / 3600), (unsigned) (s / 60 % 60));
+};
+auto age_short = [](uint32_t ms, char *b, size_t n) {
   const uint32_t s = ms / 1000;
   if (s < 90) snprintf(b, n, "%us", (unsigned) s);
   else if (s < 5400) snprintf(b, n, "%um", (unsigned) (s / 60));
   else snprintf(b, n, "%uh", (unsigned) (s / 3600));
 };
+// 1420 -> "1,420"
+auto thou = [](float v, char *b, size_t n) {
+  const long x = lroundf(v);
+  if (x >= 1000) snprintf(b, n, "%ld,%03ld", x / 1000, x % 1000); else snprintf(b, n, "%ld", x);
+};
 // Place a target-range track's band and marker. NaN bound = open-ended.
 auto range = [](lv_obj_t *trk, lv_obj_t *band, lv_obj_t *mark, float v,
                 float lo, float hi, float mn, float mx, uint32_t mark_col) {
   const int w = lv_obj_get_width(trk);
-  auto px = [&](float x) { return (int) roundf((std::min(mx, std::max(mn, x)) - mn) / (mx - mn) * (w - 4)); };
+  auto px = [&](float x) { return (int) roundf((std::min(mx, std::max(mn, x)) - mn) / (mx - mn) * (w - 6)); };
   const int a = std::isnan(lo) ? 0 : px(lo), b = std::isnan(hi) ? w : px(hi);
-  lv_obj_set_pos(band, a, 0); lv_obj_set_width(band, std::max(4, b - a));
+  lv_obj_set_pos(band, a, 0); lv_obj_set_width(band, std::max(6, b - a));
   if (std::isnan(v)) { lv_obj_add_flag(mark, LV_OBJ_FLAG_HIDDEN); return; }
   lv_obj_remove_flag(mark, LV_OBJ_FLAG_HIDDEN);
   lv_obj_set_pos(mark, px(v), -2);
   lv_obj_set_style_bg_color(mark, lv_color_hex(mark_col), 0);
 };
+// Band judgement shared by tiles and detail cards:
+// 0 in band, 1 near / above target (amber), 2 out / at alert (red), -1 unknown.
+auto judge = [](float v, float lo, float hi, float alert, float near) {
+  if (std::isnan(v)) return -1;
+  if (!std::isnan(alert) && v >= alert) return 2;
+  if (!std::isnan(hi) && v > hi) return (std::isnan(alert) && v > hi + near) ? 2 : 1;
+  if (!std::isnan(lo) && v < lo) return v < lo - near ? 2 : 1;
+  return 0;
+};
+const uint32_t J_COL[] = {0x10B981, 0xFBBF24, 0xEF4444};
 const bool night = id(night_on);
 const uint32_t C_TEXT = night ? 0x8C9CAE : 0xF8FAFC;
 const uint32_t C_HEAD = night ? 0xC28238 : 0xF8FAFC;
 const uint32_t C_UNIT = night ? 0x7D5627 : 0x38BDF8;
 const uint32_t C_CARD = night ? 0x080D13 : 0x131B24;
 const uint32_t C_CARD2 = night ? 0x0A1118 : 0x19232F;
+const uint32_t C_CARD3 = night ? 0x0A1118 : 0x16202C;
 const uint32_t C_BORDER = night ? 0x131C26 : 0x223142;
-lv_obj_set_style_bg_color(id(page_home)->obj, lv_color_hex(night ? 0x040608 : 0x0B1015), 0);
-
-// ----------------------------------------------------------- top bar
+const uint32_t C_LABEL = night ? 0x506173 : 0x94A3B8;
+const uint32_t C_CYAN = night ? 0x506173 : 0x38BDF8;
+lv_obj_set_style_bg_color(id(w_page_home)->obj, lv_color_hex(night ? 0x040608 : 0x0B1015), 0);
 auto tnow = id(sntp_time).now();
-if (tnow.is_valid()) {
-  txt(id(clock_lbl), "%s", tnow.strftime("%-I:%M %p").c_str());
-  txt(id(date), "%s", tnow.strftime("%a %b %-d").c_str());
-}
 const bool mqtt_ok = id(mqtt_up);
-txt(id(mqtt_pill_l), mqtt_ok ? "MQTT Connected" : "MQTT Down");
-col(id(mqtt_pill_l), mqtt_ok ? 0xCBD5E1 : 0xFBBF24);
-bg(id(mqtt_pill), mqtt_ok ? 0x131B24 : 0x291B07, mqtt_ok ? 0x223142 : 0xD97706);
 const bool l75 = id(t75_stamp_ms) != 0 && now_ms - id(t75_stamp_ms) < 45000;
 const bool l16 = id(t16_stamp_ms) != 0 && now_ms - id(t16_stamp_ms) < 45000;
-txt(id(ble_pill_l), "BLE %d/2", (int) l75 + (int) l16);
-col(id(ble_pill_l), (l75 && l16) ? 0xCBD5E1 : 0xFBBF24);
 
 // ------------------------------------------------------------ alerts
 int n_crit = 0, n_warn = 0;
@@ -655,146 +791,233 @@ for (auto &kv : id(alerts)) {
   }
 }
 const int n_alerts = n_crit + n_warn;
-show(id(alert_banner), n_alerts > 0);
-// The banner covers the left of the top bar; keep only the clock beside it.
-show(id(mqtt_pill), n_alerts == 0);
-show(id(ble_pill), n_alerts == 0);
-if (n_alerts > 0) {
-  txt(id(alert_title), "%s", top_title.c_str());
-  txt(id(alert_msg), "%s", top_msg.c_str());
-  bg(id(alert_banner), top_is_crit ? 0x2D0E12 : 0x291B07, top_is_crit ? 0xDC2626 : 0xD97706);
-  col(id(alert_icon), top_is_crit ? 0xEF4444 : 0xFBBF24);
+// Link-down warnings are the panel's own; they count with HA's warnings.
+const int n_links_down = (int) !l75 + (int) !l16;
+const bool compact = n_alerts > 0;
+show(id(w_alert), compact);
+if (compact) {
+  std::string up = top_title;
+  for (auto &c : up) c = toupper((unsigned char) c);
+  txt(id(w_alert_title), "%s", up.c_str());
+  txt(id(w_alert_msg), "%s", top_msg.c_str());
+  bg(id(w_alert), top_is_crit ? 0x2D0E12 : 0x291B07, top_is_crit ? 0xEF4444 : 0xD97706);
+  fill(id(w_alert_disc), top_is_crit ? 0xEF4444 : 0xD97706);
   const bool is75 = top_title.find("75") != std::string::npos;
   const bool is16 = !is75 && (top_title.find("Nano") != std::string::npos ||
                               top_title.find("nano") != std::string::npos);
   id(alert_target) = is75 ? 1 : (is16 ? 2 : 0);
-  show(id(alert_btn), is75 || is16);
-  txt(id(alert_btn_l), is75 ? "OPEN 75 GALLON" : "OPEN NANO");
+  show(id(w_alert_btn), is75 || is16);
+  fill(id(w_alert_btn), top_is_crit ? 0xEF4444 : 0xD97706);
+  txt(id(w_alert_btn_l), is75 ? "OPEN 75 GALLON" : "OPEN NANO");
 }
+
+// ----------------------------------------------------------- top bar
+if (tnow.is_valid()) {
+  txt(id(w_clock), "%s", tnow.strftime("%-I:%M %p").c_str());
+  txt(id(w_date), "%s", tnow.strftime("%a %b %-d").c_str());
+}
+show(id(w_date), !night);
+show(id(w_wake), night);
+show(id(w_mqtt_pill), !night && !compact && n_links_down == 0);
+show(id(w_ble_pill), !night && !compact);
+txt(id(w_mqtt_l), mqtt_ok ? "MQTT Connected" : "MQTT Down");
+col(id(w_mqtt_l), mqtt_ok ? 0xCBD5E1 : 0xFBBF24);
+col(id(w_mqtt_i), mqtt_ok ? 0x94A3B8 : 0xFBBF24);
+if (l75 && l16) { txt(id(w_ble_l), "Dual BLE Active"); col(id(w_ble_l), 0xCBD5E1); col(id(w_ble_i), 0x94A3B8); }
+else if (l75 || l16) { txt(id(w_ble_l), "%s Connected", l75 ? "75G" : "Nano"); col(id(w_ble_l), 0x38BDF8); col(id(w_ble_i), 0x38BDF8); }
+else { txt(id(w_ble_l), "BLE Down"); col(id(w_ble_l), 0xFBBF24); col(id(w_ble_i), 0xFBBF24); }
+bg(id(w_logo), night ? 0x080D13 : 0x0C4A6E, night ? 0x131C26 : 0x0284C7);
+col(id(w_brand), C_TEXT);
+col(id(w_clock), C_TEXT);
 {
-  char b[64]; uint32_t fill, border, text;
-  if (n_crit > 0) {
-    snprintf(b, sizeof(b), "%d CRITICAL ALERT%s", n_crit, n_crit > 1 ? "S" : "");
-    fill = 0x2D0E12; border = 0xDC2626; text = 0xEF4444;
-  } else if (!l75 || !l16) {
-    char a[12]; age(now_ms - (!l75 ? id(t75_stamp_ms) : id(t16_stamp_ms)), a, sizeof(a));
-    const bool never = (!l75 ? id(t75_stamp_ms) : id(t16_stamp_ms)) == 0;
-    if (never) snprintf(b, sizeof(b), "WAITING FOR %s LINK", !l75 ? "75 GALLON" : "NANO");
-    else snprintf(b, sizeof(b), "%s LINK DOWN %s", !l75 ? "75 GALLON" : "NANO", a);
-    fill = 0x291B07; border = 0xD97706; text = 0xFBBF24;
+  char b[120]; uint32_t fl, bd, tx;
+  if (night) {
+    snprintf(b, sizeof(b), "NIGHT MODE (Lights off · tap to wake) • 10%% DISPLAY BACKLIGHT");
+    fl = 0x080D13; bd = 0x7D5627; tx = 0xC28238;
+  } else if (n_crit > 0) {
+    snprintf(b, sizeof(b), "%d CRITICAL ALERT%s ACTIVE — IMMEDIATE ACTION REQUIRED", n_crit, n_crit > 1 ? "S" : "");
+    fl = 0x2D0E12; bd = 0xDC2626; tx = 0xEF4444;
+  } else if (n_links_down > 0) {
+    const bool down75 = !l75;
+    const uint32_t st = down75 ? id(t75_stamp_ms) : id(t16_stamp_ms);
+    if (st == 0) snprintf(b, sizeof(b), "WAITING FOR %s BLE LINK", down75 ? "75 GALLON" : "NANO");
+    else { char a[16]; age(now_ms - st, a, sizeof(a));
+           snprintf(b, sizeof(b), "%d CONNECTION WARNING: %s BLE LINK DOWN (%s)", n_links_down,
+                    down75 ? "75 GALLON" : "NANO", a); }
+    fl = 0x291B07; bd = 0xD97706; tx = 0xFBBF24;
   } else if (n_warn > 0) {
-    snprintf(b, sizeof(b), "%d WARNING%s", n_warn, n_warn > 1 ? "S" : "");
-    fill = 0x291B07; border = 0xD97706; text = 0xFBBF24;
+    snprintf(b, sizeof(b), "%d WARNING%s ACTIVE", n_warn, n_warn > 1 ? "S" : "");
+    fl = 0x291B07; bd = 0xD97706; tx = 0xFBBF24;
   } else {
-    snprintf(b, sizeof(b), "ALL SYSTEMS NORMAL");
-    fill = 0x0F291E; border = 0x059669; text = 0x10B981;
+    snprintf(b, sizeof(b), "ALL SYSTEMS NORMAL • 0 ALERTS");
+    fl = 0x0F291E; bd = 0x059669; tx = 0x10B981;
   }
-  if (night) { fill = 0x080D13; border = 0x131C26; text = text == 0x10B981 ? 0x366B56 : text; }
-  txt(id(status_pill_l), "%s", b);
-  col(id(status_pill_l), text);
-  bg(id(status_pill), fill, border);
+  txt(id(w_status_l), "%s", b);
+  col(id(w_status_l), tx);
+  bg(id(w_status), fl, bd);
+  fill(id(w_status_dot), tx);
 }
 
 // ----------------------------------------------------- bottom strip
 {
-  for (lv_obj_t *c : {id(ro_card), id(wc_card), id(ha_card)}) bg(c, C_CARD, C_BORDER);
-  bg(id(wc_open), night ? 0x0A1118 : 0x0284C7, night ? 0x131C26 : 0x38BDF8);
-  bg(id(logo), night ? 0x080D13 : 0x0C4A6E, night ? 0x131C26 : 0x0284C7);
-  col(id(brand), C_TEXT);
-  col(id(clock_lbl), C_TEXT);
+  for (lv_obj_t *c : {id(w_ro_card), id(w_ha_card)}) bg(c, C_CARD, C_BORDER);
+  bg(id(w_wc_card), C_CARD, night ? 0x131C26 : 0x0284C7);
+  bg(id(w_wc_open), night ? 0x0A1118 : 0x0284C7, night ? 0x131C26 : 0x38BDF8);
+  char t1[16], t2[16];
+  // RO
   const bool ro_on = id(ro_online);
-  if (!ro_on) { txt(id(ro_pill_l), "OFFLINE"); col(id(ro_pill_l), 0xFBBF24); bg(id(ro_pill), 0x291B07, 0xD97706); }
-  else if (id(ro_flowing)) { txt(id(ro_pill_l), "FLOWING %.2f GPM", std::isnan(id(ro_rate)) ? 0.0f : id(ro_rate)); col(id(ro_pill_l), 0x38BDF8); bg(id(ro_pill), 0x0C4A6E, 0x0284C7); }
-  else { txt(id(ro_pill_l), "IDLE"); col(id(ro_pill_l), 0x94A3B8); bg(id(ro_pill), 0x19232F, 0x334155); }
-  if (std::isnan(id(ro_fill))) txt(id(ro_val), "--"); else txt(id(ro_val), "%.1f", id(ro_fill));
-  lv_obj_update_layout(id(ro_val));
-  lv_obj_align_to(id(ro_of), id(ro_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
-  if (std::isnan(id(ro_target))) txt(id(ro_of), "/ -- gal"); else txt(id(ro_of), "/ %.1f gal", id(ro_target));
+  if (!ro_on) { txt(id(w_ro_pill_l), "OFFLINE"); col(id(w_ro_pill_l), 0xFBBF24); bg(id(w_ro_pill), 0x291B07, 0xD97706); }
+  else if (id(ro_flowing)) { txt(id(w_ro_pill_l), "FLOWING • %.2f GPM", std::isnan(id(ro_rate)) ? 0.0f : id(ro_rate)); col(id(w_ro_pill_l), C_CYAN); bg(id(w_ro_pill), night ? 0x080D13 : 0x0C4A6E, night ? 0x131C26 : 0x0284C7); }
+  else { txt(id(w_ro_pill_l), "IDLE"); col(id(w_ro_pill_l), C_LABEL); bg(id(w_ro_pill), C_CARD2, night ? 0x131C26 : 0x334155); }
+  if (std::isnan(id(ro_fill))) txt(id(w_ro_val), "--"); else txt(id(w_ro_val), "%.1f", id(ro_fill));
+  col(id(w_ro_val), C_TEXT);
+  lv_obj_update_layout(id(w_ro_val));
+  lv_obj_align_to(id(w_ro_of), id(w_ro_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+  if (std::isnan(id(ro_target))) txt(id(w_ro_of), "/ -- gal"); else txt(id(w_ro_of), "/ %.1f gal", id(ro_target));
   const bool pct_ok = !std::isnan(id(ro_fill)) && !std::isnan(id(ro_target)) && id(ro_target) > 0;
   const int pct = pct_ok ? (int) roundf(id(ro_fill) / id(ro_target) * 100.0f) : 0;
-  if (pct_ok) txt(id(ro_pct), "%d%% of target", pct); else txt(id(ro_pct), "");
-  lv_bar_set_value(id(ro_bar), std::min(100, pct), LV_ANIM_OFF);
-  txt(id(ro_reached), "Target reached: %s", id(ro_reached) ? "YES" : "NO");
-  if (std::isnan(id(ro_total))) txt(id(ro_total), ""); else txt(id(ro_total), "Lifetime: %.0f gal", id(ro_total));
-
-  if (!id(wc_online)) { txt(id(wc_batt_h), "Offline"); col(id(wc_batt_h), 0xFBBF24); }
-  else if (std::isnan(id(wc_batt))) { txt(id(wc_batt_h), "Battery --"); col(id(wc_batt_h), 0x94A3B8); }
-  else { txt(id(wc_batt_h), "Battery %.0f%%", id(wc_batt)); col(id(wc_batt_h), id(wc_batt_low) ? 0xFBBF24 : 0x10B981); }
-  if (id(wc_last_start) == 0) txt(id(wc_last_h), "No change recorded yet");
+  if (pct_ok) txt(id(w_ro_pct), "%d%% of Target", pct); else txt(id(w_ro_pct), "");
+  lv_bar_set_value(id(w_ro_bar), std::min(100, pct), LV_ANIM_OFF);
+  txt(id(w_ro_reached), "Target Reached: %s", id(ro_reached) ? "YES" : "NO");
+  if (std::isnan(id(ro_total))) txt(id(w_ro_total), "");
+  else { thou(id(ro_total), t1, sizeof(t1)); txt(id(w_ro_total), "Total: %s gal", t1); }
+  // Water-change meter
+  const bool wc_on = id(wc_online);
+  if (!wc_on || std::isnan(id(wc_batt))) { txt(id(w_wc_batt), "--"); col(id(w_wc_batt), C_LABEL); col(id(w_wc_batt_i), C_LABEL); }
+  else { const uint32_t c = id(wc_batt_low) ? 0xFBBF24 : (night ? 0x366B56 : 0x10B981);
+         txt(id(w_wc_batt), "%.0f%%", id(wc_batt)); col(id(w_wc_batt), c); col(id(w_wc_batt_i), c); }
+  show(id(w_wc_ready), !night);
+  if (!wc_on) { txt(id(w_wc_ready_l), "OFFLINE"); col(id(w_wc_ready_l), 0xFBBF24); }
+  else if (id(wc_flowing)) { txt(id(w_wc_ready_l), id(wc_draining) ? "DRAINING" : "REFILLING"); col(id(w_wc_ready_l), 0x38BDF8); }
+  else { txt(id(w_wc_ready_l), "READY"); col(id(w_wc_ready_l), 0xCBD5E1); }
+  if (id(wc_last_start) == 0) txt(id(w_wc_last), "Last Change: none recorded yet");
   else {
     auto t = ESPTime::from_epoch_local(id(wc_last_start));
     const int days = tnow.is_valid() ? (int) ((tnow.timestamp - id(wc_last_start)) / 86400) : -1;
-    if (days >= 0) txt(id(wc_last_h), "Last change: %s (%dd ago)", t.strftime("%b %-d").c_str(), days);
-    else txt(id(wc_last_h), "Last change: %s", t.strftime("%b %-d").c_str());
+    if (days >= 0) txt(id(w_wc_last), "Last Change: %s (%dd ago)", t.strftime("%b %-d").c_str(), days);
+    else txt(id(w_wc_last), "Last Change: %s", t.strftime("%b %-d").c_str());
   }
-  txt(id(wc_mode_h), "Mode: %s  ·  %s", id(wc_draining) ? "Draining" : "Refilling",
-      id(wc_flowing) ? "flowing" : "not flowing");
-
-  if (std::isnan(id(ha_livestock_days)) || !mqtt_ok) txt(id(ha_v1), "--");
-  else txt(id(ha_v1), "%.0f days", id(ha_livestock_days));
-  if (!mqtt_ok) { txt(id(ha_v2), "--"); col(id(ha_v2), 0xF8FAFC); }
-  else { txt(id(ha_v2), "%d", n_alerts); col(id(ha_v2), n_crit ? 0xEF4444 : (n_warn ? 0xFBBF24 : 0x10B981)); }
+  col(id(w_wc_last), night ? 0x8C9CAE : 0xCBD5E1);
+  if (std::isnan(id(wc_volume))) txt(id(w_wc_vol_h), "75 Gal Net Volume: --");
+  else txt(id(w_wc_vol_h), "75 Gal Net Volume: ~%.0f gal", id(wc_volume));
+  if (!wc_on) txt(id(w_wc_mode_h), "Mode: meter offline");
+  else txt(id(w_wc_mode_h), "Mode: %s (%s)", id(wc_flowing) ? (id(wc_draining) ? "Draining" : "Refilling") : "Standby",
+           id(wc_draining) ? "Drain" : "Refill");
+  if (std::isnan(id(wc_rate))) txt(id(w_wc_flow_h), ""); else txt(id(w_wc_flow_h), "Flow: %.1f gpm", id(wc_flowing) ? id(wc_rate) : 0.0f);
+  // Home Assistant
+  const int issues = n_alerts + n_links_down;
+  if (!mqtt_ok) { txt(id(w_ha_pill_l), "MQTT DOWN"); col(id(w_ha_pill_l), 0xFBBF24); bg(id(w_ha_pill), 0x291B07, 0xD97706); }
+  else if (n_crit) { txt(id(w_ha_pill_l), "%d CRITICAL", n_crit); col(id(w_ha_pill_l), 0xEF4444); bg(id(w_ha_pill), 0x2D0E12, 0xDC2626); }
+  else if (issues) { txt(id(w_ha_pill_l), "%d WARNING%s", issues, issues > 1 ? "S" : ""); col(id(w_ha_pill_l), 0xFBBF24); bg(id(w_ha_pill), 0x291B07, 0xD97706); }
+  else { txt(id(w_ha_pill_l), "SYNC OK"); col(id(w_ha_pill_l), night ? 0x366B56 : 0x10B981); bg(id(w_ha_pill), night ? 0x080D13 : 0x0F291E, night ? 0x131C26 : 0x059669); }
+  const bool ha_alert_mode = mqtt_ok && issues > 0;
+  if (n_crit) bg(id(w_ha_card), night ? 0x080D13 : 0x1A1114, 0xDC2626);
+  else if (ha_alert_mode) bg(id(w_ha_card), night ? 0x080D13 : 0x1A1610, 0xD97706);
+  show(id(w_ha_alert), ha_alert_mode);
+  show(id(w_ha_k1), !ha_alert_mode); show(id(w_ha_v1), !ha_alert_mode);
+  show(id(w_ha_k2), !ha_alert_mode); show(id(w_ha_v2), !ha_alert_mode);
   auto dusk = id(sun_pa).sunset(-6.0);
-  if (dusk.has_value()) txt(id(ha_v3), "%s", dusk->strftime("%-I:%M %p").c_str()); else txt(id(ha_v3), "--");
+  if (ha_alert_mode) {
+    if (n_alerts) txt(id(w_ha_alert), "%s", top_title.c_str());
+    else {
+      const uint32_t st = !l75 ? id(t75_stamp_ms) : id(t16_stamp_ms);
+      char a[12]; age_short(now_ms - st, a, sizeof(a));
+      if (st) txt(id(w_ha_alert), "%s BLE Link Down (%s)", !l75 ? "75G" : "Nano", a);
+      else txt(id(w_ha_alert), "%s BLE Link Down", !l75 ? "75G" : "Nano");
+    }
+    col(id(w_ha_alert), n_crit ? 0xEF4444 : 0xFBBF24);
+    if (std::isnan(id(ha_livestock_days))) txt(id(w_ha_k3), "Losses: --");
+    else txt(id(w_ha_k3), "Losses: %.0fd clean", id(ha_livestock_days));
+    if (dusk.has_value()) txt(id(w_ha_v3), "Dusk: %s", dusk->strftime("%-I:%M %p").c_str()); else txt(id(w_ha_v3), "");
+    col(id(w_ha_v3), 0x94A3B8);
+  } else {
+    txt(id(w_ha_k1), "Livestock Loss:"); txt(id(w_ha_k2), "Civil Dusk:"); txt(id(w_ha_k3), "Active Alerts:");
+    if (std::isnan(id(ha_livestock_days)) || !mqtt_ok) txt(id(w_ha_v1), "--");
+    else txt(id(w_ha_v1), "%.0f days clean", id(ha_livestock_days));
+    col(id(w_ha_v1), night ? 0x366B56 : 0x10B981);
+    if (dusk.has_value()) txt(id(w_ha_v2), "%s", dusk->strftime("%-I:%M %p").c_str()); else txt(id(w_ha_v2), "--");
+    col(id(w_ha_v2), C_TEXT);
+    if (!mqtt_ok) txt(id(w_ha_v3), "--"); else txt(id(w_ha_v3), "%d Warnings", n_warn);
+    col(id(w_ha_v3), C_CYAN);
+  }
+  (void) t2;
 }
 
 // ---------------------------------------------------- water change page
 {
   const bool dr = id(wc_draining);
-  bg(id(wc_drain), dr ? 0x261711 : 0x1E293B, dr ? 0xEA580C : 0x334155);
-  bg(id(wc_fill), !dr ? 0x0C4A6E : 0x1E293B, !dr ? 0x0284C7 : 0x334155);
-  col(id(wc_drain_l), dr ? 0xFB923C : 0x94A3B8);
-  col(id(wc_fill_l), !dr ? 0x38BDF8 : 0x94A3B8);
-  if (!id(wc_online)) txt(id(wc_state_l), "METER OFFLINE");
-  else if (!id(wc_flowing)) txt(id(wc_state_l), "%s  ·  IDLE", dr ? "DRAINING" : "REFILLING");
-  else if (std::isnan(id(wc_rate))) txt(id(wc_state_l), "%s", dr ? "DRAINING" : "REFILLING");
-  else txt(id(wc_state_l), "%s  ·  %.1f GPM", dr ? "DRAINING" : "REFILLING", id(wc_rate));
-  if (std::isnan(id(wc_batt))) txt(id(wc_batt_l), "Hose battery --");
-  else txt(id(wc_batt_l), "Hose battery %.0f%%%s", id(wc_batt), id(wc_batt_low) ? " (LOW)" : "");
-  col(id(wc_batt_l), id(wc_batt_low) ? 0xFBBF24 : 0x10B981);
-  bg(id(wc_batt_pill), id(wc_batt_low) ? 0x291B07 : 0x0F291E, id(wc_batt_low) ? 0xD97706 : 0x059669);
-  txt(id(wc_mqtt_l), mqtt_ok ? "MQTT Live" : "MQTT Down");
+  char t1[16];
+  bg(id(w_wc_drain), dr ? 0x261711 : 0x1E293B, dr ? 0xEA580C : 0x334155);
+  bg(id(w_wc_fill), !dr ? 0x0C4A6E : 0x1E293B, !dr ? 0x0284C7 : 0x334155);
+  txt(id(w_wc_drain_l), dr ? "MODE: DRAINING (ACTIVE)" : "SWITCH TO DRAIN");
+  txt(id(w_wc_fill_l), !dr ? "MODE: REFILLING (ACTIVE)" : "SWITCH TO REFILL");
+  col(id(w_wc_drain_l), dr ? 0xFB923C : 0x64748B); col(id(w_wc_drain_i), dr ? 0xFB923C : 0x64748B);
+  col(id(w_wc_fill_l), !dr ? 0x38BDF8 : 0x64748B); col(id(w_wc_fill_i), !dr ? 0x38BDF8 : 0x64748B);
+  txt(id(w_wc_switch_l), dr ? "SWITCH MODE (REFILL)" : "SWITCH MODE (DRAIN)");
+  if (!id(wc_online)) txt(id(w_wc_state_l), "METER OFFLINE");
+  else if (!id(wc_flowing)) txt(id(w_wc_state_l), "%s • IDLE", dr ? "DRAINING" : "REFILLING");
+  else if (std::isnan(id(wc_rate))) txt(id(w_wc_state_l), "%s ACTIVE", dr ? "DRAINING" : "REFILLING");
+  else txt(id(w_wc_state_l), "%s ACTIVE • %.1f GPM", dr ? "DRAINING" : "REFILLING", id(wc_rate));
+  if (std::isnan(id(wc_batt))) txt(id(w_wc_batt_l), "Hose Batt: --");
+  else txt(id(w_wc_batt_l), "Hose Batt: %.0f%% (%s)", id(wc_batt), id(wc_batt_low) ? "LOW" : "OK");
+  col(id(w_wc_batt_l), id(wc_batt_low) ? 0xFBBF24 : 0x10B981);
+  col(id(w_wc_batt_pi), id(wc_batt_low) ? 0xFBBF24 : 0x10B981);
+  bg(id(w_wc_batt_pill), id(wc_batt_low) ? 0x291B07 : 0x0F291E, id(wc_batt_low) ? 0xD97706 : 0x059669);
+  txt(id(w_wc_mqtt_l), mqtt_ok ? "MQTT Live" : "MQTT Down");
   const float big = dr ? id(wc_removed) : id(wc_added);
-  txt(id(wc_big_cap), dr ? "WATER REMOVED THIS CHANGE" : "WATER ADDED THIS CHANGE");
-  col(id(wc_big_cap), dr ? 0xFB923C : 0x38BDF8);
-  if (std::isnan(big)) txt(id(wc_big), "--"); else txt(id(wc_big), "%.1f", big);
-  lv_obj_update_layout(id(wc_big));
-  lv_obj_align_to(id(wc_big_u), id(wc_big), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -10);
-  if (std::isnan(id(wc_volume))) txt(id(wc_vol), "");
-  else txt(id(wc_vol), "%.0f gal of water", id(wc_volume));
-  if (std::isnan(id(wc_pct))) txt(id(wc_pct), "--"); else txt(id(wc_pct), "%.1f%%", id(wc_pct));
-  lv_arc_set_value(id(wc_arc), std::isnan(id(wc_pct)) ? 0 : (int) std::min(1000.0f, id(wc_pct) * 10.0f));
-  lv_obj_set_style_arc_color(id(wc_arc), lv_color_hex(dr ? 0xFB923C : 0x0284C7), LV_PART_INDICATOR);
-  if (std::isnan(id(wc_rate))) txt(id(wc_rate), "--"); else txt(id(wc_rate), "%.2f gpm", id(wc_rate));
-  txt(id(wc_flowing), "Flowing: %s", id(wc_flowing) ? "YES" : "NO");
-  if (std::isnan(id(wc_added))) txt(id(wc_added), "--"); else txt(id(wc_added), "%.1f gal", id(wc_added));
-  if (std::isnan(id(wc_removed))) txt(id(wc_removed2), "--"); else txt(id(wc_removed2), "%.1f gal", id(wc_removed));
-  if (std::isnan(id(wc_net))) txt(id(wc_net), "--");
-  else { txt(id(wc_net), "%+.1f gal", id(wc_net)); col(id(wc_net), id(wc_net) < -0.05f ? 0xFB923C : 0xF8FAFC); }
-  if (!std::isnan(id(wc_removed)) && !std::isnan(id(wc_added)))
-    txt(id(wc_other), dr ? "Added so far: %.1f gal" : "Removed this change: %.1f gal", dr ? id(wc_added) : id(wc_removed));
-  else txt(id(wc_other), "");
-  txt(id(ro_online_l), id(ro_online) ? "MQTT ONLINE" : "OFFLINE");
-  if (std::isnan(id(ro_fill))) txt(id(ro_d_val), "--"); else txt(id(ro_d_val), "%.2f gal", id(ro_fill));
+  txt(id(w_wc_big_cap), dr ? "WATER REMOVED THIS CHANGE" : "WATER ADDED THIS CHANGE");
+  col(id(w_wc_big_cap), dr ? 0xFB923C : 0x38BDF8); col(id(w_wc_big_i), dr ? 0xFB923C : 0x38BDF8);
+  if (std::isnan(big)) txt(id(w_wc_big), "--"); else txt(id(w_wc_big), "%.1f", big);
+  lv_obj_update_layout(id(w_wc_big));
+  lv_obj_align_to(id(w_wc_big_u), id(w_wc_big), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -10);
+  if (std::isnan(id(wc_volume))) txt(id(w_wc_vol), ""); else txt(id(w_wc_vol), "Actual Net Volume: ~%.0f Gal", id(wc_volume));
+  if (std::isnan(id(wc_pct))) txt(id(w_wc_pct), "--"); else txt(id(w_wc_pct), "%.1f%%", id(wc_pct));
+  lv_arc_set_value(id(w_wc_arc), std::isnan(id(wc_pct)) ? 0 : (int) std::min(1000.0f, id(wc_pct) * 10.0f));
+  lv_obj_set_style_arc_color(id(w_wc_arc), lv_color_hex(dr ? 0xFB923C : 0x0284C7), LV_PART_INDICATOR);
+  if (std::isnan(id(wc_rate))) txt(id(w_wc_rate), "--"); else txt(id(w_wc_rate), "%.1f gpm", id(wc_flowing) ? id(wc_rate) : 0.0f);
+  txt(id(w_wc_flowing), "Flowing: %s", id(wc_flowing) ? "YES" : "NO");
+  col(id(w_wc_flowing), id(wc_flowing) ? 0x10B981 : 0x64748B);
+  if (std::isnan(id(wc_added))) txt(id(w_wc_added), "--"); else txt(id(w_wc_added), "%.1f gal", id(wc_added));
+  txt(id(w_wc_added_s), dr ? "Refill inactive" : "Refilling");
+  if (std::isnan(id(wc_net))) txt(id(w_wc_net), "--"); else txt(id(w_wc_net), "%+.1f gal", id(wc_net));
+  col(id(w_wc_net), !std::isnan(id(wc_net)) && id(wc_net) < -0.05f ? 0xFB923C : 0xF8FAFC);
+  txt(id(w_wc_net_s), "%s", !std::isnan(id(wc_net)) && id(wc_net) < -0.05f ? "Current deficit"
+                      : (!std::isnan(id(wc_net)) && id(wc_net) > 0.05f ? "Current surplus" : "Balanced"));
+  // RO card
+  txt(id(w_ro_on_l), id(ro_online) ? "MQTT Online" : "Offline");
+  if (std::isnan(id(ro_fill))) txt(id(w_ro_d_val), "--"); else txt(id(w_ro_d_val), "%.1f", id(ro_fill));
+  lv_obj_update_layout(id(w_ro_d_val));
+  lv_obj_align_to(id(w_ro_d_u), id(w_ro_d_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
   const float tgt = std::isnan(id(ro_target_pending)) ? id(ro_target) : id(ro_target_pending);
-  if (std::isnan(tgt)) { txt(id(ro_d_of), ""); txt(id(ro_d_tgt), "--"); }
+  if (std::isnan(tgt)) { txt(id(w_ro_d_of), ""); txt(id(w_ro_d_tgt), "SET TARGET (--)"); }
   else {
-    txt(id(ro_d_tgt), "%.1f gal", tgt);
-    if (!std::isnan(id(ro_fill)) && tgt > 0) txt(id(ro_d_of), "of %.1f (%d%%)", tgt, (int) roundf(id(ro_fill) / tgt * 100));
-    else txt(id(ro_d_of), "of %.1f", tgt);
+    txt(id(w_ro_d_tgt), "SET TARGET (%.1f GAL)", tgt);
+    col(id(w_ro_d_tgt), std::isnan(id(ro_target_pending)) ? 0xCBD5E1 : 0xFBBF24);
+    if (!std::isnan(id(ro_fill)) && tgt > 0) txt(id(w_ro_d_of), "Target: %.1f gal (%d%%)", tgt, (int) roundf(id(ro_fill) / tgt * 100));
+    else txt(id(w_ro_d_of), "Target: %.1f gal", tgt);
   }
-  lv_bar_set_value(id(ro_d_bar), (!std::isnan(id(ro_fill)) && !std::isnan(tgt) && tgt > 0)
+  lv_bar_set_value(id(w_ro_d_bar), (!std::isnan(id(ro_fill)) && !std::isnan(tgt) && tgt > 0)
                    ? std::min(100, (int) roundf(id(ro_fill) / tgt * 100)) : 0, LV_ANIM_OFF);
-  if (id(ro_flowing) && !std::isnan(id(ro_rate))) txt(id(ro_d_flow), "Flowing  ·  %.2f gpm", id(ro_rate));
-  else txt(id(ro_d_flow), "Not flowing");
-  txt(id(ro_d_reached), id(ro_reached) ? "YES" : "NO");
-  col(id(ro_d_reached), id(ro_reached) ? 0x10B981 : 0xF8FAFC);
-  if (std::isnan(id(ro_total))) txt(id(ro_d_total), "--"); else txt(id(ro_d_total), "%.0f gal", id(ro_total));
-  if (std::isnan(id(wc_batt))) txt(id(wc_d_batt), "--");
-  else txt(id(wc_d_batt), "%.0f%%%s", id(wc_batt), id(wc_batt_low) ? "  LOW" : "");
-  if (id(wc_last_start) == 0) txt(id(wc_d_last), "--");
-  else txt(id(wc_d_last), "%s", ESPTime::from_epoch_local(id(wc_last_start)).strftime("%b %-d, %-I:%M %p").c_str());
-  if (std::isnan(id(wc_volume))) txt(id(wc_d_vol), "--"); else txt(id(wc_d_vol), "%.1f gal", id(wc_volume));
+  if (id(ro_flowing) && !std::isnan(id(ro_rate))) txt(id(w_ro_d_flow), "Flowing • %.2f gpm", id(ro_rate));
+  else txt(id(w_ro_d_flow), "Not flowing");
+  txt(id(w_ro_d_reached), id(ro_reached) ? "YES" : "NO (In Progress)");
+  col(id(w_ro_d_reached), id(ro_reached) ? 0x10B981 : 0x38BDF8);
+  if (id(ro_flowing) && !std::isnan(id(ro_rate))) txt(id(w_ro_d_state), "Flowing (%.2f gpm)", id(ro_rate));
+  else txt(id(w_ro_d_state), "%s", id(ro_online) ? "Idle" : "Offline");
+  col(id(w_ro_d_state), id(ro_flowing) ? 0x10B981 : 0x94A3B8);
+  if (std::isnan(id(ro_total))) txt(id(w_ro_d_total), "--");
+  else { thou(id(ro_total), t1, sizeof(t1)); txt(id(w_ro_d_total), "%s gal produced", t1); }
+  if (std::isnan(id(wc_batt))) txt(id(w_wc_d_batt), "--");
+  else txt(id(w_wc_d_batt), "%.0f%% (Low Batt: %s)", id(wc_batt), id(wc_batt_low) ? "YES" : "NO");
+  col(id(w_wc_d_batt), id(wc_batt_low) ? 0xFBBF24 : 0x10B981);
+  if (id(wc_last_start) == 0) txt(id(w_wc_d_last), "--");
+  else {
+    const int days = tnow.is_valid() ? (int) ((tnow.timestamp - id(wc_last_start)) / 86400) : -1;
+    auto t = ESPTime::from_epoch_local(id(wc_last_start));
+    if (days >= 0) txt(id(w_wc_d_last), "%s (%dd ago)", t.strftime("%b %-d").c_str(), days);
+    else txt(id(w_wc_d_last), "%s", t.strftime("%b %-d").c_str());
+  }
+  if (std::isnan(id(wc_volume))) txt(id(w_wc_d_vol), "--"); else txt(id(w_wc_d_vol), "~%.1f gal", id(wc_volume));
 }
 """
 
@@ -803,255 +1026,318 @@ UPDATE_TANK = r"""
 {
   const bool live = id(@T@_stamp_ms) != 0 && now_ms - id(@T@_stamp_ms) < 45000;
   const bool ever = id(@T@_stamp_ms) != 0;
-  const float temp = id(@T@_temp), sp = id(@T@_sp);
+  const bool stale = !live;
+  const float temp = id(@T@_temp), sp = id(@T@_sp), swing = id(@T@_swing), dr = id(@T@_drift);
   const bool crit = live && (id(@T@_fault) ||
                     (!std::isnan(temp) && !std::isnan(sp) && fabsf(temp - sp) > 2.0f));
-  // Card frame.
-  if (!live) {
-    lv_obj_set_style_bg_color(id(@T@_card), lv_color_hex(night ? 0x080D13 : 0x0E141B), 0);
-    lv_obj_set_style_border_color(id(@T@_card), lv_color_hex(0x475569), 0);
-    lv_obj_set_style_border_width(id(@T@_card), 1, 0);
-  } else if (crit) {
-    lv_obj_set_style_bg_color(id(@T@_card), lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_border_color(id(@T@_card), lv_color_hex(0xEF4444), 0);
-    lv_obj_set_style_border_width(id(@T@_card), 2, 0);
-  } else {
-    lv_obj_set_style_bg_color(id(@T@_card), lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_border_color(id(@T@_card), lv_color_hex(C_BORDER), 0);
-    lv_obj_set_style_border_width(id(@T@_card), 1, 0);
-  }
-  bg(id(@T@_hero), crit ? 0x2D0E12 : (live ? C_CARD2 : 0x0E141B), crit ? 0xDC2626 : (live ? (night ? 0x131C26 : 0x243447) : 0x475569));
-  col(id(@T@_title), live ? C_TEXT : 0x94A3B8);
-  show(id(@T@_tag), live);
-  show(id(@T@_stale), !live);
-  char a[12]; age(now_ms - id(@T@_stamp_ms), a, sizeof(a));
-  if (live) {
-    txt(id(@T@_link), "BLE Live  ·  %us ago", (unsigned) ((now_ms - id(@T@_stamp_ms)) / 1000));
-    col(id(@T@_link), night ? 0x506173 : 0x38BDF8);
-  } else if (!ever && id(@T@_stamp) == 0) {
-    txt(id(@T@_link), "Waiting for Bluetooth link");
-    col(id(@T@_link), 0xFBBF24);
-    txt(id(@T@_stale_l), "NO DATA");
-  } else {
-    if (id(@T@_stamp) != 0) {
-      txt(id(@T@_link), "Link lost  ·  values from %s",
-          ESPTime::from_epoch_local(id(@T@_stamp)).strftime("%-I:%M:%S %p").c_str());
-    } else {
-      txt(id(@T@_link), "Bluetooth link lost");
+  char a[16]; age(now_ms - id(@T@_stamp_ms), a, sizeof(a));
+  char as[12]; age_short(now_ms - id(@T@_stamp_ms), as, sizeof(as));
+
+  // ---- layout: normal, or compact under the alert banner
+  {
+    static int last = -1;
+    if (last != (int) compact) {
+      last = compact;
+      @LAYOUT@
     }
-    col(id(@T@_link), 0xFBBF24);
-    if (ever) txt(id(@T@_stale_l), "STALE %s", a); else txt(id(@T@_stale_l), "STALE");
   }
 
-  // Hero temperature.
-  if (std::isnan(temp)) txt(id(@T@_temp), "--"); else txt(id(@T@_temp), "%.1f", temp);
-  col(id(@T@_temp), !live ? 0x64748B : (crit ? 0xEF4444 : C_HEAD));
-  lv_obj_set_style_text_decor(id(@T@_temp), live || std::isnan(temp) ? LV_TEXT_DECOR_NONE : LV_TEXT_DECOR_STRIKETHROUGH, 0);
-  col(id(@T@_unit), !live ? 0x475569 : (crit ? 0xEF4444 : C_UNIT));
-  lv_obj_update_layout(id(@T@_temp));
-  lv_obj_align_to(id(@T@_unit), id(@T@_temp), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -8);
-  const float swing = id(@T@_swing);
-  if (std::isnan(sp)) txt(id(@T@_sp), "Setpoint --");
-  else if (std::isnan(swing)) txt(id(@T@_sp), "Setpoint  %.1f °F", sp);
-  else txt(id(@T@_sp), "Setpoint  %.1f °F  (±%.1f°)", sp, swing);
-  col(id(@T@_sp), live ? (crit ? 0xEF4444 : (night ? 0x7D5627 : 0x38BDF8)) : 0x64748B);
-  bg(id(@T@_sp_box), C_CARD, night ? 0x131C26 : 0x334155);
-  if (@DUAL@) {
+  // ---- card frame and header
+  if (stale) bg(id(w_@T@_card), night ? 0x080D13 : 0x0E141B, 0x475569);
+  else if (crit) bg(id(w_@T@_card), night ? 0x080D13 : 0x1A1114, 0xEF4444);
+  else bg(id(w_@T@_card), C_CARD, C_BORDER);
+  lv_obj_set_style_border_width(id(w_@T@_card), crit ? 2 : 1, 0);
+  show(id(w_@T@_head), !stale);
+  show(id(w_@T@_link), !stale);
+  show(id(w_@T@_lost), stale);
+  show(id(w_@T@_frozen), stale && ever);
+  col(id(w_@T@_title), crit ? 0xEF4444 : C_TEXT);
+  if (live) {
+    txt(id(w_@T@_link_l), "BLE Live • %us ago", (unsigned) ((now_ms - id(@T@_stamp_ms)) / 1000));
+    col(id(w_@T@_link_l), C_CYAN); fill(id(w_@T@_link_dot), C_CYAN);
+  } else {
+    txt(id(w_@T@_lost_t), "%s", ever ? "BLUETOOTH LINK LOST" : "WAITING FOR BLUETOOTH LINK");
+    if (id(@T@_stamp) != 0)
+      txt(id(w_@T@_lost_s), "Showing values from %s • offline %s",
+          ESPTime::from_epoch_local(id(@T@_stamp)).strftime("%-I:%M:%S").c_str(), ever ? a : "since boot");
+    else
+      txt(id(w_@T@_lost_s), "No data from the controller since the panel started");
+    if (ever) txt(id(w_@T@_lost_pl), "STALE %s", as); else txt(id(w_@T@_lost_pl), "NO DATA");
+  }
+
+  // ---- hero
+  bg(id(w_@T@_hero), crit ? 0x2D0E12 : (live ? C_CARD2 : 0x0E141B),
+     crit ? 0xDC2626 : (live ? (night ? 0x131C26 : 0x243447) : 0x475569));
+  if (std::isnan(temp)) txt(id(w_@T@_temp), "--"); else txt(id(w_@T@_temp), "%.1f", temp);
+  col(id(w_@T@_temp), stale ? 0x64748B : (crit ? 0xEF4444 : C_HEAD));
+  lv_obj_set_style_text_decor(id(w_@T@_temp), stale && !std::isnan(temp) ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE, 0);
+  col(id(w_@T@_unit), stale ? 0x475569 : (crit ? 0xEF4444 : C_UNIT));
+  lv_obj_update_layout(id(w_@T@_temp));
+  lv_obj_align_to(id(w_@T@_unit), id(w_@T@_temp), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -8);
+  txt(id(w_@T@_sp_k), "%s", compact || stale ? "Target:" : "Setpoint:");
+  if (std::isnan(sp)) txt(id(w_@T@_sp_v), "--"); else txt(id(w_@T@_sp_v), "%.1f °F", sp);
+  if (stale) txt(id(w_@T@_sp_s), "(Unknown)");
+  else if (crit && !std::isnan(temp) && !std::isnan(sp)) txt(id(w_@T@_sp_s), "(%+.1f° %s)", temp - sp, temp < sp ? "Deficit" : "Over");
+  else if (std::isnan(swing)) txt(id(w_@T@_sp_s), ""); else txt(id(w_@T@_sp_s), "(±%.1f°)", swing);
+  col(id(w_@T@_sp_k), stale ? 0x64748B : C_TEXT);
+  col(id(w_@T@_sp_v), stale ? 0x64748B : (crit ? 0xEF4444 : C_CYAN));
+  col(id(w_@T@_sp_s), crit ? 0xEF4444 : 0x64748B);
+  bg(id(w_@T@_sp), C_CARD, crit ? 0xEF4444 : (night ? 0x131C26 : 0x334155));
+  //@DUAL{
+  {
     const float tb = id(@T@_temp_b), g = id(@T@_grad);
-    char pa[12], pb[12], pg[16];
+    char pa[12], pb[12];
     if (std::isnan(temp)) snprintf(pa, sizeof(pa), "--"); else snprintf(pa, sizeof(pa), "%.1f°", temp);
     if (std::isnan(tb)) snprintf(pb, sizeof(pb), "--"); else snprintf(pb, sizeof(pb), "%.1f°", tb);
-    if (std::isnan(g)) snprintf(pg, sizeof(pg), "--"); else snprintf(pg, sizeof(pg), "%+.1f °F", g);
-    txt(id(@T@_probes), "A  %s  ·  B  %s  ·  A-B  %s", pa, pb, pg);
-  } else {
-    txt(id(@T@_probes), "Single probe");
+    if (stale) txt(id(w_@T@_probes), "Dual Probe • Stale");
+    else txt(id(w_@T@_probes), "A: %s  •  B: %s  •", pa, pb);
+    show(id(w_@T@_grad), !stale);
+    if (std::isnan(g)) txt(id(w_@T@_grad_l), "Δ --"); else txt(id(w_@T@_grad_l), "Δ %+.1f °F", g);
+    col(id(w_@T@_grad_l), crit ? 0xEF4444 : C_CYAN);
+    bg(id(w_@T@_grad), C_CARD, crit ? 0xDC2626 : (night ? 0x131C26 : 0x0284C7));
   }
-  const float dr = id(@T@_drift);
-  if (!live || std::isnan(dr)) { txt(id(@T@_drift), live ? "" : "Drift --"); col(id(@T@_drift), 0x64748B); }
+  //@DUAL}
+  //@SINGLE{
+  txt(id(w_@T@_probes), "%s", stale ? "Single Probe • Stale" : "Single Probe Active");
+  //@SINGLE}
+  col(id(w_@T@_probes), stale ? 0x64748B : (crit ? 0xEF4444 : C_LABEL));
+  if (stale) { txt(id(w_@T@_drift), "Drift: -- °F/min (Frozen)"); col(id(w_@T@_drift), 0xFBBF24); }
+  else if (std::isnan(dr)) txt(id(w_@T@_drift), "");
   else {
     const bool falling = dr < -0.02f, rising = dr > 0.02f;
-    txt(id(@T@_drift), "%+.2f °F/min  %s", dr, falling ? "(falling)" : (rising ? "(rising)" : "(stable)"));
-    col(id(@T@_drift), crit && falling ? 0xEF4444 : (night ? 0x366B56 : 0x10B981));
+    const char *arrow = dr < -0.005f ? "↘" : (dr > 0.005f ? "↗" : "→");
+    if (crit && falling) txt(id(w_@T@_drift), "%s %+.2f °F/min (RAPID FALL)", arrow, dr);
+    else txt(id(w_@T@_drift), "%s %+.2f °F/min (%s)", arrow, dr, falling ? "Falling" : (rising ? "Rising" : "Stable"));
+    col(id(w_@T@_drift), crit && falling ? 0xEF4444 : (night ? 0x366B56 : (dr < -0.005f ? 0x94A3B8 : 0x10B981)));
   }
 
-  // Heater / fan tiles.
+  // ---- heater / fan tiles
   {
     const float h = id(@T@_heat), f = id(@T@_fan);
     const bool hon = id(@T@_heat_on), fon = id(@T@_fan_on);
     const bool hstall = crit && hon && h >= 99.0f && !std::isnan(dr) && dr < 0;
-    if (!live) {
-      txt(id(@T@_heat_val), "--  (unknown)"); txt(id(@T@_fan_val), "--  (unknown)");
-      col(id(@T@_heat_val), 0xFBBF24); col(id(@T@_fan_val), 0xFBBF24);
-      txt(id(@T@_heat_cap), "HEATER DUTY"); txt(id(@T@_fan_cap), "FAN DUTY");
-      bg(id(@T@_heat_tile), 0x0E141B, 0x334155); bg(id(@T@_fan_tile), 0x0E141B, 0x334155);
-      col(id(@T@_heat_icon), 0x475569); col(id(@T@_fan_icon), 0x475569);
+    if (stale) {
+      txt(id(w_@T@_heat_cap), "HEATER DUTY"); txt(id(w_@T@_fan_cap), "FAN DUTY");
+      txt(id(w_@T@_heat_val), "--%% (UNKNOWN)"); txt(id(w_@T@_fan_val), "--%% (UNKNOWN)");
+      col(id(w_@T@_heat_val), 0xFBBF24); col(id(w_@T@_fan_val), 0xFBBF24);
+      col(id(w_@T@_heat_cap), 0x94A3B8); col(id(w_@T@_fan_cap), 0x94A3B8);
+      bg(id(w_@T@_heat), 0x0E141B, 0x334155); bg(id(w_@T@_fan), 0x0E141B, 0x334155);
+      show(id(w_@T@_heat_i), false); show(id(w_@T@_fan_i), false);
+      show(id(w_@T@_heat_bar), false); show(id(w_@T@_fan_bar), false);
     } else {
-      txt(id(@T@_heat_cap), hstall ? "HEATER  NOT HEATING" : (hon ? "HEATER  ·  ON" : "HEATER  ·  IDLE"));
-      txt(id(@T@_heat_val), "%.0f%% duty", std::isnan(h) ? 0.0f : h);
-      col(id(@T@_heat_cap), hstall ? 0xEF4444 : (hon ? 0xFB923C : 0x94A3B8));
-      col(id(@T@_heat_val), hstall ? 0xEF4444 : (hon ? (night ? 0xB47834 : 0xFB923C) : C_TEXT));
-      bg(id(@T@_heat_tile), hstall ? 0x2D0E12 : (hon ? 0x261711 : (night ? 0x0A1118 : 0x16202C)),
-         hstall ? 0xDC2626 : (hon ? 0xEA580C : C_BORDER));
-      col(id(@T@_heat_icon), hon ? 0xFB923C : 0x64748B);
-      txt(id(@T@_fan_cap), fon ? "FAN  ·  ON" : "FAN  ·  IDLE");
-      txt(id(@T@_fan_val), "%.0f%% duty", std::isnan(f) ? 0.0f : f);
-      col(id(@T@_fan_cap), fon ? 0x38BDF8 : 0x94A3B8);
-      col(id(@T@_fan_val), C_TEXT);
-      bg(id(@T@_fan_tile), fon ? 0x0C4A6E : (night ? 0x0A1118 : 0x16202C), fon ? 0x0284C7 : C_BORDER);
-      col(id(@T@_fan_icon), fon ? 0x38BDF8 : 0x64748B);
+      show(id(w_@T@_heat_i), true); show(id(w_@T@_fan_i), true);
+      show(id(w_@T@_heat_bar), true); show(id(w_@T@_fan_bar), true);
+      txt(id(w_@T@_heat_cap), "%s", hstall ? "HEATER (STALLED)" : (hon ? "HEATER (DEMAND ON)" : "HEATER (IDLE)"));
+      if (hstall) txt(id(w_@T@_heat_val), "%.0f%% • NO HEAT", h);
+      else if (hon) txt(id(w_@T@_heat_val), "%.0f%% Duty", std::isnan(h) ? 0.0f : h);
+      else txt(id(w_@T@_heat_val), "%.0f%% Duty (OFF)", std::isnan(h) ? 0.0f : h);
+      col(id(w_@T@_heat_cap), hstall ? 0xEF4444 : (hon ? 0xFB923C : C_LABEL));
+      col(id(w_@T@_heat_val), hstall ? 0xEF4444 : (hon ? (night ? 0xB47834 : 0xFB923C) : C_TEXT));
+      bg(id(w_@T@_heat), hstall ? 0x3B1216 : (hon ? (night ? 0x150E0A : 0x261711) : C_CARD3),
+         hstall ? 0xEF4444 : (hon ? (night ? 0x7D5627 : 0xEA580C) : C_BORDER));
+      col(id(w_@T@_heat_i), hstall ? 0xEF4444 : (hon ? 0xFB923C : 0x64748B));
+      txt(id(w_@T@_fan_cap), "%s", fon ? "COOLING FAN (ON)" : "COOLING FAN");
+      if (fon) txt(id(w_@T@_fan_val), "%.0f%% Duty", std::isnan(f) ? 0.0f : f);
+      else txt(id(w_@T@_fan_val), "%.0f%% Duty (OFF)", std::isnan(f) ? 0.0f : f);
+      col(id(w_@T@_fan_cap), fon ? 0x38BDF8 : C_LABEL);
+      col(id(w_@T@_fan_val), C_TEXT);
+      bg(id(w_@T@_fan), fon ? 0x0C4A6E : C_CARD3, fon ? 0x0284C7 : C_BORDER);
+      col(id(w_@T@_fan_i), fon ? 0x38BDF8 : 0x64748B);
     }
-    lv_bar_set_value(id(@T@_heat_bar), live && !std::isnan(h) ? (int) h : 0, LV_ANIM_OFF);
-    lv_bar_set_value(id(@T@_fan_bar), live && !std::isnan(f) ? (int) f : 0, LV_ANIM_OFF);
+    lv_bar_set_value(id(w_@T@_heat_bar), live && !std::isnan(h) ? (int) h : 0, LV_ANIM_OFF);
+    lv_bar_set_value(id(w_@T@_fan_bar), live && !std::isnan(f) ? (int) f : 0, LV_ANIM_OFF);
   }
 
-  // TDS / pH tiles.
+  // ---- TDS / pH tiles and detail cards
   {
     const float tds = id(@T@_tds), tm = id(@T@_tds_mean);
-    const uint32_t vc = live ? C_TEXT : 0x64748B;
-    if (std::isnan(tds)) txt(id(@T@_tds_val), "--"); else txt(id(@T@_tds_val), "%.0f", tds);
-    col(id(@T@_tds_val), vc);
-    lv_obj_update_layout(id(@T@_tds_val));
-    lv_obj_align_to(id(@T@_tds_unit), id(@T@_tds_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
-    if (std::isnan(tm)) txt(id(@T@_tds_side), ""); else txt(id(@T@_tds_side), "1 h avg %.0f", tm);
-    const float lo = @TDS_LO@, hi = @TDS_HI@, al = @TDS_ALERT@;
-    const float judge = std::isnan(tm) ? tds : tm;
-    uint32_t tcol = 0x10B981; const char *ts = "In target";
-    if (std::isnan(judge)) { tcol = 0x94A3B8; ts = ""; }
-    else if (judge >= al) { tcol = 0xEF4444; ts = "Above alert"; }
-    else if (!std::isnan(hi) && judge > hi) { tcol = 0xFBBF24; ts = "Above target"; }
-    else if (!std::isnan(lo) && judge < lo) { tcol = 0xFBBF24; ts = "Below target"; }
-    if (std::isnan(lo)) txt(id(@T@_tds_tgt), "Target < %.0f", hi);
-    else txt(id(@T@_tds_tgt), "Target %.0f-%.0f", lo, hi);
-    if (!live) { txt(id(@T@_tds_tgt), "CACHED"); col(id(@T@_tds_tgt), 0xFBBF24); }
-    else col(id(@T@_tds_tgt), 0x94A3B8);
-    range(id(@T@_tds_trk), id(@T@_tds_trk_band), id(@T@_tds_trk_mark), live ? judge : NAN,
-          lo, hi, @TDS_MIN@, @TDS_MAX@, tcol);
-    // Detail screen.
-    if (std::isnan(tds)) txt(id(@T@_d_tds), "--"); else txt(id(@T@_d_tds), "%.0f", tds);
-    col(id(@T@_d_tds), vc);
-    lv_obj_update_layout(id(@T@_d_tds));
-    lv_obj_align_to(id(@T@_d_tds_u), id(@T@_d_tds), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
-    if (std::isnan(tm)) txt(id(@T@_d_tds_m), ""); else txt(id(@T@_d_tds_m), "1 h mean %.0f", tm);
-    txt(id(@T@_d_tds_st), "%s", live ? ts : "Stale");
-    col(id(@T@_d_tds_st), live ? tcol : 0xFBBF24);
-    if (std::isnan(lo)) txt(id(@T@_d_tds_tgt), "Target under %.0f ppm", hi);
-    else txt(id(@T@_d_tds_tgt), "Target %.0f-%.0f  ·  alert %.0f ppm", lo, hi, al);
-    range(id(@T@_d_tds_trk), id(@T@_d_tds_trk_band), id(@T@_d_tds_trk_mark), live ? judge : NAN,
-          lo, hi, @TDS_MIN@, @TDS_MAX@, tcol);
+    const float lo = @TDS_LO@, hi = @TDS_HI@, al = @TDS_ALERT@, mx = @TDS_MAX@;
+    const float jv = std::isnan(tm) ? tds : tm;
+    const int tj = judge(jv, lo, hi, al, 15.0f);
+    const uint32_t tcol = tj < 0 ? 0x94A3B8 : J_COL[tj];
+    const char *TJ[] = {"In Target Band", "Above Target", "Above Alert"};
+    txt(id(w_@T@_tds_cap), "%s", stale ? "TDS (CACHED)" : "TDS (PURITY)");
+    if (std::isnan(tds)) txt(id(w_@T@_tds_val), "--"); else txt(id(w_@T@_tds_val), "%.0f", tds);
+    col(id(w_@T@_tds_val), stale ? 0x64748B : C_TEXT);
+    lv_obj_update_layout(id(w_@T@_tds_val));
+    lv_obj_align_to(id(w_@T@_tds_unit), id(w_@T@_tds_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+    if (stale) { txt(id(w_@T@_tds_tgt), "STALE"); col(id(w_@T@_tds_tgt), 0xFBBF24); }
+    else {
+      if (compact) txt(id(w_@T@_tds_tgt), "%s", tj == 0 ? "In Target" : (tj > 0 ? TJ[tj] : ""));
+      else if (std::isnan(lo)) txt(id(w_@T@_tds_tgt), "Target: < %.0f", hi);
+      else txt(id(w_@T@_tds_tgt), "Band: %.0f–%.0f", lo, hi);
+      col(id(w_@T@_tds_tgt), compact && tj >= 0 ? tcol : C_LABEL);
+    }
+    if (std::isnan(tm)) txt(id(w_@T@_tds_side), ""); else txt(id(w_@T@_tds_side), "1h avg: %.0f", tm);
+    col(id(w_@T@_tds_side), stale ? 0x64748B : C_CYAN);
+    range(id(w_@T@_tds_trk), id(w_@T@_tds_trk_band), id(w_@T@_tds_trk_mark), live ? jv : NAN,
+          lo, hi, @TDS_MIN@, @TDS_MAXS@, tcol);
+    // detail
+    if (std::isnan(tds)) txt(id(w_@T@_d_tds), "--"); else txt(id(w_@T@_d_tds), "%.0f", tds);
+    col(id(w_@T@_d_tds), stale ? 0x64748B : 0xF8FAFC);
+    lv_obj_update_layout(id(w_@T@_d_tds));
+    lv_obj_align_to(id(w_@T@_d_tds_u), id(w_@T@_d_tds), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+    if (std::isnan(tm)) txt(id(w_@T@_d_tds_m), ""); else txt(id(w_@T@_d_tds_m), "1h Mean: %.0f ppm", tm);
+    txt(id(w_@T@_d_tds_st), "%s", stale ? "Stale" : (tj < 0 ? "" : TJ[tj]));
+    col(id(w_@T@_d_tds_st), stale ? 0xFBBF24 : tcol);
+    if (std::isnan(lo)) txt(id(w_@T@_d_tds_t1), "Target: < %.0f ppm", hi);
+    else txt(id(w_@T@_d_tds_t1), "Target: %.0f–%.0f ppm", lo, hi);
+    txt(id(w_@T@_d_tds_t2), "Alert: %.0f", al);
+    if (std::isnan(mx)) txt(id(w_@T@_d_tds_t3), "%s", ""); else txt(id(w_@T@_d_tds_t3), "Max: %.0f", mx);
+    range(id(w_@T@_d_tds_trk), id(w_@T@_d_tds_trk_band), id(w_@T@_d_tds_trk_mark), live ? jv : NAN,
+          lo, hi, @TDS_MIN@, @TDS_MAXS@, tcol);
 
     const float ph = id(@T@_ph);
     const bool ph_live = id(@T@_ph_ms) != 0 && now_ms - id(@T@_ph_ms) < 3600000;
     const float plo = @PH_LO@, phi = @PH_HI@;
-    uint32_t pcol = 0x10B981; const char *ps = "In target";
-    if (std::isnan(ph)) { pcol = 0x94A3B8; ps = ""; }
-    else if (!std::isnan(plo) && ph < plo) { pcol = ph < plo - 0.2f ? 0xEF4444 : 0xFBBF24; ps = "Below target"; }
-    else if (!std::isnan(phi) && ph > phi) { pcol = 0xFBBF24; ps = "Above target"; }
-    if (std::isnan(ph)) txt(id(@T@_ph_val), "--"); else txt(id(@T@_ph_val), "%.2f", ph);
-    col(id(@T@_ph_val), ph_live ? C_TEXT : 0x64748B);
-    lv_obj_update_layout(id(@T@_ph_val));
-    lv_obj_align_to(id(@T@_ph_unit), id(@T@_ph_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
-    if (std::isnan(phi)) txt(id(@T@_ph_tgt), "Target >= %.1f", plo);
-    else txt(id(@T@_ph_tgt), "Target %.1f-%.1f", plo, phi);
-    if (!ph_live && !std::isnan(ph)) { txt(id(@T@_ph_tgt), "CACHED"); col(id(@T@_ph_tgt), 0xFBBF24); }
-    else col(id(@T@_ph_tgt), 0x94A3B8);
-    txt(id(@T@_ph_side), "%s", ph_live ? ps : "");
-    col(id(@T@_ph_side), pcol);
-    range(id(@T@_ph_trk), id(@T@_ph_trk_band), id(@T@_ph_trk_mark), ph_live ? ph : NAN,
+    const int pj = judge(ph, plo, phi, NAN, 0.15f);
+    const uint32_t pcol = pj < 0 ? 0x94A3B8 : J_COL[pj];
+    const char *PJ[] = {"Optimal", "Near Band", "Out of Band"};
+    if (!ph_live && !std::isnan(ph)) txt(id(w_@T@_ph_cap), "%s", "@PH_TILE@ (CACHED)");
+    else txt(id(w_@T@_ph_cap), "%s", "@PH_TILE@");
+    if (std::isnan(ph)) txt(id(w_@T@_ph_val), "--"); else txt(id(w_@T@_ph_val), "%.2f", ph);
+    col(id(w_@T@_ph_val), ph_live ? C_TEXT : 0x64748B);
+    lv_obj_update_layout(id(w_@T@_ph_val));
+    lv_obj_align_to(id(w_@T@_ph_unit), id(w_@T@_ph_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+    if (!ph_live && !std::isnan(ph)) { txt(id(w_@T@_ph_tgt), "STALE"); col(id(w_@T@_ph_tgt), 0xFBBF24); }
+    else {
+      if (compact) txt(id(w_@T@_ph_tgt), "%s", pj < 0 ? "" : PJ[pj]);
+      else txt(id(w_@T@_ph_tgt), "Target: %.1f–%.1f", plo, phi);
+      col(id(w_@T@_ph_tgt), compact && pj >= 0 ? pcol : C_LABEL);
+    }
+    if (!ph_live) { txt(id(w_@T@_ph_side), "%s", std::isnan(ph) ? "" : "Wi-Fi Link Stale"); col(id(w_@T@_ph_side), 0x64748B); }
+    else if (compact) { txt(id(w_@T@_ph_side), "Target %.1f–%.1f", plo, phi); col(id(w_@T@_ph_side), pj > 0 ? pcol : C_LABEL); }
+    else { txt(id(w_@T@_ph_side), "%s", pj < 0 ? "" : PJ[pj]); col(id(w_@T@_ph_side), night && pj == 0 ? 0x366B56 : pcol); }
+    range(id(w_@T@_ph_trk), id(w_@T@_ph_trk_band), id(w_@T@_ph_trk_mark), ph_live ? ph : NAN,
           plo, phi, @PH_MIN@, @PH_MAX@, pcol);
-    if (std::isnan(ph)) txt(id(@T@_d_ph), "--"); else txt(id(@T@_d_ph), "%.2f", ph);
-    col(id(@T@_d_ph), ph_live ? C_TEXT : 0x64748B);
-    txt(id(@T@_d_ph_st), "%s", ph_live ? ps : (std::isnan(ph) ? "No data" : "Stale"));
-    col(id(@T@_d_ph_st), ph_live ? pcol : 0xFBBF24);
-    if (std::isnan(phi)) txt(id(@T@_d_ph_tgt), "Target >= %.2f", plo);
-    else txt(id(@T@_d_ph_tgt), "Target %.2f-%.2f", plo, phi);
-    range(id(@T@_d_ph_trk), id(@T@_d_ph_trk_band), id(@T@_d_ph_trk_mark), ph_live ? ph : NAN,
+    if (std::isnan(ph)) txt(id(w_@T@_d_ph), "--"); else txt(id(w_@T@_d_ph), "%.2f", ph);
+    col(id(w_@T@_d_ph), ph_live ? 0xF8FAFC : 0x64748B);
+    lv_obj_update_layout(id(w_@T@_d_ph));
+    lv_obj_align_to(id(w_@T@_d_ph_u), id(w_@T@_d_ph), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+    txt(id(w_@T@_d_ph_st), "%s", ph_live ? (pj < 0 ? "" : PJ[pj]) : (std::isnan(ph) ? "No data" : "Stale"));
+    col(id(w_@T@_d_ph_st), ph_live ? pcol : 0xFBBF24);
+    txt(id(w_@T@_d_ph_tgt), "Target: %.2f – %.2f", plo, phi);
+    txt(id(w_@T@_d_ph_t1), "Min: %.2f", @PH_MIN@);
+    txt(id(w_@T@_d_ph_t2), "Target Band: %.2f – %.2f", plo, phi);
+    txt(id(w_@T@_d_ph_t3), "Max: %.2f", @PH_MAX@);
+    range(id(w_@T@_d_ph_trk), id(w_@T@_d_ph_trk_band), id(w_@T@_d_ph_trk_mark), ph_live ? ph : NAN,
           plo, phi, @PH_MIN@, @PH_MAX@, pcol);
+    bg(id(w_@T@_tds), stale ? 0x0E141B : C_CARD3, stale ? 0x334155 : C_BORDER);
+    bg(id(w_@T@_ph), (stale && !ph_live) ? 0x0E141B : C_CARD3, (stale && !ph_live) ? 0x334155 : C_BORDER);
   }
 
-  // Footer + detail info card.
+  // ---- footer + detail info card
   {
     const float lux = id(@T@_lux);
-    if (!live || std::isnan(lux)) txt(id(@T@_f_lux), "-- lux"); else txt(id(@T@_f_lux), "%.0f lux", lux);
     const int co2 = id(ha_co2_@T@), bub = id(ha_bubbler_@T@);
-    txt(id(@T@_f_co2), "CO2 %s", co2 < 0 ? "--" : (co2 ? "On" : "Off"));
-    col(id(@T@_f_co2), co2 == 1 ? (night ? 0x506173 : 0x38BDF8) : (night ? 0x506173 : 0x94A3B8));
-    txt(id(@T@_f_bub), "Bubbler %s", bub < 0 ? "--" : (bub ? "On" : "Off"));
-    col(id(@T@_f_bub), bub == 1 ? (night ? 0x506173 : 0x38BDF8) : (night ? 0x506173 : 0x94A3B8));
     const float conf = id(@T@_conf);
-    if (!live) { txt(id(@T@_f_model), "Model --"); col(id(@T@_f_model), 0x94A3B8); }
-    else if (id(@T@_fault)) { txt(id(@T@_f_model), "SAFETY TRIPPED"); col(id(@T@_f_model), 0xEF4444); }
-    else if (std::isnan(conf)) txt(id(@T@_f_model), "Model --");
-    else { txt(id(@T@_f_model), "Model  %.0f%%", conf); col(id(@T@_f_model), conf < 70 ? 0xFBBF24 : 0x94A3B8); }
+    const bool dark = live && !std::isnan(lux) && lux < 18.0f;
+    if (!live || std::isnan(lux)) txt(id(w_@T@_f_lux), "-- lux");
+    else if (dark) txt(id(w_@T@_f_lux), "%s", "Lights Off");
+    else txt(id(w_@T@_f_lux), "%.0f lux", lux);
+    lv_label_set_text(id(w_@T@_fi_lux), dark ? "@ICON_NIGHT@" : "@ICON_SUN@");
+    col(id(w_@T@_fi_lux), night ? 0x506173 : 0xFBBF24);
+    col(id(w_@T@_f_lux), C_LABEL);
+    txt(id(w_@T@_f_co2), "CO2 %s", co2 < 0 ? "--" : (co2 ? "On" : "Off"));
+    col(id(w_@T@_f_co2), co2 == 1 ? C_CYAN : C_LABEL); col(id(w_@T@_fi_co2), co2 == 1 ? C_CYAN : 0x64748B);
+    txt(id(w_@T@_f_bub), "Bubbler %s", bub < 0 ? "--" : (bub ? "On" : "Off"));
+    col(id(w_@T@_f_bub), bub == 1 ? C_CYAN : C_LABEL); col(id(w_@T@_fi_bub), bub == 1 ? C_CYAN : 0x64748B);
+    if (stale) { txt(id(w_@T@_f_model), "BLE Down"); col(id(w_@T@_f_model), 0xFBBF24); col(id(w_@T@_fi_model), 0xFBBF24); }
+    else if (id(@T@_fault)) { txt(id(w_@T@_f_model), "Safety Tripped"); col(id(w_@T@_f_model), 0xEF4444); col(id(w_@T@_fi_model), 0xEF4444); }
+    else if (std::isnan(conf)) { txt(id(w_@T@_f_model), "Model --"); col(id(w_@T@_f_model), C_LABEL); }
+    else { txt(id(w_@T@_f_model), "Model %.0f%%", conf); col(id(w_@T@_f_model), conf < 70 ? 0xFBBF24 : C_LABEL); col(id(w_@T@_fi_model), conf < 70 ? 0xFBBF24 : 0x64748B); }
+    show(id(w_@T@_details), !stale);
+    show(id(w_@T@_reconn), stale && ever);
+    bg(id(w_@T@_details), crit ? 0x3B1216 : (night ? 0x0A1118 : 0x1E293B), crit ? 0xDC2626 : (night ? 0x131C26 : 0x334155));
+    fill(id(w_@T@_sep), C_BORDER);
 
-    if (!live || std::isnan(lux)) txt(id(@T@_d_lux), "-- lux"); else txt(id(@T@_d_lux), "%.0f lux", lux);
+    if (!live || std::isnan(lux)) txt(id(w_@T@_d_lux), "-- lux");
+    else if (dark) txt(id(w_@T@_d_lux), "%.0f lux (Lights Off)", lux);
+    else txt(id(w_@T@_d_lux), "%.0f lux", lux);
     auto dawn = id(sun_pa).sunrise(-6.0); auto dusk = id(sun_pa).sunset(-6.0);
     if (dawn.has_value() && dusk.has_value())
-      txt(id(@T@_d_sun), "Civil dawn  %s  ·  dusk  %s", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
-    txt(id(@T@_d_co2), "CO2 %s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
-    col(id(@T@_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
-    txt(id(@T@_d_bub), "Bubbler %s", bub < 0 ? "--" : (bub ? "on" : "off"));
-    col(id(@T@_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
-    if (!live) { txt(id(@T@_d_safe2), "--"); col(id(@T@_d_safe2), 0x94A3B8); }
-    else { txt(id(@T@_d_safe2), id(@T@_fault) ? "SAFETY TRIPPED" : "Safety OK"); col(id(@T@_d_safe2), id(@T@_fault) ? 0xEF4444 : 0x10B981); }
-    if (std::isnan(conf)) txt(id(@T@_d_model), "Model confidence --");
-    else txt(id(@T@_d_model), "Model confidence  %.0f%%", conf);
+      txt(id(w_@T@_d_sun), "Civil Dawn (%s) – Dusk (%s)", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
+    txt(id(w_@T@_d_co2), "%s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
+    col(id(w_@T@_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
+    txt(id(w_@T@_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
+    col(id(w_@T@_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
+    lv_label_set_text(id(w_@T@_d_bub_i), bub == 1 ? "@ICON_CHECK@" : "@ICON_MINUSC@");
+    col(id(w_@T@_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);
+    if (!live) { txt(id(w_@T@_d_safe2), "Safety Tripped: --"); col(id(w_@T@_d_safe2), 0x94A3B8); }
+    else { txt(id(w_@T@_d_safe2), "Safety Tripped: %s", id(@T@_fault) ? "YES" : "NO"); col(id(w_@T@_d_safe2), id(@T@_fault) ? 0xEF4444 : 0x10B981); }
+    if (live) txt(id(w_@T@_d_ctrl), "Controller BLE: Live (%s ago)", as);
+    else txt(id(w_@T@_d_ctrl), "Controller BLE: Down (%s)", ever ? as : "no data yet");
   }
 
-  // Detail header + setpoint + actuators.
+  // ---- detail header, setpoint, probes, actuators
   {
-    if (live) txt(id(@T@_d_link_l), "BLE Live  ·  %us ago", (unsigned) ((now_ms - id(@T@_stamp_ms)) / 1000));
-    else txt(id(@T@_d_link_l), "Link lost  ·  %s", ever ? a : "no data yet");
-    col(id(@T@_d_link_l), live ? 0x38BDF8 : 0xFBBF24);
-    txt(id(@T@_d_safety_l), !live ? "SAFETY --" : (id(@T@_fault) ? "SAFETY TRIPPED" : "SAFETY OK"));
-    col(id(@T@_d_safety_l), !live ? 0x94A3B8 : (id(@T@_fault) ? 0xEF4444 : 0x10B981));
-    bg(id(@T@_d_safety), !live ? 0x131B24 : (id(@T@_fault) ? 0x2D0E12 : 0x0F291E),
-       !live ? 0x334155 : (id(@T@_fault) ? 0xDC2626 : 0x059669));
+    if (live) txt(id(w_@T@_d_link_l), "BLE Live • %s ago", as);
+    else txt(id(w_@T@_d_link_l), "BLE Down • %s", ever ? a : "no data yet");
+    col(id(w_@T@_d_link_l), live ? 0x38BDF8 : 0xFBBF24); fill(id(w_@T@_d_link_dot), live ? 0x38BDF8 : 0xFBBF24);
+    if (!live) txt(id(w_@T@_d_safety_l), "SAFETY: UNKNOWN (LINK DOWN)");
+    else txt(id(w_@T@_d_safety_l), "%s", id(@T@_fault) ? "SAFETY TRIPPED: YES" : "SAFETY TRIPPED: NO (NORMAL)");
+    const uint32_t sc = !live ? 0xFBBF24 : (id(@T@_fault) ? 0xEF4444 : 0x10B981);
+    col(id(w_@T@_d_safety_l), sc); col(id(w_@T@_d_safety_i), sc);
+    bg(id(w_@T@_d_safety), !live ? 0x291B07 : (id(@T@_fault) ? 0x2D0E12 : 0x0F291E),
+       !live ? 0xD97706 : (id(@T@_fault) ? 0xDC2626 : 0x059669));
     const float shown = std::isnan(id(@T@_sp_pending)) ? sp : id(@T@_sp_pending);
-    if (std::isnan(shown)) txt(id(@T@_d_sp), "--"); else txt(id(@T@_d_sp), "%.1f", shown);
-    col(id(@T@_d_sp), std::isnan(id(@T@_sp_pending)) ? 0xF8FAFC : 0xFBBF24);
-    if (!std::isnan(id(@T@_sp_pending))) txt(id(@T@_d_band), "Sending...");
-    else if (std::isnan(sp) || std::isnan(swing)) txt(id(@T@_d_band), "");
-    else txt(id(@T@_d_band), "Control band  %.1f-%.1f °F", sp - swing, sp + swing);
-    if (std::isnan(swing)) txt(id(@T@_d_swing), ""); else txt(id(@T@_d_swing), "SWING ±%.1f °F", swing);
+    if (std::isnan(shown)) txt(id(w_@T@_d_sp), "--"); else txt(id(w_@T@_d_sp), "%.1f", shown);
+    col(id(w_@T@_d_sp), std::isnan(id(@T@_sp_pending)) ? 0xF8FAFC : 0xFBBF24);
+    if (!std::isnan(id(@T@_sp_pending))) txt(id(w_@T@_d_band), "Sending to controller…");
+    else if (std::isnan(sp) || std::isnan(swing)) txt(id(w_@T@_d_band), "%s", "");
+    else txt(id(w_@T@_d_band), "Control Band: %.1f° – %.1f°F", sp - swing, sp + swing);
+    if (std::isnan(swing)) txt(id(w_@T@_d_swing_l), "SWING --"); else txt(id(w_@T@_d_swing_l), "SWING ±%.1f °F", swing);
     const float conf = id(@T@_conf);
-    if (std::isnan(conf)) txt(id(@T@_d_conf), "Confidence --");
-    else txt(id(@T@_d_conf), "Confidence  %.0f%%", conf);
+    if (std::isnan(conf)) txt(id(w_@T@_d_conf), "Confidence: --");
+    else txt(id(w_@T@_d_conf), "Confidence: %.0f%%", conf);
     const bool ln = id(@T@_learn);
-    txt(id(@T@_learn_l), ln ? "LEARNING ON" : "LEARNING OFF");
-    col(id(@T@_learn_l), ln ? 0x10B981 : 0x94A3B8);
-    bg(id(@T@_learn), ln ? 0x0F291E : 0x1E293B, ln ? 0x059669 : 0x334155);
-    if (std::isnan(temp)) txt(id(@T@_d_pa), "--"); else txt(id(@T@_d_pa), "%.1f °F", temp);
-    col(id(@T@_d_pa), live ? 0xF8FAFC : 0x64748B);
+    txt(id(w_@T@_learn_l), "%s", ln ? "LEARNING ON" : "LEARNING OFF");
+    col(id(w_@T@_learn_l), ln ? 0x10B981 : 0x94A3B8);
+    bg(id(w_@T@_learn), ln ? 0x0F291E : 0x1E293B, ln ? 0x059669 : 0x334155);
+    if (std::isnan(temp)) txt(id(w_@T@_d_pa), "--"); else txt(id(w_@T@_d_pa), "%.1f", temp);
+    col(id(w_@T@_d_pa), live ? 0xF8FAFC : 0x64748B);
+    lv_obj_update_layout(id(w_@T@_d_pa));
+    lv_obj_align_to(id(w_@T@_d_pa_u), id(w_@T@_d_pa), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
     //@DUAL{
     {
       const float tb = id(@T@_temp_b), g = id(@T@_grad);
-      if (std::isnan(tb)) txt(id(@T@_d_pb), "--"); else txt(id(@T@_d_pb), "%.1f °F", tb);
-      col(id(@T@_d_pb), live ? 0xF8FAFC : 0x64748B);
-      if (std::isnan(g)) txt(id(@T@_d_grad), "--"); else txt(id(@T@_d_grad), "%+.2f °F", g);
+      if (std::isnan(tb)) txt(id(w_@T@_d_pb), "--"); else txt(id(w_@T@_d_pb), "%.1f", tb);
+      col(id(w_@T@_d_pb), live ? 0xF8FAFC : 0x64748B);
+      lv_obj_update_layout(id(w_@T@_d_pb));
+      lv_obj_align_to(id(w_@T@_d_pb_u), id(w_@T@_d_pb), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+      if (std::isnan(g)) txt(id(w_@T@_d_grad), "--"); else txt(id(w_@T@_d_grad), "%+.2f °F", g);
+      if (!live || std::isnan(dr)) txt(id(w_@T@_d_drift), "%s", "");
+      else txt(id(w_@T@_d_drift), "%s %+.2f °F/min Drift", dr < -0.005f ? "↘" : (dr > 0.005f ? "↗" : "→"), dr);
     }
     //@DUAL}
     //@SINGLE{
-    if (std::isnan(sp) || std::isnan(swing)) txt(id(@T@_d_grad), "--");
-    else txt(id(@T@_d_grad), "%.1f-%.1f °F", sp - swing, sp + swing);
+    if (!live || std::isnan(dr)) txt(id(w_@T@_d_drift), "Drift --");
+    else txt(id(w_@T@_d_drift), "%s %+.2f °F/min (%s)", dr < -0.005f ? "↘" : (dr > 0.005f ? "↗" : "→"), dr,
+             dr < -0.02f ? "Falling" : (dr > 0.02f ? "Rising" : "Stable"));
+    {
+      const bool aligned = live && !std::isnan(temp) && !std::isnan(sp) && !std::isnan(swing) && fabsf(temp - sp) <= swing;
+      txt(id(w_@T@_d_aligned), "%s", live ? (aligned ? "Setpoint Aligned" : "Outside control band") : "");
+      col(id(w_@T@_d_aligned), aligned ? 0x10B981 : 0xFBBF24);
+    }
     //@SINGLE}
-    if (!live || std::isnan(dr)) txt(id(@T@_d_drift), "");
-    else txt(id(@T@_d_drift), "%+.2f °F/min", dr);
     const float h = id(@T@_heat), f = id(@T@_fan);
     const bool hon = id(@T@_heat_on), fon = id(@T@_fan_on);
-    txt(id(@T@_d_heat_cap), hon ? "HEATER: DEMAND ON" : "HEATER: IDLE");
-    col(id(@T@_d_heat_cap), hon ? 0xFB923C : 0x94A3B8);
-    txt(id(@T@_d_heat_sub), "Duty cycle");
-    if (!live || std::isnan(h)) txt(id(@T@_d_heat_pct), "--"); else txt(id(@T@_d_heat_pct), "%.0f%%", h);
-    bg(id(@T@_d_heat), hon ? 0x261711 : 0x16202C, hon ? 0xEA580C : 0x223142);
-    col(id(@T@_d_heat_icon), hon ? 0xFB923C : 0x64748B);
-    lv_bar_set_value(id(@T@_d_heat_bar), live && !std::isnan(h) ? (int) h : 0, LV_ANIM_OFF);
-    txt(id(@T@_d_fan_cap), fon ? "COOLING FAN: ON" : "COOLING FAN: OFF");
-    col(id(@T@_d_fan_cap), fon ? 0x38BDF8 : 0x94A3B8);
-    txt(id(@T@_d_fan_sub), "Duty cycle");
-    if (!live || std::isnan(f)) txt(id(@T@_d_fan_pct), "--"); else txt(id(@T@_d_fan_pct), "%.0f%%", f);
-    bg(id(@T@_d_fan), fon ? 0x0C4A6E : 0x16202C, fon ? 0x0284C7 : 0x223142);
-    col(id(@T@_d_fan_icon), fon ? 0x38BDF8 : 0x64748B);
-    lv_bar_set_value(id(@T@_d_fan_bar), live && !std::isnan(f) ? (int) f : 0, LV_ANIM_OFF);
+    txt(id(w_@T@_d_heat_cap), "%s", hon ? "HEATER DEMAND: ON" : "HEATER DEMAND: OFF");
+    col(id(w_@T@_d_heat_cap), hon ? 0xFB923C : 0x94A3B8);
+    if (!live || std::isnan(h)) { txt(id(w_@T@_d_heat_pct), "--"); txt(id(w_@T@_d_heat_sub), "Duty Cycle: --"); }
+    else { txt(id(w_@T@_d_heat_pct), "%.0f%%", h); if (hon) txt(id(w_@T@_d_heat_sub), "Duty Cycle: %.0f%%", h); else txt(id(w_@T@_d_heat_sub), "Duty Cycle: %.0f%% (Idle)", h); }
+    col(id(w_@T@_d_heat_pct), hon ? 0xFB923C : 0x94A3B8);
+    bg(id(w_@T@_d_heat), hon ? 0x261711 : 0x16202C, hon ? 0xEA580C : 0x223142);
+    col(id(w_@T@_d_heat_i), hon ? 0xFB923C : 0x64748B);
+    lv_bar_set_value(id(w_@T@_d_heat_bar), live && !std::isnan(h) ? (int) h : 0, LV_ANIM_OFF);
+    txt(id(w_@T@_d_fan_cap), "%s", fon ? "COOLING FAN DEMAND: ON" : "COOLING FAN DEMAND: OFF");
+    col(id(w_@T@_d_fan_cap), fon ? 0x38BDF8 : 0x94A3B8);
+    if (!live || std::isnan(f)) { txt(id(w_@T@_d_fan_pct), "--"); txt(id(w_@T@_d_fan_sub), "Duty Cycle: --"); }
+    else { txt(id(w_@T@_d_fan_pct), "%.0f%%", f); if (fon) txt(id(w_@T@_d_fan_sub), "Duty Cycle: %.0f%%", f); else txt(id(w_@T@_d_fan_sub), "Duty Cycle: %.0f%% (Idle)", f); }
+    col(id(w_@T@_d_fan_pct), fon ? 0x38BDF8 : 0x94A3B8);
+    bg(id(w_@T@_d_fan), fon ? 0x0C4A6E : 0x16202C, fon ? 0x0284C7 : 0x223142);
+    col(id(w_@T@_d_fan_i), fon ? 0x38BDF8 : 0x64748B);
+    lv_bar_set_value(id(w_@T@_d_fan_bar), live && !std::isnan(f) ? (int) f : 0, LV_ANIM_OFF);
   }
 }
 """
@@ -1060,12 +1346,12 @@ CHART_TANK = r"""
 // ------------------------------------------------- chart, tank @T@
 {
   const int mode = id(@T@_chart_mode);
+  lv_obj_t *tabs[3] = {id(w_@T@_tab0), id(w_@T@_tab1), id(w_@T@_tab2)};
+  lv_obj_t *tabl[3] = {id(w_@T@_tab0_l), id(w_@T@_tab1_l), id(w_@T@_tab2_l)};
   for (int i = 0; i < 3; i++) {
-    lv_obj_t *tb = i == 0 ? id(@T@_tab0) : (i == 1 ? id(@T@_tab1) : id(@T@_tab2));
-    lv_obj_t *tl = i == 0 ? id(@T@_tab0_l) : (i == 1 ? id(@T@_tab1_l) : id(@T@_tab2_l));
-    lv_obj_set_style_bg_color(tb, lv_color_hex(i == mode ? 0x0284C7 : 0x1E293B), 0);
-    lv_obj_set_style_border_color(tb, lv_color_hex(i == mode ? 0x38BDF8 : 0x334155), 0);
-    lv_obj_set_style_text_color(tl, lv_color_hex(i == mode ? 0xF8FAFC : 0x94A3B8), 0);
+    lv_obj_set_style_bg_color(tabs[i], lv_color_hex(i == mode ? 0x0284C7 : 0x1E293B), 0);
+    lv_obj_set_style_border_color(tabs[i], lv_color_hex(i == mode ? 0x38BDF8 : 0x334155), 0);
+    lv_obj_set_style_text_color(tabl[i], lv_color_hex(i == mode ? 0xF8FAFC : 0x94A3B8), 0);
   }
   const auto &A = mode == 0 ? id(@T@_hist_temp) : (mode == 1 ? id(@T@_hist_tds) : id(@T@_hist_ph));
   const auto &B = id(@T@_hist_temp_b);
@@ -1079,46 +1365,84 @@ CHART_TANK = r"""
   const float sp = id(@T@_sp);
   if (mode == 0 && !std::isnan(sp)) { lo = std::min(lo, sp); hi = std::max(hi, sp); }
   const bool any = lo <= hi;
-  // Minimum span per series so noise does not fill the plot.
-  const float min_span = mode == 0 ? 2.0f : (mode == 1 ? 40.0f : 0.4f);
-  if (any && hi - lo < min_span) { const float m = (hi + lo) / 2; lo = m - min_span / 2; hi = m + min_span / 2; }
-  const float pad = (hi - lo) * 0.1f; lo -= pad; hi += pad;
-  const char *fmt = mode == 1 ? "%.0f" : (mode == 2 ? "%.2f" : "%.1f°");
-  lv_obj_t *yl[5] = {id(@T@_yl0), id(@T@_yl1), id(@T@_yl2), id(@T@_yl3), id(@T@_yl4)};
-  for (int i = 0; i < 5; i++) {
-    if (!any) { txt(yl[i], ""); continue; }
-    // Grid line i sits at y = 34*i + 17 of 170: value at that height.
-    const float v = hi - (hi - lo) * (34.0f * i + 17.0f) / 170.0f;
-    txt(yl[i], fmt, v);
+  // Fixed-step axes like the mockup: 0.5 °F, 10 ppm, 0.1 pH per gridline,
+  // centred on the data (on the setpoint for temperature).
+  const float step = mode == 0 ? 0.5f : (mode == 1 ? 10.0f : 0.1f);
+  if (any) {
+    const float c = (mode == 0 && !std::isnan(sp)) ? sp : (lo + hi) / 2.0f;
+    const float mid = roundf(c / step) * step;
+    float half = 2.0f * step;
+    while (mid - half > lo || mid + half < hi) half += 2.0f * step;
+    lo = mid - half; hi = mid + half;
   }
-  txt(id(@T@_legend), "%s", mode == 0 ? (@DUAL@ ? "Probe A  ·  Probe B  ·  Setpoint" : "Water  ·  Setpoint")
-                                      : (mode == 1 ? "TDS ppm" : "pH"));
-  show(id(@T@_plot_empty), n < 2);
+  const char *fmt = mode == 1 ? "%.0f" : (mode == 2 ? "%.1f" : "%.1f°");
+  lv_obj_t *yl[5] = {id(w_@T@_yl0), id(w_@T@_yl1), id(w_@T@_yl2), id(w_@T@_yl3), id(w_@T@_yl4)};
+  for (int i = 0; i < 5; i++) {
+    if (!any) { txt(yl[i], "%s", ""); continue; }
+    txt(yl[i], fmt, hi - (hi - lo) * i / 4.0f);
+    lv_obj_set_style_text_color(yl[i], lv_color_hex(i == 2 && mode == 0 ? 0x10B981 : 0x64748B), 0);
+  }
+  if (mode == 0) {
+    txt(id(w_@T@_lg_a_l), "%s", @DUAL@ ? "Probe A" : "Water Temp");
+    txt(id(w_@T@_lg_b_l), "%s", "Probe B");
+    if (std::isnan(sp)) txt(id(w_@T@_lg_sp_l), "%s", "Setpoint"); else txt(id(w_@T@_lg_sp_l), "Setpoint (%.1f°)", sp);
+  } else {
+    txt(id(w_@T@_lg_a_l), "%s", mode == 1 ? "TDS (ppm)" : "pH");
+  }
+  show(id(w_@T@_lg_b), use_b);
+  show(id(w_@T@_lg_sp), mode == 0);
+  show(id(w_@T@_plot_empty), n < 2);
   static lv_point_precise_t pa_@T@[96], pb_@T@[96], ps_@T@[2];
   auto build = [&](const std::array<float, 96> &S, lv_point_precise_t *pts) {
     int k = 0;
     for (int i = 0; i < n; i++) {
       if (std::isnan(S[i])) continue;
       // Newest sample at the right edge, 15 min per step across 24 h.
-      pts[k].x = (lv_value_precise_t) (532 - (n - 1 - i) * 532.0f / 95.0f);
-      pts[k].y = (lv_value_precise_t) ((hi - S[i]) / (hi - lo) * 170.0f);
+      pts[k].x = (lv_value_precise_t) (@PW@ - (n - 1 - i) * (float) @PW@ / 95.0f);
+      pts[k].y = (lv_value_precise_t) ((hi - S[i]) / (hi - lo) * @PH@);
       k++;
     }
     return k;
   };
   const int ka = any ? build(A, pa_@T@) : 0;
-  lv_line_set_points(id(@T@_ln_a)->obj, pa_@T@, ka);
+  lv_line_set_points(id(w_@T@_ln_a)->obj, pa_@T@, ka);
   const int kb = (any && use_b) ? build(B, pb_@T@) : 0;
-  lv_line_set_points(id(@T@_ln_b)->obj, pb_@T@, kb);
+  lv_line_set_points(id(w_@T@_ln_b)->obj, pb_@T@, kb);
   if (any && mode == 0 && !std::isnan(sp)) {
-    const float y = (hi - sp) / (hi - lo) * 170.0f;
-    ps_@T@[0] = {0, (lv_value_precise_t) y}; ps_@T@[1] = {532, (lv_value_precise_t) y};
-    lv_line_set_points(id(@T@_ln_sp)->obj, ps_@T@, 2);
+    const float y = (hi - sp) / (hi - lo) * @PH@;
+    ps_@T@[0] = {0, (lv_value_precise_t) y}; ps_@T@[1] = {@PW@, (lv_value_precise_t) y};
+    lv_line_set_points(id(w_@T@_ln_sp)->obj, ps_@T@, 2);
   } else {
-    lv_line_set_points(id(@T@_ln_sp)->obj, ps_@T@, 0);
+    lv_line_set_points(id(w_@T@_ln_sp)->obj, ps_@T@, 0);
   }
 }
 """
+
+
+def layout_code(T):
+    """C++ that moves one card's blocks to the normal or compact layout."""
+    t = T["t"]
+    parts = []
+    for mode in ("compact", "normal"):
+        L = LAYOUT[mode]
+        lines = [
+            f"lv_obj_set_pos(id(w_{t}_card), {T['card_x']}, {L['card'][0]}); "
+            f"lv_obj_set_height(id(w_{t}_card), {L['card'][1]});",
+            f"lv_obj_set_y(id(w_{t}_head), {L['head']}); lv_obj_set_y(id(w_{t}_link), {L['head'] + 4});",
+            f"lv_obj_set_y(id(w_{t}_lost), {L['lost']});",
+            f"lv_obj_set_y(id(w_{t}_hero), {L['hero'][0]}); lv_obj_set_height(id(w_{t}_hero), {L['hero'][1]});",
+            f"lv_obj_set_y(id(w_{t}_frozen), {L['hero'][0] - 9});",
+            f"for (lv_obj_t *o : {{id(w_{t}_heat), id(w_{t}_fan)}}) "
+            f"{{ lv_obj_set_y(o, {L['act'][0]}); lv_obj_set_height(o, {L['act'][1]}); }}",
+            f"for (lv_obj_t *o : {{id(w_{t}_tds), id(w_{t}_ph)}}) "
+            f"{{ lv_obj_set_y(o, {L['met'][0]}); lv_obj_set_height(o, {L['met'][1]}); }}",
+            f"lv_obj_set_y(id(w_{t}_tds_trk), {L['met'][1] - 18}); lv_obj_set_y(id(w_{t}_ph_trk), {L['met'][1] - 18});",
+            f"lv_obj_set_y(id(w_{t}_sep), {L['sep']}); lv_obj_set_y(id(w_{t}_foot), {L['foot']});",
+            f"lv_obj_set_y(id(w_{t}_details), {L['details']}); lv_obj_set_y(id(w_{t}_reconn), {L['reconn']});",
+        ]
+        parts.append(("if (compact) {" if mode == "compact" else "} else {") + "\n        "
+                     + "\n        ".join(lines))
+    return "\n      ".join(parts) + "\n      }"
 
 
 def tank_code(tmpl, T):
@@ -1126,23 +1450,32 @@ def tank_code(tmpl, T):
     kept only for the two-probe tank and //@SINGLE{ ... //@SINGLE} only for
     the one-probe tank: ESPHome resolves every id() in a lambda even inside
     a branch that can never run, so dead branches must not exist at all."""
-    import re
     keep, drop = ("DUAL", "SINGLE") if T["dual"] else ("SINGLE", "DUAL")
     tmpl = re.sub(rf"[ \t]*//@{drop}{{.*?//@{drop}}}\n", "", tmpl, flags=re.S)
     tmpl = re.sub(rf"[ \t]*//@{keep}[{{}}]\n", "", tmpl)
 
     def num(v):
         return "NAN" if v == "NAN" else f"{float(v)}f"
-    return (tmpl.replace("@T@", T["t"]).replace("@DUAL@", "true" if T["dual"] else "false")
-            .replace("@TDS_LO@", num(T["tds_lo"])).replace("@TDS_HI@", num(T["tds_hi"]))
-            .replace("@TDS_ALERT@", num(T["tds_alert"]))
-            .replace("@TDS_MIN@", num(T["tds_min"])).replace("@TDS_MAX@", num(T["tds_max"]))
-            .replace("@PH_LO@", num(T["ph_lo"])).replace("@PH_HI@", num(T["ph_hi"]))
-            .replace("@PH_MIN@", num(T["ph_min"])).replace("@PH_MAX@", num(T["ph_max"])))
+    rep = {
+        "@LAYOUT@": layout_code(T),
+        "@TDS_LO@": num(T["tds_lo"]), "@TDS_HI@": num(T["tds_hi"]),
+        "@TDS_ALERT@": num(T["tds_alert"]), "@TDS_MAXS@": num(T["tds_scale"][1]),
+        "@TDS_MAX@": num(T["tds_max"]), "@TDS_MIN@": num(T["tds_scale"][0]),
+        "@PH_LO@": num(T["ph_lo"]), "@PH_HI@": num(T["ph_hi"]),
+        "@PH_MIN@": num(T["ph_scale"][0]), "@PH_MAX@": num(T["ph_scale"][1]),
+        "@PH_TILE@": T["ph_tile"], "@PW@": str(PLOT_W), "@PH@": f"{float(PLOT_H)}f",
+        "@ICON_SUN@": ICON["sun"], "@ICON_NIGHT@": ICON["night"],
+        "@ICON_CHECK@": ICON["check"], "@ICON_MINUSC@": ICON["minus_circle"],
+        "@DUAL@": "true" if T["dual"] else "false",
+        "@T@": T["t"],
+    }
+    for k, v in rep.items():
+        tmpl = tmpl.replace(k, v)
+    return tmpl
 
 # ------------------------------------------------------------------- fonts
 
-TEXT_EXTRA = "°±·–—"
+TEXT_EXTRA = "°±·–—−•●Δ↗↘→←›…"
 FONTS = [
     # id, size, weight, glyphs (None = Latin + extras)
     ("f58", 58, 800, "0123456789.-°F "),
@@ -1178,23 +1511,6 @@ def fonts_yaml():
 # -------------------------------------------------------------------- main
 
 
-def rename_widget_ids(text, names):
-    """Widgets that would share an id with a data global get a _w suffix.
-
-    The globals (panel_p4_tank.yaml / panel_p4_feeds.yaml) keep the plain
-    name. In this file a plain `id: X` is always the widget's definition, and
-    in the C++ a widget is only ever the object argument of an LVGL call or
-    of the txt/col/bg/show helpers, so those are the only places renamed.
-    """
-    import re
-    for n in names:
-        text = re.sub(rf"(\bid: ){n}\b", rf"\g<1>{n}_w", text)
-        text = re.sub(rf"(\b(?:txt|col|bg|show|lv_[a-z_]+)\()id\({n}\)", rf"\g<1>id({n}_w)", text)
-        text = re.sub(rf"(lv_obj_align_to\(id\([a-z0-9_]+\), )id\({n}\)", rf"\g<1>id({n}_w)", text)
-    return text
-
-
-
 HEADER = """\
 # GENERATED by tools/gen_panel_p4_ui.py -- do not edit by hand; edit the
 # generator and rerun it. The 10.1" P4 wall panel's LVGL UI.
@@ -1206,8 +1522,8 @@ HEADER = """\
 
 def build():
     """The generated YAML as text."""
-    home = {"id": "page_home", "bg_color": COL["canvas"], "scrollable": False,
-            "widgets": top_bar()[:-1] + [tank_card(T) for T in TANKS] + strip() + [top_bar()[-1]]}
+    home = {"id": "w_page_home", "bg_color": COL["canvas"], "scrollable": False,
+            "widgets": top_bar() + [tank_card(T) for T in TANKS] + strip() + [alert_banner()]}
     pages = [home] + [detail_page(T) for T in TANKS] + [wc_page()]
 
     doc = {
@@ -1233,9 +1549,9 @@ def build():
             "top_layer": {"widgets": [
                 # Eats the first touch while the screen is dimmed for the
                 # night, so waking it can never also press a button.
-                {"obj": {"id": "night_shield", "x": 0, "y": 0, "width": 1024, "height": 600,
+                {"obj": {"id": "w_night_shield", "x": 0, "y": 0, "width": 1024, "height": 600,
                          "bg_opa": "TRANSP", "border_width": 0, "hidden": True,
-                         "on_click": [{"lambda": "lv_obj_add_flag(id(night_shield), LV_OBJ_FLAG_HIDDEN);"}]}},
+                         "on_click": [{"lambda": "lv_obj_add_flag(id(w_night_shield), LV_OBJ_FLAG_HIDDEN);"}]}},
             ]},
             "pages": pages,
         },
@@ -1244,8 +1560,8 @@ def build():
                 {"delay": "1500ms"},
                 {"if": {"condition": {"lambda": "return !std::isnan(id(ro_target_pending));"},
                         "then": [publish("water-flow-ro/number/fill_target/command", "@ROPAYLOAD@"),
-                            {"delay": "6s"},
-                            {"lambda": "id(ro_target_pending) = NAN;"}]}}]},
+                                 {"delay": "6s"},
+                                 {"lambda": "id(ro_target_pending) = NAN;"}]}}]},
         ],
         "interval": [
             {"interval": "1s", "then": [{"lambda": "@UPDATE@"}]},
@@ -1280,8 +1596,8 @@ def build():
         "auto call = id(backlight).turn_on();\n"
         "call.set_brightness(want ? 0.10f : 1.0f);\n"
         "call.perform();\n"
-        "if (want) lv_obj_remove_flag(id(night_shield), LV_OBJ_FLAG_HIDDEN);\n"
-        "else lv_obj_add_flag(id(night_shield), LV_OBJ_FLAG_HIDDEN);\n"
+        "if (want) lv_obj_remove_flag(id(w_night_shield), LV_OBJ_FLAG_HIDDEN);\n"
+        "else lv_obj_add_flag(id(w_night_shield), LV_OBJ_FLAG_HIDDEN);\n"
         "ESP_LOGI(\"panel\", \"night mode %s\", want ? \"on\" : \"off\");\n")
 
     def block(code):
@@ -1294,12 +1610,7 @@ def build():
         "payload: !lambda |-\n"
         "            char b[12]; snprintf(b, sizeof(b), \"%.1f\", id(ro_target_pending));\n"
         "            return std::string(b);")
-    text = rename_widget_ids(text, [f"{T['t']}_{k}" for T in TANKS
-                                    for k in ("link", "temp", "sp", "drift", "learn")]
-                             + ["ro_reached", "ro_total", "wc_added", "wc_flowing",
-                                "wc_net", "wc_pct", "wc_rate"])
     if PREVIEW:
-        text = text.replace("payload: '@ROPAYLOAD@'", "payload: ''")
         text = text.replace("- logger.log: 'preview: would publish @ROPAYLOAD@ to",
                             "- logger.log: 'preview: would publish target to")
     return HEADER + text
