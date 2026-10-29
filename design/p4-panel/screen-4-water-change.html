@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1024, height=600, initial-scale=1.0">
+  <title>Screen 4: Water Change in Progress - 10.1" Tank Monitor Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font/css/materialdesignicons.min.css">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 1024px;
+      height: 600px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0B1015;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #F1F5F9;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .screen-root {
+      width: 1024px;
+      height: 600px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background-color: #0B1015;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 14px 10px 14px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    /* TOP BAR - Height 46px */
+    .top-bar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+    .back-btn {
+      height: 46px;
+      padding: 0 16px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #E2E8F0;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .back-btn:hover {
+      background-color: #1E293B;
+      border-color: #0284C7;
+      color: #38BDF8;
+    }
+    .top-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .wc-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #FFFFFF;
+      text-transform: uppercase;
+    }
+
+    .active-flow-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background-color: #0C4A6E;
+      border: 1px solid #0284C7;
+      border-radius: 20px;
+      padding: 5px 14px;
+      color: #38BDF8;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+    }
+    .pulse-flow-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #38BDF8;
+    }
+
+    .top-right-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .battery-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #10B981;
+    }
+
+    /* MAIN WATER CHANGE WORKSPACE - Height 524px */
+    .wc-grid {
+      display: grid;
+      grid-template-columns: 628px 356px;
+      gap: 12px;
+      height: 524px;
+    }
+
+    /* LEFT COLUMN: LIVE HOSE CONSOLE */
+    .left-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Mode Selector Bar (Min 56px Touch Targets) */
+    .mode-switch-bar {
+      height: 58px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 10px;
+      padding: 4px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .mode-btn {
+      height: 48px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+    }
+    .mode-btn.active-drain {
+      background-color: #261711;
+      border-color: #EA580C;
+      color: #FB923C;
+    }
+    .mode-btn.inactive {
+      background-color: #19232F;
+      border-color: #223142;
+      color: #64748B;
+    }
+    .mode-btn.inactive:hover {
+      background-color: #212E3D;
+      color: #CBD5E1;
+      border-color: #38BDF8;
+    }
+
+    /* Live Water Change Hero Card */
+    .wc-hero-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 16px 18px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .hero-top-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .tank-target-label {
+      font-size: 12px;
+      font-weight: 800;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tank-vol-sub {
+      font-size: 11px;
+      font-weight: 600;
+      color: #38BDF8;
+    }
+
+    /* Central Big Metrics Layout */
+    .hero-metrics-center {
+      display: grid;
+      grid-template-columns: 310px 250px;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .hero-main-stat {
+      display: flex;
+      flex-direction: column;
+    }
+    .hero-stat-badge {
+      font-size: 11px;
+      font-weight: 800;
+      color: #FB923C;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .hero-huge-num-row {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+      margin-top: 2px;
+    }
+    .hero-huge-num {
+      font-size: 68px;
+      font-weight: 800;
+      letter-spacing: -2px;
+      line-height: 1;
+      color: #F8FAFC;
+    }
+    .hero-huge-unit {
+      font-size: 24px;
+      font-weight: 700;
+      color: #38BDF8;
+    }
+    .hero-target-text {
+      font-size: 13px;
+      font-weight: 700;
+      color: #94A3B8;
+      margin-top: 4px;
+    }
+
+    /* Radial Arc Gauge (LVGL lv_arc representation) */
+    .arc-gauge-container {
+      width: 240px;
+      height: 140px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+    }
+    .arc-text-overlay {
+      position: absolute;
+      bottom: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .arc-percent {
+      font-size: 34px;
+      font-weight: 800;
+      color: #F8FAFC;
+      line-height: 1;
+    }
+    .arc-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* Realtime Flow & Balance Details */
+    .stats-breakdown-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 8px;
+      background-color: #19232F;
+      border: 1px solid #223142;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+    .breakdown-box {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .bd-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+    }
+    .bd-val {
+      font-size: 18px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .bd-sub {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748B;
+    }
+
+    /* Touch Action Controls (Min 56px Touch Target Height) */
+    .wc-actions-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      height: 58px;
+    }
+    .action-touch-btn {
+      height: 58px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      background-color: #1E293B;
+      color: #E2E8F0;
+    }
+    .btn-secondary:hover {
+      background-color: #283548;
+      border-color: #38BDF8;
+      color: #FFFFFF;
+    }
+    .btn-primary-finish {
+      background-color: #064E3B;
+      border-color: #059669;
+      color: #34D399;
+    }
+    .btn-primary-finish:hover {
+      background-color: #047857;
+      color: #FFFFFF;
+    }
+
+    /* RIGHT COLUMN: RO FILTER SYSTEM & CONTEXT */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    /* RO Filter Card */
+    .ro-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .ro-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ro-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .ro-icon {
+      font-size: 18px;
+      color: #0284C7;
+    }
+    .ro-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #FFFFFF;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .ro-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background-color: #0C4A6E;
+      color: #38BDF8;
+      border: 1px solid #0284C7;
+    }
+
+    .ro-hero-box {
+      background-color: #19232F;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ro-fill-label-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .ro-fill-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+    }
+    .ro-flow-rate {
+      font-size: 11px;
+      font-weight: 700;
+      color: #38BDF8;
+    }
+    .ro-numbers-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .ro-big-num {
+      font-size: 32px;
+      font-weight: 800;
+      color: #F8FAFC;
+      line-height: 1;
+    }
+    .ro-target-sub {
+      font-size: 12px;
+      font-weight: 700;
+      color: #94A3B8;
+    }
+
+    .ro-bar-track {
+      height: 8px;
+      background-color: #0F172A;
+      border-radius: 4px;
+      border: 1px solid #1E293B;
+      overflow: hidden;
+    }
+    .ro-bar-fill {
+      height: 100%;
+      background-color: #0284C7;
+      border-radius: 3px;
+    }
+
+    .ro-stats-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ro-stat-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .ro-stat-val {
+      font-weight: 700;
+      color: #F1F5F9;
+    }
+
+    /* RO Actions (56px Touch Targets) */
+    .ro-actions-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .ro-touch-btn {
+      height: 56px;
+      background-color: #19232F;
+      border: 1px solid #243447;
+      border-radius: 8px;
+      color: #E2E8F0;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .ro-touch-btn:hover {
+      background-color: #212E3D;
+      border-color: #0284C7;
+      color: #38BDF8;
+    }
+
+    /* System Context Card */
+    .context-card {
+      height: 130px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .ctx-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .ctx-val {
+      font-weight: 700;
+      color: #F8FAFC;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-root">
+
+    <!-- TOP HEADER -->
+    <header class="top-bar">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <a href="screen-1-home.html" class="back-btn">
+          <span class="mdi mdi-arrow-left"></span>
+          <span>Home</span>
+        </a>
+        <div class="top-title-group">
+          <span class="wc-title">Water Change Manager</span>
+          <div class="active-flow-pill">
+            <div class="pulse-flow-dot"></div>
+            <span>DRAINING ACTIVE • 2.4 GPM</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-right-badges">
+        <div class="battery-pill">
+          <span class="mdi mdi-battery-80"></span>
+          <span>Hose Batt: 88% (OK)</span>
+        </div>
+        <div class="battery-pill" style="color:#38BDF8; border-color:#0284C7;">
+          <span class="mdi mdi-wifi"></span>
+          <span>MQTT Live</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN WATER CHANGE WORKSPACE -->
+    <main class="wc-grid">
+
+      <!-- LEFT COLUMN: LIVE HOSE METER & ACTIONS -->
+      <section class="left-col">
+
+        <!-- Mode Selector Bar (58px height, >= 56px touch target) -->
+        <div class="mode-switch-bar">
+          <button class="mode-btn active-drain" title="Draining mode currently running">
+            <span class="mdi mdi-arrow-down-bold-circle"></span>
+            <span>Mode: Draining (Active)</span>
+          </button>
+          <button class="mode-btn inactive" title="Tap to switch mode to Refilling">
+            <span class="mdi mdi-arrow-up-bold-circle-outline"></span>
+            <span>Switch to Refill</span>
+          </button>
+        </div>
+
+        <!-- Water Change Hero Card -->
+        <div class="wc-hero-card">
+          <div class="hero-top-meta">
+            <span class="tank-target-label">Selected Tank: 75 Gallon</span>
+            <span class="tank-vol-sub">Actual Net Volume: ~62 Gal</span>
+          </div>
+
+          <!-- Central Big Metrics & Arc -->
+          <div class="hero-metrics-center">
+
+            <!-- Gallons Removed Stat -->
+            <div class="hero-main-stat">
+              <div class="hero-stat-badge">
+                <span class="mdi mdi-water-minus"></span>
+                <span>Water Removed This Change</span>
+              </div>
+              <div class="hero-huge-num-row">
+                <span class="hero-huge-num">18.2</span>
+                <span class="hero-huge-unit">gal</span>
+              </div>
+            </div>
+
+            <!-- LVGL 9 Arc Gauge (180° semi-circle representation) -->
+            <div class="arc-gauge-container">
+              <svg width="220" height="120" viewBox="0 0 220 120">
+                <!-- Background Arc Track -->
+                <path d="M 20,110 A 90,90 0 0,1 200,110" fill="none" stroke="#1E293B" stroke-width="16" stroke-linecap="round" />
+                <!-- Active Progress Arc (29.4% of 180° = 53°) -->
+                <!-- SVG path for arc from (20,110) along radius 90 to angle 53 deg:
+                     cx=110, cy=110. rad=53 deg -> x = 110 - 90*cos(53°) = 110 - 54.1 = 55.9,
+                     y = 110 - 90*sin(53°) = 110 - 71.9 = 38.1 -->
+                <path d="M 20,110 A 90,90 0 0,1 56,38" fill="none" stroke="#FB923C" stroke-width="16" stroke-linecap="round" />
+              </svg>
+              <div class="arc-text-overlay">
+                <span class="arc-percent">29.4%</span>
+                <span class="arc-label">of Tank Changed</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Realtime Flow & Balance Details -->
+          <div class="stats-breakdown-row">
+            <div class="breakdown-box">
+              <span class="bd-label">Realtime Flow</span>
+              <div class="bd-val" style="color:#38BDF8;">2.4 <span style="font-size:12px;">gpm</span></div>
+              <span class="bd-sub" style="color:#10B981;">Flowing: YES</span>
+            </div>
+            <div class="breakdown-box">
+              <span class="bd-label">Water Added</span>
+              <div class="bd-val">0.0 <span style="font-size:12px;">gal</span></div>
+              <span class="bd-sub">Refill inactive</span>
+            </div>
+            <div class="breakdown-box">
+              <span class="bd-label">Net Water Change</span>
+              <div class="bd-val" style="color:#FB923C;">-18.2 <span style="font-size:12px;">gal</span></div>
+              <span class="bd-sub">Current deficit</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Big Touch Action Buttons (58px height >= 56px touch target) -->
+        <div class="wc-actions-bar">
+          <button class="action-touch-btn btn-secondary">
+            <span class="mdi mdi-swap-horizontal"></span>
+            <span>Switch Mode (Refill)</span>
+          </button>
+          <button class="action-touch-btn btn-secondary" style="border-color:#0284C7; color:#38BDF8;" title="Zero this change's counters">
+            <span class="mdi mdi-restart"></span>
+            <span>New Water Change</span>
+          </button>
+        </div>
+
+      </section>
+
+      <!-- RIGHT COLUMN: RO FILTER SYSTEM & CONTEXT -->
+      <section class="right-col">
+
+        <!-- RO Meter System Card -->
+        <div class="card ro-card">
+          <div class="ro-header">
+            <div class="ro-title-wrap">
+              <span class="mdi mdi-filter-check ro-icon"></span>
+              <span class="ro-title">RO Filter System</span>
+            </div>
+            <span class="ro-badge">MQTT Online</span>
+          </div>
+
+          <!-- RO Fill Numbers -->
+          <div class="ro-hero-box">
+            <div class="ro-fill-label-row">
+              <span class="ro-fill-label">Batch Fill Volume</span>
+              <span class="ro-flow-rate">Flowing • 0.18 gpm</span>
+            </div>
+            <div class="ro-numbers-row">
+              <span class="ro-big-num">3.4 <span style="font-size:16px; color:#38BDF8;">gal</span></span>
+              <span class="ro-target-sub">Target: 5.0 gal (68%)</span>
+            </div>
+            <div class="ro-bar-track">
+              <div class="ro-bar-fill" style="width: 68%;"></div>
+            </div>
+          </div>
+
+          <!-- RO Status Attributes -->
+          <div class="ro-stats-list">
+            <div class="ro-stat-item">
+              <span>Target Reached:</span>
+              <span class="ro-stat-val" style="color:#38BDF8;">NO (In Progress)</span>
+            </div>
+            <div class="ro-stat-item">
+              <span>Flow State:</span>
+              <span class="ro-stat-val" style="color:#10B981;">Flowing (0.18 gpm)</span>
+            </div>
+            <div class="ro-stat-item">
+              <span>Lifetime Total:</span>
+              <span class="ro-stat-val">1,420 gal produced</span>
+            </div>
+          </div>
+
+          <!-- RO Action Touch Buttons (56px touch target) -->
+          <div class="ro-actions-stack">
+            <button class="ro-touch-btn" title="Set fill target volume">
+              <span class="mdi mdi-target"></span>
+              <span>Set Target (5.0 gal)</span>
+            </button>
+            <button class="ro-touch-btn" title="Reset current batch fill counter">
+              <span class="mdi mdi-restart"></span>
+              <span>Reset Fill Counter</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Hardware & Tank Context Card -->
+        <div class="card context-card">
+          <div style="font-size:11px; font-weight:800; color:#94A3B8; text-transform:uppercase;">
+            System & Battery Context
+          </div>
+          <div class="ctx-row">
+            <span>Hose Sensor Battery:</span>
+            <span class="ctx-val" style="color:#10B981;">88% (Low Batt: NO)</span>
+          </div>
+          <div class="ctx-row">
+            <span>Last Water Change:</span>
+            <span class="ctx-val">Oct 24 (5d ago • 20.2 gal)</span>
+          </div>
+          <div class="ctx-row">
+            <span>75 Gallon Actual Volume:</span>
+            <span class="ctx-val">~62.0 gal</span>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+</body>
+</html>

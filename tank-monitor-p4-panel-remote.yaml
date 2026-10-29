@@ -1,0 +1,53 @@
+# WALL PANEL -- Elecrow CrowPanel Advanced 10.1" (ESP32-P4), 1024x600.
+# Put THIS file in the ESPHome dashboard.
+#
+# One panel for both tanks and both flow meters. It replaces the 4.3"
+# 75 gal panel (tank-monitor-75g), the round AMOLED (tank-monitor-round)
+# and the CYD. Retire those BEFORE powering this one: each controller has
+# room for this panel only once the old panel has let go of its BLE slot.
+#
+#   75 gal   BLE, payload v3   D0:CF:13:02:1A:62  (tank-monitor-75-gallon)
+#   nano     BLE, payload v2   A4:CB:8F:DE:79:26  (tank-monitor-s3)
+#   flow meters, nano pH, CO2/bubbler, alerts: MQTT (panel_p4_feeds.yaml)
+#
+# The MACs are each controller's "Controller BLE MAC" sensor on 2026-10-29.
+# A new controller chip means a new MAC; a wrong one compiles cleanly and
+# then never connects.
+#
+# First boot: see boards/elecrow-crowpanel-p4-101.yaml. Check the board
+# revision (V1.0 needs the SDIO pins flipped), then press Install on
+# "C6 Radio Firmware" once so the radio gets Bluetooth.
+#
+# device_name: must not collide with any tank-monitor-* device. The Home
+# Assistant side publishes to tank-monitor-panel/*, which is a fixed topic,
+# not derived from this name.
+substitutions:
+  device_name: tank-monitor-panel
+  friendly_name: Tank Monitor Panel
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - path: packages/panel_p4_tank.yaml
+        vars:
+          tank: t75
+          tank_name: "75 Gallon"
+          mac: "D0:CF:13:02:1A:62"
+          fields: "20"
+          version: "3"
+          ph_from_ble: "true"
+      - path: packages/panel_p4_tank.yaml
+        vars:
+          tank: t16
+          tank_name: "Nano"
+          mac: "A4:CB:8F:DE:79:26"
+          fields: "15"
+          version: "2"
+      - packages/panel_p4_feeds.yaml
+      - packages/panel_p4_ui.yaml
+      - boards/elecrow-crowpanel-p4-101.yaml
+    refresh: 0s

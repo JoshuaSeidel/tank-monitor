@@ -1,0 +1,37 @@
+# LOCAL validation wrapper for the 10.1" P4 wall panel.
+#
+# Builds from the working tree, so `esphome compile local-p4-panel.yaml`
+# tests what you just edited. Needs ESPHome >= 2026.10.0.
+# Same MACs as the deploy wrapper; -test device name so it never fights the
+# real panel on MQTT.
+substitutions:
+  device_name: tank-monitor-panel-test
+  friendly_name: Tank Monitor Panel TEST
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui_local.yaml
+  t75: !include
+    file: packages/panel_p4_tank.yaml
+    vars:
+      tank: t75
+      tank_name: "75 Gallon"
+      mac: "D0:CF:13:02:1A:62"
+      fields: "20"
+      version: "3"
+      ph_from_ble: "true"
+  t16: !include
+    file: packages/panel_p4_tank.yaml
+    vars:
+      tank: t16
+      tank_name: "Nano"
+      mac: "A4:CB:8F:DE:79:26"
+      fields: "15"
+      version: "2"
+  feeds: !include packages/panel_p4_feeds.yaml
+  ui: !include packages/panel_p4_ui.yaml
+  board: !include boards/elecrow-crowpanel-p4-101.yaml
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [tank_webui]

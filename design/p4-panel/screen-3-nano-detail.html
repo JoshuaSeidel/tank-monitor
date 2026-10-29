@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1024, height=600, initial-scale=1.0">
+  <title>Screen 3: Fluval Spec 16 Detail - 10.1" Tank Monitor Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font/css/materialdesignicons.min.css">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 1024px;
+      height: 600px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0B1015;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #F1F5F9;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .screen-root {
+      width: 1024px;
+      height: 600px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background-color: #0B1015;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 14px 10px 14px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    /* TOP BAR - Height 46px */
+    .top-bar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+    .back-btn {
+      height: 46px;
+      padding: 0 16px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #E2E8F0;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .back-btn:hover {
+      background-color: #1E293B;
+      border-color: #0284C7;
+      color: #38BDF8;
+    }
+    .top-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .tank-detail-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #FFFFFF;
+      text-transform: uppercase;
+    }
+    .connection-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #38BDF8;
+    }
+    .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: #0284C7;
+    }
+    .top-right-badges {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge-safe {
+      background-color: #0F291E;
+      color: #34D399;
+      border: 1px solid #059669;
+    }
+    .badge-info {
+      background-color: #131B24;
+      color: #94A3B8;
+      border: 1px solid #223142;
+    }
+
+    /* MAIN DETAIL GRID - Height 524px */
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 376px 608px;
+      gap: 12px;
+      height: 524px;
+    }
+
+    /* LEFT COLUMN - Thermal Control & Actuators */
+    .left-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 12px 14px;
+    }
+
+    /* Setpoint Control Card */
+    .setpoint-card {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .card-badge {
+      font-size: 10px;
+      font-weight: 700;
+      color: #38BDF8;
+      background-color: #0F172A;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #1E293B;
+    }
+
+    .setpoint-control-box {
+      background-color: #19232F;
+      border: 1px solid #243447;
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .setpoint-touch-btn {
+      width: 56px;
+      height: 56px;
+      background-color: #212E3D;
+      border: 1px solid #33465C;
+      border-radius: 8px;
+      color: #F8FAFC;
+      font-size: 24px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .setpoint-touch-btn:hover, .setpoint-touch-btn:active {
+      background-color: #0284C7;
+      border-color: #38BDF8;
+    }
+    .setpoint-display {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .setpoint-main-val {
+      font-size: 42px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1;
+      color: #F8FAFC;
+    }
+    .setpoint-sub {
+      font-size: 11px;
+      font-weight: 700;
+      color: #38BDF8;
+      margin-top: 4px;
+    }
+
+    /* Learning Mode Big Toggle Button */
+    .learning-toggle-btn {
+      height: 56px;
+      background-color: #19232F;
+      border: 1px solid #0284C7;
+      border-radius: 8px;
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+    }
+    .learning-toggle-btn:hover {
+      background-color: #1E293B;
+    }
+    .learning-info-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .learning-icon {
+      font-size: 24px;
+      color: #38BDF8;
+    }
+    .learning-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #F1F5F9;
+    }
+    .learning-desc {
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .toggle-state-badge {
+      background-color: #064E3B;
+      color: #34D399;
+      border: 1px solid #059669;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+
+    /* Single Probe & Thermal Actuators Card */
+    .probes-thermal-card {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .single-probe-hero {
+      background-color: #19232F;
+      border: 1px solid #223142;
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .single-probe-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .single-probe-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+    }
+    .single-probe-val {
+      font-size: 34px;
+      font-weight: 800;
+      color: #F8FAFC;
+      line-height: 1;
+    }
+    .single-probe-sub {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748B;
+      margin-top: 2px;
+    }
+    .single-probe-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 6px;
+    }
+
+    .drift-pill {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 6px;
+      padding: 4px 8px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .actuators-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .act-row {
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .act-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .act-name {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+    }
+    .act-val {
+      font-size: 12px;
+      font-weight: 800;
+      color: #64748B;
+    }
+    .act-bar-wrap {
+      width: 80px;
+      height: 8px;
+      background-color: #0F172A;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #334155;
+    }
+    .act-bar-fill {
+      height: 100%;
+      background-color: #38BDF8;
+      border-radius: 3px;
+    }
+
+    /* RIGHT COLUMN - Metrics & 24h History Chart */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Dual Metric Cards (TDS & pH) */
+    .metric-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      height: 116px;
+    }
+    .metric-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .metric-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .metric-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-val-wrap {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .metric-number {
+      font-size: 32px;
+      font-weight: 800;
+      color: #F8FAFC;
+      line-height: 1;
+    }
+    .metric-unit-text {
+      font-size: 13px;
+      font-weight: 600;
+      color: #64748B;
+      margin-left: 3px;
+    }
+    .metric-badge-status {
+      font-size: 11px;
+      font-weight: 700;
+      color: #10B981;
+    }
+
+    .bar-gauge-lg {
+      height: 8px;
+      background-color: #0F172A;
+      border-radius: 4px;
+      position: relative;
+      border: 1px solid #1E293B;
+      overflow: hidden;
+    }
+    .bar-target-zone-lg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background-color: #064E3B;
+      border-left: 1px solid #059669;
+      border-right: 1px solid #059669;
+    }
+    .bar-marker-lg {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      margin-left: -2px;
+      background-color: #10B981;
+      border-radius: 2px;
+    }
+    .metric-limits-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748B;
+    }
+
+    /* 24-HOUR CHART CARD */
+    .chart-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 12px 14px;
+      height: 260px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .chart-hdr {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .chart-tabs {
+      display: flex;
+      gap: 6px;
+    }
+    .chart-tab {
+      padding: 4px 10px;
+      background-color: #19232F;
+      border: 1px solid #223142;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      cursor: pointer;
+    }
+    .chart-tab.active {
+      background-color: #0284C7;
+      border-color: #38BDF8;
+      color: #FFFFFF;
+    }
+    .chart-legend {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .leg-line {
+      width: 14px;
+      height: 2px;
+    }
+
+    /* SVG Chart Area */
+    .chart-svg-wrap {
+      width: 100%;
+      height: 180px;
+      background-color: #0F172A;
+      border-radius: 8px;
+      border: 1px solid #1E293B;
+      position: relative;
+    }
+
+    /* ENVIRONMENT & MAINTENANCE STRIP - Height 114px */
+    .env-strip {
+      height: 114px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .env-col {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .env-col-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #94A3B8;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .env-col-val {
+      font-size: 16px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .env-col-sub {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748B;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-root">
+
+    <!-- TOP HEADER -->
+    <header class="top-bar">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <a href="screen-1-home.html" class="back-btn">
+          <span class="mdi mdi-arrow-left"></span>
+          <span>Home</span>
+        </a>
+        <div class="top-title-group">
+          <span class="tank-detail-title">Fluval Spec 16 Detail</span>
+          <div class="connection-chip">
+            <div class="pulse-dot"></div>
+            <span>BLE Live • 4s ago</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-right-badges">
+        <div class="status-badge badge-safe">
+          <span class="mdi mdi-shield-check"></span>
+          <span>Safety Tripped: NO (Normal)</span>
+        </div>
+        <div class="status-badge badge-info">
+          <span>Net Volume: ~14 Gal (16 Gal Tank)</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN DETAIL CONTENT GRID -->
+    <main class="detail-grid">
+
+      <!-- LEFT COLUMN: CONTROLS & THERMAL HARDWARE -->
+      <section class="left-col">
+
+        <!-- Setpoint Touch Control (>= 56px Touch Buttons) -->
+        <div class="card setpoint-card">
+          <div class="card-label-row">
+            <span class="card-title">Temperature Setpoint Control</span>
+            <span class="card-badge">SWING ±0.5 °F</span>
+          </div>
+
+          <div class="setpoint-control-box">
+            <!-- 56px Touch Button [-] -->
+            <button class="setpoint-touch-btn" title="Decrease Setpoint 0.1°F">
+              <span class="mdi mdi-minus"></span>
+            </button>
+
+            <!-- Center Display -->
+            <div class="setpoint-display">
+              <span class="setpoint-main-val">74.5</span>
+              <span class="setpoint-sub">Control Band: 74.0° – 75.0°F</span>
+            </div>
+
+            <!-- 56px Touch Button [+] -->
+            <button class="setpoint-touch-btn" title="Increase Setpoint 0.1°F">
+              <span class="mdi mdi-plus"></span>
+            </button>
+          </div>
+
+          <!-- Adaptive Learning Toggle Button (56px Touch Target) -->
+          <button class="learning-toggle-btn" title="Toggle Adaptive Model Learning">
+            <div class="learning-info-wrap">
+              <span class="mdi mdi-brain learning-icon"></span>
+              <div>
+                <div class="learning-title">Adaptive Thermal Model</div>
+                <div class="learning-desc">Confidence: 98% (High Prediction)</div>
+              </div>
+            </div>
+            <div class="toggle-state-badge">
+              LEARNING ON
+            </div>
+          </button>
+        </div>
+
+        <!-- Single Probe Hero & Actuator Hardware -->
+        <div class="card probes-thermal-card">
+          <div class="card-label-row">
+            <span class="card-title">Single Probe & Thermal Actuators</span>
+            <span style="font-size:10px; color:#38BDF8; font-weight:700;">CONTROLLER BLE</span>
+          </div>
+
+          <!-- Single Probe Hero Tile -->
+          <div class="single-probe-hero">
+            <div class="single-probe-left">
+              <span class="single-probe-title">Primary Temperature Probe</span>
+              <div class="single-probe-val">
+                74.4 <span style="font-size:18px; color:#38BDF8;">°F</span>
+              </div>
+              <span class="single-probe-sub">Single probe config • No B probe / gradient</span>
+            </div>
+            <div class="single-probe-right">
+              <div class="drift-pill">
+                <span class="mdi mdi-arrow-bottom-right"></span>
+                <span>-0.01 °F/min (Stable)</span>
+              </div>
+              <div style="font-size:10px; font-weight:700; color:#10B981;">
+                <span class="mdi mdi-check"></span> Setpoint Aligned
+              </div>
+            </div>
+          </div>
+
+          <!-- Heater and Fan Duties (Both 0%) -->
+          <div class="actuators-stack">
+            <!-- Heater -->
+            <div class="act-row">
+              <div class="act-left">
+                <span class="mdi mdi-fire" style="font-size:18px; color:#64748B;"></span>
+                <div>
+                  <span class="act-name">Heater Demand: OFF</span>
+                  <div style="font-size:10px; color:#64748B;">Duty Cycle: 0% (Idle)</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="act-val">0%</span>
+                <div class="act-bar-wrap">
+                  <div class="act-bar-fill" style="width: 0%;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Fan -->
+            <div class="act-row">
+              <div class="act-left">
+                <span class="mdi mdi-fan" style="font-size:18px; color:#64748B;"></span>
+                <div>
+                  <span class="act-name">Cooling Fan Demand: OFF</span>
+                  <div style="font-size:10px; color:#64748B;">Duty Cycle: 0% (Idle)</div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span class="act-val">0%</span>
+                <div class="act-bar-wrap">
+                  <div class="act-bar-fill" style="width: 0%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- RIGHT COLUMN: METRICS, 24H CHART, SCHEDULES -->
+      <section class="right-col">
+
+        <!-- Top Dual Metric Tiles -->
+        <div class="metric-row">
+
+          <!-- TDS Tile -->
+          <div class="metric-card">
+            <div class="metric-hdr">
+              <span class="metric-title">TDS Live & 1-Hour Mean</span>
+              <span class="metric-badge-status">Target: 150–200</span>
+            </div>
+            <div class="metric-val-wrap">
+              <div>
+                <span class="metric-number">162</span>
+                <span class="metric-unit-text">ppm live</span>
+              </div>
+              <div style="font-size:12px; font-weight:700; color:#38BDF8;">
+                1h Mean: 164 ppm
+              </div>
+            </div>
+            <!-- Target Band Gauge: 100 to 250 ppm -->
+            <div class="bar-gauge-lg" title="Target: 150-200 ppm">
+              <!-- Target Band (150-200) on 100-250 range (150 width) -> 33% to 66% -->
+              <div class="bar-target-zone-lg" style="left: 33%; width: 33%;"></div>
+              <!-- Marker 162 -> 41% -->
+              <div class="bar-marker-lg" style="left: 41%;"></div>
+            </div>
+            <div class="metric-limits-row">
+              <span>Target: 150–200 ppm</span>
+              <span style="color:#10B981;">1h Avg: 164</span>
+              <span style="color:#F59E0B;">Alert: 240 ppm</span>
+            </div>
+          </div>
+
+          <!-- pH Tile (Wi-Fi Source) -->
+          <div class="metric-card">
+            <div class="metric-hdr">
+              <span class="metric-title">Water pH (Wi-Fi)</span>
+              <span class="metric-badge-status" style="color:#FBBF24;">Near Band</span>
+            </div>
+            <div class="metric-val-wrap">
+              <div>
+                <span class="metric-number">6.90</span>
+                <span class="metric-unit-text">pH</span>
+              </div>
+              <div style="font-size:12px; font-weight:700; color:#94A3B8;">
+                Target: 7.00 – 7.50
+              </div>
+            </div>
+            <!-- Large Target Band Gauge: 6.0 to 8.5 range -->
+            <div class="bar-gauge-lg" title="Target: 7.00 - 7.50 pH (Source: Wi-Fi MQTT)">
+              <!-- Target 7.0 to 7.5 on 6.0-8.5 scale -> 40% to 60% -->
+              <div class="bar-target-zone-lg" style="left: 40%; width: 20%;"></div>
+              <!-- Marker 6.90 -> 36% -->
+              <div class="bar-marker-lg" style="left: 36%; background-color:#FBBF24;"></div>
+            </div>
+            <div class="metric-limits-row">
+              <span>Min: 6.80</span>
+              <span>Target Band: 7.00 – 7.50</span>
+              <span>Max: 7.80</span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- 24-HOUR HISTORY CHART (LVGL 9 lv_chart Primitive Style) -->
+        <div class="chart-card">
+          <div class="chart-hdr">
+            <div class="chart-tabs">
+              <button class="chart-tab active">Temperature (24h)</button>
+              <button class="chart-tab">TDS (24h)</button>
+              <button class="chart-tab">pH (24h)</button>
+            </div>
+            <div class="chart-legend">
+              <div class="leg-item">
+                <span class="leg-line" style="background-color: #38BDF8;"></span>
+                <span>Water Temp (Single Probe)</span>
+              </div>
+              <div class="leg-item">
+                <span class="leg-line" style="background-color: #10B981;"></span>
+                <span>Setpoint (74.5°)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pure Inline SVG Clean LVGL Chart for Nano -->
+          <div class="chart-svg-wrap">
+            <svg width="580" height="178" viewBox="0 0 580 178" style="display:block;">
+              <!-- Grid Horizontal Lines -->
+              <line x1="45" y1="20" x2="560" y2="20" stroke="#1E293B" stroke-width="1" />
+              <text x="12" y="24" fill="#64748B" font-size="10" font-family="Plus Jakarta Sans">75.5°</text>
+
+              <line x1="45" y1="58" x2="560" y2="58" stroke="#1E293B" stroke-width="1" />
+              <text x="12" y="62" fill="#64748B" font-size="10" font-family="Plus Jakarta Sans">75.0°</text>
+
+              <!-- Setpoint Reference Line (74.5° Thin Solid Horizontal Line) -->
+              <line x1="45" y1="96" x2="560" y2="96" stroke="#059669" stroke-width="1.2" />
+              <text x="12" y="100" fill="#10B981" font-size="10" font-weight="700" font-family="Plus Jakarta Sans">74.5°</text>
+
+              <line x1="45" y1="134" x2="560" y2="134" stroke="#1E293B" stroke-width="1" />
+              <text x="12" y="138" fill="#64748B" font-size="10" font-family="Plus Jakarta Sans">74.0°</text>
+
+              <line x1="45" y1="162" x2="560" y2="162" stroke="#1E293B" stroke-width="1" />
+              <text x="12" y="165" fill="#64748B" font-size="10" font-family="Plus Jakarta Sans">73.5°</text>
+
+              <!-- Grid Vertical Lines (Time Axis) -->
+              <line x1="45" y1="162" x2="45" y2="167" stroke="#334155" stroke-width="1" />
+              <text x="35" y="176" fill="#64748B" font-size="9" font-family="Plus Jakarta Sans">-24h</text>
+
+              <line x1="174" y1="162" x2="174" y2="167" stroke="#334155" stroke-width="1" />
+              <text x="162" y="176" fill="#64748B" font-size="9" font-family="Plus Jakarta Sans">-18h</text>
+
+              <line x1="303" y1="162" x2="303" y2="167" stroke="#334155" stroke-width="1" />
+              <text x="291" y="176" fill="#64748B" font-size="9" font-family="Plus Jakarta Sans">-12h</text>
+
+              <line x1="432" y1="162" x2="432" y2="167" stroke="#334155" stroke-width="1" />
+              <text x="422" y="176" fill="#64748B" font-size="9" font-family="Plus Jakarta Sans">-6h</text>
+
+              <line x1="560" y1="162" x2="560" y2="167" stroke="#334155" stroke-width="1" />
+              <text x="548" y="176" fill="#38BDF8" font-size="9" font-weight="700" font-family="Plus Jakarta Sans">Now</text>
+
+              <!-- Nano Single Probe Curve (Oscillating 74.3 to 74.6, Live 74.4) -->
+              <path d="M 45,94 C 90,90 130,102 174,96 C 220,88 260,104 303,98 C 350,90 390,96 432,92 C 470,88 520,102 560,102" 
+                    fill="none" stroke="#38BDF8" stroke-width="2.5" />
+
+              <!-- Current Live Endpoint Dot -->
+              <circle cx="560" cy="102" r="5" fill="#38BDF8" stroke="#0B1015" stroke-width="1.5" />
+            </svg>
+          </div>
+        </div>
+
+        <!-- ENVIRONMENT, SENSORS & SCHEDULE STRIP -->
+        <div class="env-strip">
+          <!-- Light Schedule -->
+          <div class="env-col">
+            <span class="env-col-title">
+              <span class="mdi mdi-white-balance-sunny" style="color:#FBBF24;"></span>
+              <span>Light & Photoperiod</span>
+            </span>
+            <div class="env-col-val">280 lux <span style="font-size:12px; font-weight:600; color:#38BDF8;">(60%)</span></div>
+            <div class="env-col-sub">Civil Dawn (06:45) – Dusk (18:15)</div>
+          </div>
+
+          <!-- CO2 & Aeration -->
+          <div class="env-col">
+            <span class="env-col-title">
+              <span class="mdi mdi-gas-cylinder" style="color:#0284C7;"></span>
+              <span>CO2 & Aeration</span>
+            </span>
+            <div class="env-col-val" style="font-size:14px; margin-top:2px;">
+              <span style="color:#94A3B8;">CO2: </span><span style="color:#38BDF8;">ON (Day Schedule)</span>
+            </div>
+            <div class="env-col-sub" style="color:#94A3B8; font-weight:700;">
+              <span class="mdi mdi-minus-circle-outline" style="font-size:12px;"></span> Bubbler: OFF (Night Only)
+            </div>
+          </div>
+
+          <!-- Safety & System Status -->
+          <div class="env-col">
+            <span class="env-col-title">
+              <span class="mdi mdi-shield-check" style="color:#10B981;"></span>
+              <span>Safety & System</span>
+            </span>
+            <div class="env-col-val" style="color:#10B981;">Safety Tripped: NO</div>
+            <div class="env-col-sub">Controller BLE: Live (4s ago)</div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+  </div>
+</body>
+</html>

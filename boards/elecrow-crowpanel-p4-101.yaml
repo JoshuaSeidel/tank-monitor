@@ -1,0 +1,160 @@
+# Elecrow CrowPanel Advanced 10.1" (ESP32-P4 + ESP32-C6), 1024x600 IPS,
+# GT911 touch. Also sold on Amazon under the IDEAQUX brand. Hardware only:
+# the UI is packages/panel_p4_ui.yaml, the data is panel_p4_tank.yaml (x2)
+# and panel_p4_feeds.yaml.
+#
+# Sources, cross-checked: Elecrow's wiki pinout; vespassassina/crowpanel-ha
+# (9", same board family, on real hardware); espcontrol-community-devices
+# PR #156 (10.1", EK79007 panel = ESPHome's WAVESHARE-...-7B preset).
+#
+# ---------------------------------------------------------------------
+# ESPHome version
+# ---------------------------------------------------------------------
+# Needs 2026.10.0 or later: older versions lack parts of the P4 support
+# (min_version below makes that a compile error, not a boot loop).
+#
+# ---------------------------------------------------------------------
+# The radio is a separate chip
+# ---------------------------------------------------------------------
+# The P4 has no radio. Wi-Fi AND Bluetooth come from the on-board C6 over
+# SDIO (ESP-Hosted). Elecrow ships the C6 with Wi-Fi-only firmware, so BLE
+# will not come up until the C6 is reflashed ONCE with ESPHome's Wi-Fi + BT
+# build: after first boot, press Install on the "C6 Radio Firmware" update
+# entity (or the web page). It flashes the C6 from the P4 over SDIO; no
+# cable, no buttons. The manifest only offers versions <= the ESP-Hosted
+# library compiled into this firmware, so the two halves cannot mismatch.
+#
+# That stock firmware allows 3 BLE connections (BT_LE_MAX_CONNECTIONS
+# default). This panel uses 2, one per tank.
+#
+# ---------------------------------------------------------------------
+# Two things that differ between boards and must be right
+# ---------------------------------------------------------------------
+# 1. BOARD REVISION (silkscreen V1.0 / V1.1 / V1.2). The SDIO data pins are
+#    in opposite order on V1.0. Wrong order = boot loop right after flashing.
+#    Default below is V1.1/V1.2; for V1.0 set c6_d0..d3 to 14,15,16,17.
+# 2. P4 CHIP REVISION. Below v3.0 is an engineering sample and needs
+#    engineering_sample: "true". The boot log prints the revision.
+
+substitutions:
+  engineering_sample: "false"
+  c6_d0: GPIO17
+  c6_d1: GPIO16
+  c6_d2: GPIO15
+  c6_d3: GPIO14
+
+esphome:
+  min_version: 2026.10.0
+
+esp32:
+  variant: esp32p4
+  engineering_sample: ${engineering_sample}
+  # 400 MHz is still marked experimental in 2026.10 (esphome#13425).
+  cpu_frequency: 360MHz
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    advanced:
+      execute_from_psram: true
+    sdkconfig_options:
+      # Keeps ESP-Hosted's buffers out of internal RAM, which the display
+      # and LVGL need. Engineering samples roll back without it.
+      CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+# MIPI-DSI PHY supply.
+esp_ldo:
+  - channel: 3
+    voltage: 2.5V
+
+esp32_hosted:
+  variant: esp32c6
+  active_high: true
+  reset_pin: GPIO32
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: ${c6_d0}
+  d1_pin: ${c6_d1}
+  d2_pin: ${c6_d2}
+  d3_pin: ${c6_d3}
+
+http_request:
+  verify_ssl: true
+
+update:
+  - platform: esp32_hosted
+    name: "C6 Radio Firmware"
+    type: http
+    source: https://esphome.github.io/esp-hosted-firmware/manifest/esp32c6.json
+    update_interval: 24h
+
+esp32_ble:
+  # Two tanks + one spare. The C6's stock limit is 3.
+  max_connections: 3
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Only ever looking for two known MACs. Passive scanning does not
+    # transmit, which matters on a radio shared with the Wi-Fi station.
+    active: false
+    interval: 1100ms
+    window: 100ms
+
+i2c:
+  - id: bus_a
+    sda: GPIO45
+    scl: GPIO46
+    frequency: 400kHz
+
+output:
+  - platform: gpio
+    id: backlight_power
+    pin: GPIO29
+  - platform: ledc
+    id: backlight_pwm
+    pin: GPIO31
+    # From Elecrow's IDF sample; no audible whine.
+    frequency: 30kHz
+
+light:
+  - platform: monochromatic
+    id: backlight
+    name: "Display Backlight"
+    output: backlight_pwm
+    restore_mode: ALWAYS_ON
+    default_transition_length: 400ms
+    on_turn_on:
+      - output.turn_on: backlight_power
+    on_turn_off:
+      - output.turn_off: backlight_power
+
+display:
+  - platform: mipi_dsi
+    id: main_display
+    # EK79007, 1024x600: the same panel and init sequence as this preset.
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    reset_pin: GPIO41
+    dimensions:
+      width: 1024
+      height: 600
+    color_order: RGB
+    update_interval: never
+    auto_clear_enabled: false
+
+touchscreen:
+  - platform: gt911
+    id: main_touch
+    i2c_id: bus_a
+    display: main_display
+    reset_pin: GPIO40
+    interrupt_pin: GPIO42
+
+# Both tanks share one sun (see the controller configs): south-central PA.
+# Used for night mode and the dawn/dusk times on the detail screens.
+sun:
+  id: sun_pa
+  latitude: 39.8
+  longitude: -76.7

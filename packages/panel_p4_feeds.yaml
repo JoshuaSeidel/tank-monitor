@@ -1,0 +1,260 @@
+# Everything the 10.1" P4 panel reads over Wi-Fi (MQTT), and the commands it
+# sends back the same way.
+#
+# The tanks themselves come over BLE (packages/panel_p4_tank.yaml) so their
+# numbers survive Home Assistant or the broker being down. What lives here
+# has no BLE path:
+#
+#   water-flow-ro/*, water-flow-change/*   the two flow meters' own MQTT
+#                                          state and command topics
+#   tank-monitor-s3/sensor/water_ph/state  the nano's pH. Its BLE frame is
+#                                          v2 and does not carry pH.
+#   tank-monitor-panel/ha/*                retained states Home Assistant
+#                                          publishes for this panel
+#                                          (automation "Aquarium -- publish
+#                                          panel state to MQTT")
+#   tank-monitor-panel/alert/<tag>         one retained message per active
+#                                          alert, "tag|level|title|message",
+#                                          written by script.aquarium_alert;
+#                                          "tag|" clears it
+#
+# Every value carries a millis() stamp so the UI can show it as stale rather
+# than pretend it is current.
+
+globals:
+  # Broker connection, kept by mqtt on_connect/on_disconnect below. The UI
+  # reads this rather than the MQTT client so it does not depend on MQTT's
+  # C++ API (and so tools/p4_preview.py can drive it).
+  - id: mqtt_up
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # ---- RO meter ----
+  - id: ro_fill
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ro_target
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ro_reached
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: ro_rate
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ro_flowing
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: ro_total
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ro_online
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # ---- water-change meter ----
+  - id: wc_draining
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: wc_removed
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_added
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_net
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_pct
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_rate
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_flowing
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: wc_batt
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_batt_low
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: wc_volume
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: wc_online
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Wall clock of the last time a new change started, i.e. "Removed This
+  # Change" went from something back to zero. Restored: it is a date the
+  # panel should remember across reboots.
+  - id: wc_last_start
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # ---- Home Assistant ----
+  - id: ha_co2_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'   # -1 unknown, 0 off, 1 on
+  - id: ha_bubbler_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_co2_t16
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_bubbler_t16
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_livestock_days
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  # tag -> "level|title|message". std::map keeps them sorted by tag, which is
+  # stable, so the banner does not reshuffle while you read it.
+  - id: alerts
+    type: std::map<std::string, std::string>
+    restore_value: false
+
+sensor:
+  - platform: mqtt_subscribe
+    id: sub_t16_ph
+    internal: true
+    topic: tank-monitor-s3/sensor/water_ph/state
+    on_value:
+      - lambda: |-
+          if (!std::isnan(x)) { id(t16_ph) = x; id(t16_ph_ms) = millis(); }
+
+  - platform: mqtt_subscribe
+    id: sub_wf_ro_fill_volume
+    internal: true
+    topic: water-flow-ro/sensor/fill_volume/state
+    on_value: [lambda: 'id(ro_fill) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_ro_fill_target
+    internal: true
+    topic: water-flow-ro/number/fill_target/state
+    on_value: [lambda: 'id(ro_target) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_ro_flow_rate
+    internal: true
+    topic: water-flow-ro/sensor/flow_rate/state
+    on_value: [lambda: 'id(ro_rate) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_ro_total_produced
+    internal: true
+    topic: water-flow-ro/sensor/total_produced/state
+    on_value: [lambda: 'id(ro_total) = x;']
+
+  - platform: mqtt_subscribe
+    id: sub_wf_change_removed_this_change
+    internal: true
+    topic: water-flow-change/sensor/removed_this_change/state
+    on_value:
+      - lambda: |-
+          if (!std::isnan(id(wc_removed)) && id(wc_removed) > 0.05f && x < 0.01f &&
+              id(sntp_time).now().is_valid())
+            id(wc_last_start) = id(sntp_time).now().timestamp;
+          id(wc_removed) = x;
+  - platform: mqtt_subscribe
+    id: sub_wf_change_added_this_change
+    internal: true
+    topic: water-flow-change/sensor/added_this_change/state
+    on_value: [lambda: 'id(wc_added) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_change_net_change
+    internal: true
+    topic: water-flow-change/sensor/net_change/state
+    on_value: [lambda: 'id(wc_net) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_change_percent_changed
+    internal: true
+    topic: water-flow-change/sensor/percent_changed/state
+    on_value: [lambda: 'id(wc_pct) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_change_flow_rate
+    internal: true
+    topic: water-flow-change/sensor/flow_rate/state
+    on_value: [lambda: 'id(wc_rate) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_change_battery
+    internal: true
+    topic: water-flow-change/sensor/battery/state
+    on_value: [lambda: 'id(wc_batt) = x;']
+  - platform: mqtt_subscribe
+    id: sub_wf_change_tank_water_volume
+    internal: true
+    topic: water-flow-change/sensor/tank_water_volume/state
+    on_value: [lambda: 'id(wc_volume) = x;']
+
+  - platform: mqtt_subscribe
+    id: sub_ha_livestock_days
+    internal: true
+    topic: tank-monitor-panel/ha/livestock_days
+    on_value: [lambda: 'id(ha_livestock_days) = x;']
+
+mqtt:
+  on_connect:
+    - lambda: 'id(mqtt_up) = true;'
+  on_disconnect:
+    - lambda: 'id(mqtt_up) = false;'
+  on_message:
+    - topic: water-flow-ro/status
+      then: [lambda: 'id(ro_online) = (x == "online");']
+    - topic: water-flow-change/status
+      then: [lambda: 'id(wc_online) = (x == "online");']
+    - topic: water-flow-ro/binary_sensor/fill_target_reached/state
+      then: [lambda: 'id(ro_reached) = (x == "ON");']
+    - topic: water-flow-ro/binary_sensor/flowing/state
+      then: [lambda: 'id(ro_flowing) = (x == "ON");']
+    - topic: water-flow-change/binary_sensor/flowing/state
+      then: [lambda: 'id(wc_flowing) = (x == "ON");']
+    - topic: water-flow-change/binary_sensor/low_battery/state
+      then: [lambda: 'id(wc_batt_low) = (x == "ON");']
+    - topic: water-flow-change/select/mode/state
+      then: [lambda: 'id(wc_draining) = (x != "Refilling");']
+    - topic: tank-monitor-panel/ha/co2_t75
+      then: [lambda: 'id(ha_co2_t75) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/ha/bubbler_t75
+      then: [lambda: 'id(ha_bubbler_t75) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/ha/co2_t16
+      then: [lambda: 'id(ha_co2_t16) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/ha/bubbler_t16
+      then: [lambda: 'id(ha_bubbler_t16) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/alert/+
+      then:
+        - lambda: |-
+            // Payload "tag|level|title|message", retained, so the broker
+            // replays every active alert the moment the panel reconnects.
+            // The tag rides in the payload because on_message hands over the
+            // payload only, not the topic. A clear is "tag|" (live, so an
+            // open panel drops it now) followed by an EMPTY retained payload
+            // that deletes the retained alert from the broker; the empty one
+            // has no '|' and is ignored here.
+            const size_t bar = x.find('|');
+            if (bar == std::string::npos) return;
+            const std::string tag = x.substr(0, bar);
+            const std::string rest = x.substr(bar + 1);
+            if (rest.empty()) id(alerts).erase(tag);
+            else id(alerts)[tag] = rest;

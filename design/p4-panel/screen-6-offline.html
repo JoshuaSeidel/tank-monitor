@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1024, height=600, initial-scale=1.0">
+  <title>Screen 6: Nano Offline / Stale State - 10.1" Tank Monitor Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font/css/materialdesignicons.min.css">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 1024px;
+      height: 600px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0B1015;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #F1F5F9;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .screen-root {
+      width: 1024px;
+      height: 600px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background-color: #0B1015;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 14px 10px 14px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    /* TOP BAR - Height 46px */
+    .top-bar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background-color: #164E63;
+      border: 1px solid #0891B2;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #22D3EE;
+      font-size: 20px;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #F8FAFC;
+      text-transform: uppercase;
+    }
+
+    /* Connectivity Warning Status Pill */
+    .system-status-pill-warning {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background-color: #291B07;
+      border: 1px solid #D97706;
+      border-radius: 20px;
+      padding: 6px 14px;
+      color: #FBBF24;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.3px;
+    }
+    .pulse-dot-amber {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #F59E0B;
+    }
+
+    .top-right-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .clock-display {
+      font-size: 15px;
+      font-weight: 700;
+      color: #E2E8F0;
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+
+    /* TANKS ROW - Height 416px */
+    .tanks-row {
+      display: grid;
+      grid-template-columns: 492px 492px;
+      gap: 12px;
+      height: 416px;
+    }
+
+    /* LIVE TANK CARD (75 Gallon) */
+    .tank-card-live {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    /* OFFLINE / STALE TANK CARD (Fluval Spec 16) */
+    .tank-card-stale {
+      background-color: #0E141B;
+      border: 1px solid #475569;
+      border-radius: 14px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      opacity: 0.92;
+    }
+
+    /* Stale Alert Header Box */
+    .stale-warning-banner {
+      background-color: #211913;
+      border: 1px solid #92400E;
+      border-radius: 8px;
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .stale-warn-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .stale-warn-icon {
+      font-size: 18px;
+      color: #F59E0B;
+    }
+    .stale-warn-title {
+      font-size: 11px;
+      font-weight: 800;
+      color: #FDE68A;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .stale-warn-sub {
+      font-size: 10px;
+      font-weight: 600;
+      color: #FBBF24;
+    }
+    .stale-time-badge {
+      background-color: #291B07;
+      border: 1px solid #D97706;
+      color: #FBBF24;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 20px;
+    }
+
+    /* Stale Headline Section */
+    .stale-hero-section {
+      background-color: #121922;
+      border: 1px solid #243447;
+      border-radius: 10px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+    }
+    .stale-badge-watermark {
+      position: absolute;
+      top: -9px;
+      left: 14px;
+      background-color: #475569;
+      color: #E2E8F0;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 1px 8px;
+      border-radius: 3px;
+    }
+    .stale-temp-num {
+      font-size: 58px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -1.5px;
+      color: #64748B; /* Deliberately dimmed grey */
+      text-decoration: line-through;
+      text-decoration-color: #92400E;
+      text-decoration-thickness: 3px;
+    }
+    .stale-temp-unit {
+      font-size: 24px;
+      font-weight: 700;
+      color: #475569;
+      margin-left: 2px;
+    }
+
+    .stale-hero-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+    }
+    .stale-target-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background-color: #0B1015;
+      border: 1px solid #1E293B;
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #64748B;
+    }
+
+    /* Stale Actuators (Unknown State) */
+    .stale-actuators-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stale-actuator-box {
+      background-color: #121922;
+      border: 1px solid #1E293B;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .stale-act-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #64748B;
+      text-transform: uppercase;
+    }
+    .stale-act-val {
+      font-size: 12px;
+      font-weight: 800;
+      color: #F59E0B;
+    }
+
+    /* Stale Metrics (TDS & pH) */
+    .stale-metrics-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stale-metric-tile {
+      background-color: #121922;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .stale-metric-val {
+      font-size: 24px;
+      font-weight: 800;
+      color: #64748B;
+    }
+
+    /* Reconnect Action Touch Button (Min 56px height) */
+    .reconnect-touch-btn {
+      height: 56px;
+      background-color: #1E293B;
+      border: 1px solid #D97706;
+      border-radius: 8px;
+      color: #FBBF24;
+      font-size: 13px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .reconnect-touch-btn:hover {
+      background-color: #78350F;
+      color: #FFFFFF;
+    }
+
+    /* Normal Live Styles for 75 Gallon */
+    .temp-hero-section {
+      background-color: #19232F;
+      border: 1px solid #243447;
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .temp-big-block {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+    .temp-huge-num {
+      font-size: 58px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -1.5px;
+      color: #F8FAFC;
+    }
+    .temp-huge-unit {
+      font-size: 24px;
+      font-weight: 700;
+      color: #38BDF8;
+      margin-left: 2px;
+    }
+    .actuator-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .actuator-box {
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .metrics-dual-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .metric-tile {
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 9px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    /* BOTTOM WATER FLOW & MAINTENANCE STRIP - Height 108px */
+    .bottom-strip {
+      height: 108px;
+      display: grid;
+      grid-template-columns: 344px 388px 252px;
+      gap: 12px;
+    }
+    .strip-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-root">
+
+    <!-- TOP SYSTEM BAR -->
+    <header class="top-bar">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <span class="mdi mdi-fishbowl-outline"></span>
+        </div>
+        <div>
+          <span class="brand-title">Tank Monitor</span>
+        </div>
+      </div>
+
+      <!-- Center Status Pill: Link Warning -->
+      <div class="system-status-pill-warning">
+        <div class="pulse-dot-amber"></div>
+        <span>1 CONNECTION WARNING: NANO BLE LINK DOWN (4m 12s)</span>
+      </div>
+
+      <!-- Top Right Info -->
+      <div class="top-right-group">
+        <div style="font-size:11px; font-weight:700; color:#38BDF8; background:#131B24; padding:5px 10px; border-radius:6px; border:1px solid #223142;">
+          <span class="mdi mdi-bluetooth"></span> 75G Connected
+        </div>
+        <div class="clock-display">
+          <span>2:48 PM</span>
+          <span style="font-size:11px; color:#94A3B8;">Thu Oct 29</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN TANKS AT A GLANCE ROW -->
+    <main class="tanks-row">
+
+      <!-- TANK 1: 75 GALLON (FULLY LIVE & VIBRANT) -->
+      <section class="tank-card-live">
+        <!-- Header -->
+        <div style="display:flex; align-items:center; justify-content:space-between; height:30px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:17px; font-weight:800; color:#FFF; text-transform:uppercase;">75 Gallon</span>
+            <span style="font-size:10px; font-weight:700; color:#94A3B8; background:#1E293B; padding:2px 7px; border-radius:4px; border:1px solid #334155;">Community</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px; font-size:11px; font-weight:600; color:#38BDF8;">
+            <div style="width:7px; height:7px; border-radius:50%; background:#0284C7;"></div>
+            <span>BLE Live • 2s ago</span>
+          </div>
+        </div>
+
+        <!-- Headline Temperature Hero -->
+        <div class="temp-hero-section">
+          <div class="temp-big-block">
+            <span class="temp-huge-num">74.9</span>
+            <span class="temp-huge-unit">°F</span>
+          </div>
+          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:5px;">
+            <div style="display:flex; align-items:center; gap:5px; background:#0F172A; border:1px solid #334155; border-radius:6px; padding:4px 9px; font-size:12px; font-weight:700;">
+              <span>Target:</span>
+              <span style="color:#38BDF8;">75.0 °F</span>
+              <span style="color:#64748B;">(±0.5°)</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:7px; font-size:11px; font-weight:600; color:#94A3B8;">
+              <span>A: 74.9°</span>
+              <span>•</span>
+              <span>B: 75.1°</span>
+              <span>•</span>
+              <span style="background:#1E293B; color:#38BDF8; padding:2px 6px; border-radius:4px; font-weight:700; border:1px solid #334155;">Δ -0.2 °F</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:3px; font-size:11px; font-weight:600; color:#10B981;">
+              <span class="mdi mdi-arrow-top-right"></span>
+              <span>+0.01 °F/min (Stable)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actuators: Heater 14% ON -->
+        <div class="actuator-strip">
+          <div class="actuator-box" style="border-color:#EA580C; background:#261711;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="mdi mdi-fire" style="font-size:18px; color:#FB923C;"></span>
+              <div>
+                <span style="font-size:11px; font-weight:700; text-transform:uppercase; color:#FDBA74; display:block;">Heater (Demand ON)</span>
+                <span style="font-size:14px; font-weight:800; color:#FB923C;">14% Duty</span>
+              </div>
+            </div>
+            <div style="width:48px; height:8px; background:#0F172A; border-radius:4px; overflow:hidden; border:1px solid #334155;">
+              <div style="height:100%; width:14%; background:#FB923C; border-radius:3px;"></div>
+            </div>
+          </div>
+
+          <div class="actuator-box">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span class="mdi mdi-fan" style="font-size:18px; color:#64748B;"></span>
+              <div>
+                <span style="font-size:11px; font-weight:700; text-transform:uppercase; color:#94A3B8; display:block;">Cooling Fan</span>
+                <span style="font-size:14px; font-weight:800; color:#E2E8F0;">0% Duty (OFF)</span>
+              </div>
+            </div>
+            <div style="width:48px; height:8px; background:#0F172A; border-radius:4px; overflow:hidden; border:1px solid #334155;">
+              <div style="height:100%; width:0%; background:#38BDF8; border-radius:3px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metrics: TDS & pH -->
+        <div class="metrics-dual-row">
+          <div class="metric-tile">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:11px; font-weight:700; color:#94A3B8; text-transform:uppercase;">TDS (Purity)</span>
+              <span style="font-size:10px; font-weight:600; color:#64748B;">Target 200–225</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <div>
+                <span style="font-size:26px; font-weight:800; color:#F8FAFC;">218</span>
+                <span style="font-size:12px; font-weight:600; color:#64748B;">ppm</span>
+              </div>
+              <span style="font-size:11px; font-weight:600; color:#38BDF8;">1h avg: 221</span>
+            </div>
+          </div>
+
+          <div class="metric-tile">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:11px; font-weight:700; color:#94A3B8; text-transform:uppercase;">Water pH</span>
+              <span style="font-size:10px; font-weight:600; color:#10B981;">Target 7.0–7.5</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <div>
+                <span style="font-size:26px; font-weight:800; color:#F8FAFC;">7.24</span>
+                <span style="font-size:12px; font-weight:600; color:#64748B;">pH</span>
+              </div>
+              <span style="font-size:11px; font-weight:600; color:#10B981;">Optimal</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="display:flex; align-items:center; justify-content:space-between; border-top:1px solid #1B2633; padding-top:2px;">
+          <div style="display:flex; gap:10px; font-size:11px; color:#64748B;">
+            <span>420 lux</span>
+            <span>•</span>
+            <span>CO2 Off (Nov)</span>
+            <span>•</span>
+            <span style="color:#38BDF8;">Bubbler On</span>
+            <span>•</span>
+            <span style="color:#10B981;">Safety OK</span>
+          </div>
+          <a href="screen-2-75-detail.html" style="height:36px; padding:0 14px; background:#1E293B; border:1px solid #334155; border-radius:6px; color:#E2E8F0; font-size:12px; font-weight:700; display:flex; align-items:center; gap:4px; text-decoration:none;">
+            <span>Details</span>
+            <span class="mdi mdi-chevron-right"></span>
+          </a>
+        </div>
+      </section>
+
+      <!-- TANK 2: FLUVAL SPEC 16 (BLE OFFLINE FOR 4 MINUTES - STALE VIEW) -->
+      <section class="tank-card-stale">
+
+        <!-- Prominent Stale Alert Banner -->
+        <div class="stale-warning-banner">
+          <div class="stale-warn-left">
+            <span class="mdi mdi-bluetooth-off stale-warn-icon"></span>
+            <div>
+              <div class="stale-warn-title">Bluetooth Link Lost</div>
+              <div class="stale-warn-sub">Showing values from 14:35:10 • offline 4m 12s</div>
+            </div>
+          </div>
+          <span class="stale-time-badge">STALE 4m</span>
+        </div>
+
+        <!-- Stale Headline Hero Section -->
+        <div class="stale-hero-section">
+          <span class="stale-badge-watermark">STALE FROZEN DATA</span>
+          <div style="display:flex; align-items:baseline; gap:3px;">
+            <span class="stale-temp-num">74.4</span>
+            <span class="stale-temp-unit">°F</span>
+          </div>
+          <div class="stale-hero-right">
+            <div class="stale-target-pill">
+              <span>Target: 74.5 °F</span>
+              <span style="color:#64748B;">(Unknown)</span>
+            </div>
+            <div style="font-size:11px; font-weight:700; color:#64748B;">
+              Single Probe • Stale
+            </div>
+            <div style="font-size:11px; font-weight:700; color:#F59E0B; display:flex; align-items:center; gap:4px;">
+              <span class="mdi mdi-timer-sand"></span>
+              <span>Drift: -- °F/min (Frozen)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stale Actuator Status: UNKNOWN -->
+        <div class="stale-actuators-strip">
+          <div class="stale-actuator-box">
+            <span class="stale-act-label">Heater Duty</span>
+            <span class="stale-act-val">--% (UNKNOWN)</span>
+          </div>
+          <div class="stale-actuator-box">
+            <span class="stale-act-label">Fan Duty</span>
+            <span class="stale-act-val">--% (UNKNOWN)</span>
+          </div>
+        </div>
+
+        <!-- Stale Metrics -->
+        <div class="stale-metrics-row">
+          <div class="stale-metric-tile">
+            <div style="display:flex; justify-content:space-between;">
+              <span style="font-size:10px; font-weight:700; color:#64748B; text-transform:uppercase;">TDS (Cached)</span>
+              <span style="font-size:9px; color:#F59E0B; font-weight:700;">STALE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span class="stale-metric-val">162 <span style="font-size:12px;">ppm</span></span>
+              <span style="font-size:10px; color:#64748B;">1h avg: 164</span>
+            </div>
+          </div>
+
+          <div class="stale-metric-tile">
+            <div style="display:flex; justify-content:space-between;">
+              <span style="font-size:10px; font-weight:700; color:#64748B; text-transform:uppercase;">pH (Wi-Fi) (Cached)</span>
+              <span style="font-size:9px; color:#F59E0B; font-weight:700;">STALE</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:baseline;">
+              <span class="stale-metric-val">6.90 <span style="font-size:12px;">pH</span></span>
+              <span style="font-size:10px; color:#64748B;">Wi-Fi Link Stale</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stale Auxiliary Footer (No Retry Button - Link Reconnects Automatically) -->
+        <div style="display:flex; align-items:center; justify-content:space-between; border-top:1px solid #1E293B; padding-top:6px; font-size:11px; color:#64748B;">
+          <div style="display:flex; gap:10px;">
+            <span>CO2: Cached</span>
+            <span>•</span>
+            <span>Bubbler: Cached</span>
+            <span>•</span>
+            <span style="color:#F59E0B;">BLE Down</span>
+          </div>
+          <span style="font-size:11px; color:#475569;">Auto-reconnecting...</span>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- COMPACT WATER FLOW & MAINTENANCE STRIP -->
+    <footer class="bottom-strip">
+
+      <div class="strip-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="mdi mdi-filter-outline" style="color:#0284C7; font-size:16px;"></span>
+            <span style="font-size:12px; font-weight:800; color:#E2E8F0; text-transform:uppercase;">RO Filter Output</span>
+          </div>
+          <span style="font-size:10px; font-weight:700; color:#38BDF8; background:#0C4A6E; padding:2px 6px; border-radius:4px;">Flowing • 0.18 gpm</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <span style="font-size:24px; font-weight:800; color:#F8FAFC;">3.4 <span style="font-size:12px; color:#94A3B8;">/ 5.0 gal</span></span>
+          <span style="font-size:11px; color:#64748B;">68% of Target</span>
+        </div>
+        <div style="font-size:10px; color:#64748B; display:flex; justify-content:space-between;">
+          <span>Target Reached: NO</span>
+          <span>Total: 1,420 gal</span>
+        </div>
+      </div>
+
+      <div class="strip-card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="mdi mdi-swap-horizontal-bold" style="color:#38BDF8; font-size:16px;"></span>
+            <span style="font-size:12px; font-weight:800; color:#E2E8F0; text-transform:uppercase;">Water Change Meter</span>
+          </div>
+          <span style="font-size:11px; font-weight:700; color:#10B981;"><span class="mdi mdi-battery-80"></span> 88%</span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:11px; color:#94A3B8;">Last Change: Oct 24 (5d ago) • 20 gal</div>
+          <a href="screen-4-water-change.html" style="height:36px; padding:0 14px; background:#0369A1; border:1px solid #38BDF8; border-radius:6px; color:#FFF; font-size:11px; font-weight:700; display:flex; align-items:center; text-decoration:none;">
+            Start Change
+          </a>
+        </div>
+        <div style="font-size:10px; color:#64748B;">Mode: Standby • 0.0 gpm</div>
+      </div>
+
+      <div class="strip-card" style="border-color:#D97706; background:#1C1710;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span class="mdi mdi-home-assistant" style="color:#F59E0B; font-size:16px;"></span>
+            <span style="font-size:12px; font-weight:800; color:#FDE68A; text-transform:uppercase;">Home Assistant</span>
+          </div>
+          <span style="font-size:10px; font-weight:800; color:#FDE68A; background:#78350F; padding:2px 6px; border-radius:4px;">1 WARNING</span>
+        </div>
+        <div style="font-size:11px; font-weight:700; color:#F59E0B;">
+          Nano BLE Link Down (4m)
+        </div>
+        <div style="font-size:10px; color:#94A3B8; display:flex; justify-content:space-between;">
+          <span>75G: Live Sync OK</span>
+          <span>Light: 65%</span>
+        </div>
+      </div>
+
+    </footer>
+
+  </div>
+</body>
+</html>

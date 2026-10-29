@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tank Monitor - 10.1" Aquarium Wall Panel UI Design Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font/css/materialdesignicons.min.css">
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: #070B0E;
+      font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+      color: #F1F5F9;
+      line-height: 1.5;
+      padding: 24px;
+      min-width: 1080px;
+    }
+    .gallery-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    /* HEADER */
+    .gallery-header {
+      background-color: #0E1620;
+      border: 1px solid #1E2E40;
+      border-radius: 16px;
+      padding: 24px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .header-icon {
+      width: 52px;
+      height: 52px;
+      background-color: #164E63;
+      border: 1px solid #0891B2;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #22D3EE;
+      font-size: 30px;
+    }
+    .header-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: #FFFFFF;
+    }
+    .header-sub {
+      font-size: 14px;
+      color: #94A3B8;
+      font-weight: 500;
+    }
+    .spec-badges {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .spec-pill {
+      background-color: #131E2A;
+      border: 1px solid #223448;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #38BDF8;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* SCREEN SELECTOR TABS */
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      background-color: #0E1620;
+      padding: 8px;
+      border-radius: 12px;
+      border: 1px solid #1E2E40;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      padding: 10px 16px;
+      border-radius: 8px;
+      background-color: transparent;
+      border: 1px solid transparent;
+      color: #94A3B8;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      text-decoration: none;
+      transition: all 0.15s ease;
+    }
+    .tab-btn:hover {
+      background-color: #16222E;
+      color: #F1F5F9;
+    }
+    .tab-btn.active {
+      background-color: #0284C7;
+      border-color: #38BDF8;
+      color: #FFFFFF;
+    }
+
+    /* LIVE PREVIEW FRAME CONTAINER */
+    .preview-section {
+      background-color: #0A0F15;
+      border: 1px solid #1E2E40;
+      border-radius: 16px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 4px 30px rgba(0,0,0,0.5);
+    }
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #172433;
+      padding-bottom: 12px;
+    }
+    .preview-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .preview-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .preview-desc {
+      font-size: 13px;
+      color: #94A3B8;
+    }
+    .preview-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .action-btn {
+      padding: 8px 14px;
+      background-color: #131E2A;
+      border: 1px solid #223448;
+      border-radius: 6px;
+      color: #F1F5F9;
+      font-size: 12px;
+      font-weight: 700;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+    }
+    .action-btn:hover {
+      background-color: #1E2F44;
+      border-color: #0284C7;
+      color: #38BDF8;
+    }
+
+    /* 1024 x 600 DISPLAY FRAME */
+    .viewport-outer {
+      display: flex;
+      justify-content: center;
+      background-color: #030507;
+      border-radius: 12px;
+      border: 2px solid #243548;
+      padding: 16px;
+      overflow: auto;
+    }
+    .viewport-bezel {
+      width: 1024px;
+      height: 600px;
+      box-shadow: 0 0 40px rgba(0, 186, 224, 0.08);
+      position: relative;
+      background-color: #0B1015;
+    }
+    .viewport-frame {
+      width: 1024px;
+      height: 600px;
+      border: none;
+      display: block;
+    }
+
+    /* ALL SCREENS GRID (THUMBNAIL GALLERY) */
+    .screens-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+      gap: 20px;
+    }
+    .screen-card {
+      background-color: #0E1620;
+      border: 1px solid #1E2E40;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+    .screen-card:hover {
+      transform: translateY(-2px);
+      border-color: #0284C7;
+    }
+    .card-thumb-wrap {
+      width: 100%;
+      height: 246px;
+      background-color: #070B0E;
+      position: relative;
+      overflow: hidden;
+      border-bottom: 1px solid #1E2E40;
+    }
+    .card-iframe-thumb {
+      width: 1024px;
+      height: 600px;
+      transform: scale(0.41);
+      transform-origin: top left;
+      border: none;
+      pointer-events: none;
+    }
+    .card-details {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .card-title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .card-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .card-num-badge {
+      font-size: 11px;
+      font-weight: 700;
+      background-color: #131E2A;
+      color: #38BDF8;
+      border: 1px solid #223448;
+      padding: 2px 8px;
+      border-radius: 4px;
+    }
+    .card-summary {
+      font-size: 12px;
+      color: #94A3B8;
+      line-height: 1.4;
+    }
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+      padding-top: 8px;
+      border-top: 1px solid #16222E;
+    }
+    .card-link {
+      font-size: 12px;
+      font-weight: 700;
+      color: #38BDF8;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .card-link:hover {
+      color: #7DD3FC;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="gallery-container">
+
+    <!-- HEADER & SPEC OVERVIEW -->
+    <header class="gallery-header">
+      <div class="header-left">
+        <div class="header-icon">
+          <span class="mdi mdi-fishbowl-outline"></span>
+        </div>
+        <div>
+          <h1 class="header-title">Tank Monitor Design System Gallery</h1>
+          <p class="header-sub">Elecrow CrowPanel 10.1" (ESP32-P4) Wall Touch Panel UI Mockups</p>
+        </div>
+      </div>
+      <div class="spec-badges">
+        <span class="spec-pill"><span class="mdi mdi-aspect-ratio"></span> 1024 × 600 px (Landscape)</span>
+        <span class="spec-pill"><span class="mdi mdi-palette-outline"></span> 16-bit RGB565 Safe</span>
+        <span class="spec-pill"><span class="mdi mdi-gesture-tap"></span> 56px Min Touch Targets</span>
+        <span class="spec-pill"><span class="mdi mdi-chip"></span> LVGL 9 via ESPHome</span>
+        <a href="DESIGN.md" class="action-btn" style="background:#0284C7; border-color:#38BDF8;">
+          <span class="mdi mdi-book-open-outline"></span>
+          <span>View DESIGN.md</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- SCREEN SELECTOR TABS -->
+    <nav class="tab-bar">
+      <button class="tab-btn active" onclick="switchPreview('screen-1-home.html', 'Screen 1: Home Dashboard', 'Both tanks at a glance (74.9°F & 74.4°F), thermal actuators, TDS & pH target bands, and compact water-flow strip.')">
+        <span class="mdi mdi-view-dashboard"></span>
+        <span>1. Home</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-2-75-detail.html', 'Screen 2: 75 Gallon Detail', 'Dual probes (A: 74.9°, B: 75.1°, Δ -0.2°), 56px setpoint controls, 24h history chart, light, and adaptive model.')">
+        <span class="mdi mdi-chart-timeline-variant"></span>
+        <span>2. 75 Gallon Detail</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-3-nano-detail.html', 'Screen 3: Fluval Spec 16 Detail', 'Single probe (74.4°F), 74.5° setpoint control, Wi-Fi pH integration, and 24h temperature history.')">
+        <span class="mdi mdi-cube-outline"></span>
+        <span>3. Fluval Spec 16</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-4-water-change.html', 'Screen 4: Water Change in Progress', 'Live draining console: 18.2 gal removed (29.4% of 62 gal), 2.4 gpm flow, New Water Change action, and RO fill progress.')">
+        <span class="mdi mdi-water-pump"></span>
+        <span>4. Water Change</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-5-alert.html', 'Screen 5: Critical Alert Active', 'Critical heater failure warning banner: 71.8°F and falling (-0.15°/min) with single Open 75 Gallon detail action.')">
+        <span class="mdi mdi-alert-octagon"></span>
+        <span>5. Alert State</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-6-offline.html', 'Screen 6: Nano Offline / Stale Data', 'Nano BLE link down for 4m: solid 1px border, clearly greyed out stale metrics, strike-through text, and amber STALE 4m pill.')">
+        <span class="mdi mdi-bluetooth-off"></span>
+        <span>6. Offline / Stale</span>
+      </button>
+      <button class="tab-btn" onclick="switchPreview('screen-7-night.html', 'Screen 7: Dim Night Mode', 'Low-luminance amber/cyan nocturnal palette (10% backlight) entered when lights turn off after civil dusk.')">
+        <span class="mdi mdi-weather-night"></span>
+        <span>7. Night Mode</span>
+      </button>
+    </nav>
+
+    <!-- LIVE 1024x600 PREVIEW SECTION -->
+    <section class="preview-section">
+      <div class="preview-toolbar">
+        <div class="preview-info">
+          <h2 class="preview-title" id="current-title">Screen 1: Home Dashboard</h2>
+          <span class="preview-desc" id="current-desc">Both tanks at a glance (74.9°F & 74.4°F), thermal actuators, TDS & pH target bands, and compact water-flow strip.</span>
+        </div>
+        <div class="preview-actions">
+          <a id="open-standalone-btn" href="screen-1-home.html" target="_blank" class="action-btn">
+            <span class="mdi mdi-open-in-new"></span>
+            <span>Open Standalone (1024×600)</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="viewport-outer">
+        <div class="viewport-bezel">
+          <iframe id="preview-frame" class="viewport-frame" src="screen-1-home.html" title="10.1 inch Screen Preview"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <!-- GRID OF ALL SEVEN SCREENS -->
+    <section>
+      <h2 style="font-size: 20px; font-weight: 800; margin-bottom: 16px; color: #F8FAFC;">
+        Complete Design Deliverables (7 Screens)
+      </h2>
+
+      <div class="screens-grid">
+
+        <!-- Card 1 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-1-home.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">1. Home Dashboard</span>
+              <span class="card-num-badge">screen-1-home.html</span>
+            </div>
+            <p class="card-summary">Primary day glanceable view from 1–3 m. Dual tanks headline temps (74.9° & 74.4°), dual actuator duty, TDS & pH target bars, and bottom RO/WC flow strip.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-1-home.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 2 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-2-75-detail.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">2. 75 Gallon Detail</span>
+              <span class="card-num-badge">screen-2-75-detail.html</span>
+            </div>
+            <p class="card-summary">Dual probes (A: 74.9°, B: 75.1°, signed gradient -0.2°), large 56px touch setpoint control (75.0°F), adaptive model toggle, TDS/pH limits, and 24h history chart.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-2-75-detail.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 3 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-3-nano-detail.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">3. Fluval Spec 16 Detail</span>
+              <span class="card-num-badge">screen-3-nano-detail.html</span>
+            </div>
+            <p class="card-summary">Fluval Spec 16 (16 gal tank, ~14 gal water), single temperature probe (74.4°F), 74.5° setpoint control, Wi-Fi pH integration (6.90), and 24h chart.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-3-nano-detail.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 4 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-4-water-change.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">4. Water Change In Progress</span>
+              <span class="card-num-badge">screen-4-water-change.html</span>
+            </div>
+            <p class="card-summary">Live draining & refilling console. Big 18.2 gal display, 29.4% tank volume arc gauge, 2.4 gpm flow, battery 88%, New Water Change action, and RO filter progress toward 5.0 gal target.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-4-water-change.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 5 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-5-alert.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">5. Critical Alert Active</span>
+              <span class="card-num-badge">screen-5-alert.html</span>
+            </div>
+            <p class="card-summary">High-contrast critical banner and red-accented 75G card: heater not responding, 71.8°F falling (-0.15°/min) with 100% stalled heater duty and Open 75 Gallon navigation.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-5-alert.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 6 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-6-offline.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">6. Offline / Stale State</span>
+              <span class="card-num-badge">screen-6-offline.html</span>
+            </div>
+            <p class="card-summary">Fluval Spec 16 Bluetooth disconnected for 4 minutes. Solid 1px grey border, amber STALE 4m pill, cached numbers visibly struck through and dimmed, actuator duties set to UNKNOWN.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-6-offline.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+        <!-- Card 7 -->
+        <article class="screen-card">
+          <div class="card-thumb-wrap">
+            <iframe class="card-iframe-thumb" src="screen-7-night.html" loading="lazy"></iframe>
+          </div>
+          <div class="card-details">
+            <div class="card-title-row">
+              <span class="card-title">7. Night Mode</span>
+              <span class="card-num-badge">screen-7-night.html</span>
+            </div>
+            <p class="card-summary">Deep obsidian black background (#040608) with warm amber headline numbers (#C28238) triggered when room lights turn off after civil dusk. 10% backlight and quick wake control.</p>
+            <div class="card-footer">
+              <span style="font-size:11px; color:#64748B;">1024 × 600 px</span>
+              <a href="screen-7-night.html" target="_blank" class="card-link">View Screen <span class="mdi mdi-arrow-right"></span></a>
+            </div>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    function switchPreview(url, title, desc) {
+      document.getElementById('preview-frame').src = url;
+      document.getElementById('open-standalone-btn').href = url;
+      document.getElementById('current-title').textContent = title;
+      document.getElementById('current-desc').textContent = desc;
+
+      const buttons = document.querySelectorAll('.tab-btn');
+      buttons.forEach(btn => {
+        if (btn.getAttribute('onclick').includes(url)) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+    }
+  </script>
+</body>
+</html>

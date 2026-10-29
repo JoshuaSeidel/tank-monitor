@@ -1,0 +1,295 @@
+# One tank's BLE link, as seen by the 10.1" P4 wall panel.
+#
+# Loaded ONCE PER TANK with vars, so one panel can hold the 75 gal (payload
+# v3, 20 fields) and the nano (payload v2, 15 fields) at the same time:
+#
+#   - path: packages/panel_p4_tank.yaml
+#     vars: { tank: t75, mac: "D0:CF:13:02:1A:62", fields: "20", version: "3" }
+#
+# Every id here is prefixed with ${tank}, which is the whole reason this is
+# a new file rather than ble_link_panel.yaml + ble_link_panel_v3.yaml: those
+# two declare the same ids and can never be loaded into one device.
+#
+# The parser keeps the rule those panels live by. A frame with the wrong
+# field count or the wrong version publishes NOTHING: a truncated BLE read
+# (MTU) is plausible-looking garbage, and a stale screen that admits it is
+# stale beats a fresh screen that is lying.
+#
+# Everything the UI reads is a global in DISPLAY units (degF, ppm, pH). The
+# wire carries Celsius for temperatures; the conversion happens once, here.
+#
+# Fields 0-14 are identical in v2 and v3 (see packages/ble_link_v3.yaml):
+#   0 version  1 temp A C  2 setpoint C  3 TDS  4 TDS 1h  5 lux  6 swing C
+#   7 drift C/min  8 confidence %  9 heater %  10 fan %  11 heat demand
+#   12 fan demand  13 safety tripped  14 learning enabled
+#   v3 only: 15 temp B C  16 gradient degF  17 pH  18/19 gradient heat/idle
+
+defaults:
+  # Whether the controller's frame carries pH (v3). The nano's pH arrives
+  # over MQTT instead, from packages/panel_p4_feeds.yaml.
+  ph_from_ble: "false"
+
+ble_client:
+  - id: ${tank}_ble
+    mac_address: ${mac}
+    on_connect:
+      - lambda: |-
+          id(${tank}_connected) = true;
+          ESP_LOGI("${tank}", "controller connected");
+    on_disconnect:
+      - lambda: |-
+          id(${tank}_connected) = false;
+          ESP_LOGW("${tank}", "controller disconnected");
+
+globals:
+  # restore_value on the readings so a rebooted panel shows the last known
+  # values at once -- marked stale, because ${tank}_stamp_ms starts at 0.
+  - id: ${tank}_temp
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_temp_b
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_grad
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_sp
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_swing
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_drift
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ${tank}_conf
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_heat
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: ${tank}_fan
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: ${tank}_heat_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: ${tank}_fan_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: ${tank}_fault
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: ${tank}_learn
+    type: bool
+    restore_value: true
+    initial_value: 'true'
+  - id: ${tank}_tds
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_tds_mean
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: ${tank}_lux
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: ${tank}_ph
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  # millis() of the last pH update, from whichever source carries it.
+  - id: ${tank}_ph_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: ${tank}_connected
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # millis() of the last fully parsed frame. 0 = nothing since boot.
+  - id: ${tank}_stamp_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Wall clock of the last parsed frame, for "showing values from 14:35:10".
+  # Restored, so after a reboot the panel can still say how old its
+  # restored numbers are.
+  - id: ${tank}_stamp
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # Setpoint the user is dialling in, not yet sent. NAN = not editing.
+  - id: ${tank}_sp_pending
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  # 24 h history, one sample every 15 min = 96 points per series, oldest
+  # first. Kept in RAM only: after a reboot the chart starts empty and fills
+  # from the left rather than drawing a flat line through hours nobody saw.
+  - id: ${tank}_hist_temp
+    type: std::array<float, 96>
+    restore_value: false
+  - id: ${tank}_hist_temp_b
+    type: std::array<float, 96>
+    restore_value: false
+  - id: ${tank}_hist_tds
+    type: std::array<float, 96>
+    restore_value: false
+  - id: ${tank}_hist_ph
+    type: std::array<float, 96>
+    restore_value: false
+  - id: ${tank}_hist_n
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+text_sensor:
+  - platform: ble_client
+    ble_client_id: ${tank}_ble
+    id: ${tank}_tele
+    internal: true
+    service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+    characteristic_uuid: "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+    notify: true
+    on_value:
+      - lambda: |-
+          const std::string &s = x;
+          float f[20];
+          int n = 0;
+          size_t start = 0;
+          while (n < 20 && start <= s.size()) {
+            const size_t comma = s.find(',', start);
+            const std::string tok = (comma == std::string::npos)
+                                      ? s.substr(start)
+                                      : s.substr(start, comma - start);
+            if (tok.empty()) break;
+            f[n++] = atof(tok.c_str());
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+          }
+          if (n != ${fields}) {
+            ESP_LOGW("${tank}", "bad payload: %d of ${fields} fields in %u bytes -- MTU too small?",
+                     n, (unsigned) s.size());
+            return;
+          }
+          if ((int) f[0] != ${version}) {
+            ESP_LOGW("${tank}", "payload format v%d, expected v${version} -- wrong MAC or reflash one end",
+                     (int) f[0]);
+            return;
+          }
+          // -999 is the controller's not-a-number sentinel.
+          const auto val = [](float v) { return v <= -998.0f ? NAN : v; };
+          const auto c2f = [](float c) { return std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f; };
+
+          id(${tank}_temp)     = c2f(val(f[1]));
+          id(${tank}_sp)       = c2f(val(f[2]));
+          id(${tank}_tds)      = val(f[3]);
+          id(${tank}_tds_mean) = val(f[4]);
+          id(${tank}_lux)      = val(f[5]);
+          // Swing and drift are differences: scale only, no offset.
+          id(${tank}_swing)    = std::isnan(val(f[6])) ? NAN : val(f[6]) * 9.0f / 5.0f;
+          id(${tank}_drift)    = std::isnan(val(f[7])) ? NAN : val(f[7]) * 9.0f / 5.0f;
+          id(${tank}_conf)     = val(f[8]);
+          id(${tank}_heat)     = val(f[9]);
+          id(${tank}_fan)      = val(f[10]);
+          id(${tank}_heat_on)  = f[11] > 0.5f;
+          id(${tank}_fan_on)   = f[12] > 0.5f;
+          id(${tank}_fault)    = f[13] > 0.5f;
+          id(${tank}_learn)    = f[14] > 0.5f;
+          if (${fields} == 20) {
+            id(${tank}_temp_b) = c2f(val(f[15]));
+            id(${tank}_grad)   = val(f[16]);
+            if (${ph_from_ble} && !std::isnan(val(f[17]))) {
+              id(${tank}_ph) = val(f[17]);
+              id(${tank}_ph_ms) = millis();
+            }
+          }
+
+          // Stamp last, and only on a frame that fully parsed.
+          id(${tank}_stamp_ms) = millis();
+          if (id(sntp_time).now().is_valid())
+            id(${tank}_stamp) = id(sntp_time).now().timestamp;
+
+binary_sensor:
+  # Notifications every 5 s, so 45 s is nine missed rounds. Deliberately not
+  # the GATT connection state: a connection can stay up while notifies stop.
+  - platform: template
+    id: ${tank}_link
+    name: "${tank_name} Controller Link"
+    device_class: connectivity
+    entity_category: diagnostic
+    trigger_on_initial_state: true
+    lambda: |-
+      return id(${tank}_stamp_ms) != 0 && (millis() - id(${tank}_stamp_ms)) < 45000;
+
+script:
+  # Setpoint changes are debounced: each tap restarts the 1.5 s wait, so
+  # five quick taps send one command, not five.
+  - id: ${tank}_send_sp
+    mode: restart
+    then:
+      - delay: 1500ms
+      - if:
+          condition:
+            lambda: 'return !std::isnan(id(${tank}_sp_pending));'
+          then:
+            - ble_client.ble_write:
+                id: ${tank}_ble
+                service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+                characteristic_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+                value: !lambda |-
+                  char b[12];
+                  snprintf(b, sizeof(b), "SP%.1f", id(${tank}_sp_pending));
+                  ESP_LOGI("${tank}", "sending %s", b);
+                  return std::vector<uint8_t>(b, b + strlen(b));
+            # Leave the pending value up until the controller's next frame
+            # reports it back, so the dial does not flick to the old value.
+            - delay: 8s
+            - lambda: 'id(${tank}_sp_pending) = NAN;'
+
+  # Sends whatever ${tank}_learn now holds; the button flips it first, so
+  # the panel shows the new state at once and the next frame confirms it.
+  - id: ${tank}_send_learn
+    then:
+      - ble_client.ble_write:
+          id: ${tank}_ble
+          service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
+          characteristic_uuid: "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+          value: !lambda |-
+            return id(${tank}_learn) ? std::vector<uint8_t>{'A', 'L', '1'} : std::vector<uint8_t>{'A', 'L', '0'};
+
+interval:
+  # History sample. Skips (stores NAN for) any series whose source is stale,
+  # so a link outage shows as a gap in the chart instead of a flat line.
+  - interval: 15min
+    then:
+      - lambda: |-
+          const bool live = id(${tank}_stamp_ms) != 0 && (millis() - id(${tank}_stamp_ms)) < 45000;
+          const bool ph_live = id(${tank}_ph_ms) != 0 && (millis() - id(${tank}_ph_ms)) < 3600000;
+          auto push = [](std::array<float, 96> &a, int n, float v) {
+            if (n < 96) { a[n] = v; return; }
+            for (int i = 0; i < 95; i++) a[i] = a[i + 1];
+            a[95] = v;
+          };
+          const int n = id(${tank}_hist_n);
+          push(id(${tank}_hist_temp),   n, live ? id(${tank}_temp)   : NAN);
+          push(id(${tank}_hist_temp_b), n, live ? id(${tank}_temp_b) : NAN);
+          push(id(${tank}_hist_tds),    n, live ? id(${tank}_tds)    : NAN);
+          push(id(${tank}_hist_ph),     n, ph_live ? id(${tank}_ph)  : NAN);
+          if (n < 96) id(${tank}_hist_n) = n + 1;

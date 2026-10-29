@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1024, height=600, initial-scale=1.0">
+  <title>Screen 1: Home Dashboard - 10.1" Tank Monitor Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font/css/materialdesignicons.min.css">
+  <style>
+    /* LVGL 9 & RGB565 Optimized Display Stylesheet */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    html, body {
+      width: 1024px;
+      height: 600px;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #0B1015;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #F1F5F9;
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .screen-root {
+      width: 1024px;
+      height: 600px;
+      position: absolute;
+      top: 0;
+      left: 0;
+      background-color: #0B1015;
+      display: flex;
+      flex-direction: column;
+      padding: 10px 14px 10px 14px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    /* TOP BAR - Height 46px */
+    .top-bar {
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 4px;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background-color: #164E63;
+      border: 1px solid #0891B2;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #22D3EE;
+      font-size: 20px;
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #F8FAFC;
+      text-transform: uppercase;
+    }
+    .brand-sub {
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748B;
+      margin-left: 2px;
+    }
+
+    .system-status-pill {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background-color: #0F291E;
+      border: 1px solid #059669;
+      border-radius: 20px;
+      padding: 6px 14px;
+      color: #34D399;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .system-status-pill .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #10B981;
+    }
+
+    .top-right-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .clock-display {
+      font-size: 15px;
+      font-weight: 700;
+      color: #E2E8F0;
+      display: flex;
+      align-items: baseline;
+      gap: 5px;
+    }
+    .clock-date {
+      font-size: 12px;
+      font-weight: 500;
+      color: #94A3B8;
+    }
+    .icon-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+
+    /* TANKS ROW - Height 412px */
+    .tanks-row {
+      display: grid;
+      grid-template-columns: 492px 492px;
+      gap: 12px;
+      height: 416px;
+    }
+
+    .tank-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 14px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+    }
+    .tank-card:hover, .tank-card:active {
+      border-color: #0284C7;
+    }
+
+    /* Tank Card Header */
+    .tank-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 30px;
+    }
+    .tank-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tank-name {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #FFFFFF;
+      text-transform: uppercase;
+    }
+    .tank-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 4px;
+      background-color: #1E293B;
+      color: #94A3B8;
+      border: 1px solid #334155;
+    }
+    .tank-live-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #38BDF8;
+    }
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: #0284C7;
+    }
+
+    /* Headline Temperature Section - Glanceable from 3m */
+    .temp-hero-section {
+      background-color: #19232F;
+      border: 1px solid #243447;
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .temp-big-block {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+    .temp-huge-num {
+      font-size: 58px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -1.5px;
+      color: #F8FAFC;
+    }
+    .temp-huge-unit {
+      font-size: 24px;
+      font-weight: 700;
+      color: #38BDF8;
+      margin-left: 2px;
+    }
+    .temp-hero-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+    }
+    .target-pill {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background-color: #0F172A;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #CBD5E1;
+    }
+    .target-val {
+      color: #38BDF8;
+    }
+    .probes-gradient-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .gradient-pill {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 11px;
+    }
+    .grad-normal {
+      background-color: #1E293B;
+      color: #38BDF8;
+      border: 1px solid #334155;
+    }
+    .drift-indicator {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #10B981;
+    }
+
+    /* Actuator Status Strip */
+    .actuator-strip {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .actuator-box {
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .actuator-box.heating-active {
+      border-color: #EA580C;
+      background-color: #261711;
+    }
+    .actuator-info {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .actuator-icon {
+      font-size: 18px;
+      color: #64748B;
+    }
+    .heating-active .actuator-icon {
+      color: #FB923C;
+    }
+    .actuator-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #94A3B8;
+      display: block;
+    }
+    .heating-active .actuator-label {
+      color: #FDBA74;
+    }
+    .actuator-duty {
+      font-size: 14px;
+      font-weight: 800;
+      color: #E2E8F0;
+    }
+    .heating-active .actuator-duty {
+      color: #FB923C;
+    }
+    .actuator-bar-wrap {
+      width: 48px;
+      height: 8px;
+      background-color: #0F172A;
+      border-radius: 4px;
+      overflow: hidden;
+      border: 1px solid #334155;
+    }
+    .actuator-bar-fill {
+      height: 100%;
+      background-color: #FB923C;
+      border-radius: 3px;
+    }
+
+    /* Metrics Dual Tiles (TDS & pH) */
+    .metrics-dual-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .metric-tile {
+      background-color: #16202C;
+      border: 1px solid #223142;
+      border-radius: 8px;
+      padding: 9px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .metric-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .metric-tag {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .metric-target-text {
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748B;
+    }
+    .metric-value-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .metric-huge-val {
+      font-size: 26px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .metric-unit {
+      font-size: 12px;
+      font-weight: 600;
+      color: #64748B;
+      margin-left: 2px;
+    }
+    .metric-sub-val {
+      font-size: 11px;
+      font-weight: 600;
+      color: #38BDF8;
+    }
+
+    /* Range Gauge Bar (LVGL Style Solid Segments) */
+    .gauge-bar-container {
+      height: 6px;
+      background-color: #0F172A;
+      border-radius: 3px;
+      position: relative;
+      overflow: hidden;
+      margin-top: 2px;
+      border: 1px solid #1E293B;
+    }
+    .gauge-target-zone {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      background-color: #064E3B;
+      border-left: 1px solid #059669;
+      border-right: 1px solid #059669;
+    }
+    .gauge-current-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 4px;
+      margin-left: -2px;
+      background-color: #10B981;
+      border-radius: 2px;
+    }
+
+    /* Tank Card Footer */
+    .tank-card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 2px;
+      border-top: 1px solid #1B2633;
+    }
+    .footer-aux-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748B;
+    }
+    .aux-chip {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .aux-active {
+      color: #38BDF8;
+    }
+    .aux-amber {
+      color: #FBBF24;
+    }
+
+    .detail-touch-btn {
+      height: 38px;
+      padding: 0 14px;
+      background-color: #1E293B;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: #E2E8F0;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .detail-touch-btn:hover {
+      background-color: #0284C7;
+      border-color: #38BDF8;
+      color: #FFFFFF;
+    }
+
+    /* BOTTOM WATER FLOW & MAINTENANCE STRIP - Height 104px */
+    .bottom-strip {
+      height: 108px;
+      display: grid;
+      grid-template-columns: 344px 388px 252px;
+      gap: 12px;
+    }
+
+    .strip-card {
+      background-color: #131B24;
+      border: 1px solid #223142;
+      border-radius: 12px;
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .strip-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .strip-title-group {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .strip-icon {
+      font-size: 16px;
+      color: #0284C7;
+    }
+    .strip-title {
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #E2E8F0;
+      text-transform: uppercase;
+    }
+    .strip-status-badge {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      text-transform: uppercase;
+    }
+    .badge-flowing {
+      background-color: #0C4A6E;
+      color: #38BDF8;
+      border: 1px solid #0284C7;
+    }
+    .badge-idle {
+      background-color: #1E293B;
+      color: #94A3B8;
+      border: 1px solid #334155;
+    }
+
+    .strip-content-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+    .strip-big-metric {
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+    }
+    .strip-num {
+      font-size: 24px;
+      font-weight: 800;
+      color: #F8FAFC;
+    }
+    .strip-unit {
+      font-size: 12px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .strip-sub-info {
+      font-size: 11px;
+      font-weight: 600;
+      color: #64748B;
+    }
+
+    .strip-progress-bar {
+      height: 6px;
+      background-color: #0F172A;
+      border-radius: 3px;
+      border: 1px solid #1E293B;
+      overflow: hidden;
+    }
+    .strip-progress-fill {
+      height: 100%;
+      background-color: #0284C7;
+      border-radius: 2px;
+    }
+
+    .strip-footer-text {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 600;
+      color: #64748B;
+    }
+
+    /* Water Change Start Action Button */
+    .wc-action-btn {
+      height: 42px;
+      background-color: #0369A1;
+      border: 1px solid #38BDF8;
+      border-radius: 8px;
+      color: #FFFFFF;
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .wc-action-btn:hover {
+      background-color: #0284C7;
+    }
+
+    /* HA Status Box */
+    .ha-metric-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ha-metric-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: #94A3B8;
+    }
+    .ha-item-val {
+      font-weight: 700;
+      color: #F1F5F9;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen-root">
+
+    <!-- TOP SYSTEM BAR -->
+    <header class="top-bar">
+      <div class="brand-group">
+        <div class="brand-icon">
+          <span class="mdi mdi-fishbowl-outline"></span>
+        </div>
+        <div>
+          <span class="brand-title">Tank Monitor</span>
+        </div>
+      </div>
+
+      <!-- Center Status Pill -->
+      <div class="system-status-pill">
+        <div class="pulse-dot"></div>
+        <span>ALL SYSTEMS NORMAL • 0 ALERTS</span>
+      </div>
+
+      <!-- Top Right Info -->
+      <div class="top-right-group">
+        <div class="icon-chip">
+          <span class="mdi mdi-wifi text-sky"></span>
+          <span>MQTT Connected</span>
+        </div>
+        <div class="icon-chip">
+          <span class="mdi mdi-bluetooth"></span>
+          <span>Dual BLE Active</span>
+        </div>
+        <div class="clock-display">
+          <span>2:48 PM</span>
+          <span class="clock-date">Thu Oct 29</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- MAIN TANKS AT A GLANCE ROW -->
+    <main class="tanks-row">
+
+      <!-- TANK 1: 75 GALLON -->
+      <section class="tank-card">
+        <!-- Header -->
+        <div class="tank-card-header">
+          <div class="tank-title-wrap">
+            <span class="tank-name">75 Gallon</span>
+            <span class="tank-badge">Community</span>
+          </div>
+          <div class="tank-live-indicator">
+            <div class="live-dot"></div>
+            <span>BLE Live • 2s ago</span>
+          </div>
+        </div>
+
+        <!-- Headline Temperature Hero (Glanceable from 3m) -->
+        <div class="temp-hero-section">
+          <div class="temp-big-block">
+            <span class="temp-huge-num">74.9</span>
+            <span class="temp-huge-unit">°F</span>
+          </div>
+          <div class="temp-hero-right">
+            <div class="target-pill">
+              <span>Setpoint:</span>
+              <span class="target-val">75.0 °F</span>
+              <span style="color:#64748B;">(±0.5°)</span>
+            </div>
+            <div class="probes-gradient-row">
+              <span>A: 74.9°</span>
+              <span>•</span>
+              <span>B: 75.1°</span>
+              <span>•</span>
+              <span class="gradient-pill grad-normal">Δ -0.2 °F</span>
+            </div>
+            <div class="drift-indicator">
+              <span class="mdi mdi-arrow-top-right"></span>
+              <span>+0.01 °F/min (Stable)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actuators: Heater & Fan -->
+        <div class="actuator-strip">
+          <div class="actuator-box heating-active">
+            <div class="actuator-info">
+              <span class="mdi mdi-fire actuator-icon"></span>
+              <div>
+                <span class="actuator-label">Heater (Demand ON)</span>
+                <span class="actuator-duty">14% Duty</span>
+              </div>
+            </div>
+            <div class="actuator-bar-wrap">
+              <div class="actuator-bar-fill" style="width: 14%;"></div>
+            </div>
+          </div>
+
+          <div class="actuator-box">
+            <div class="actuator-info">
+              <span class="mdi mdi-fan actuator-icon"></span>
+              <div>
+                <span class="actuator-label">Cooling Fan</span>
+                <span class="actuator-duty">0% Duty (OFF)</span>
+              </div>
+            </div>
+            <div class="actuator-bar-wrap">
+              <div class="actuator-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secondary Metrics: TDS & pH -->
+        <div class="metrics-dual-row">
+          <!-- TDS Tile -->
+          <div class="metric-tile">
+            <div class="metric-top">
+              <span class="metric-tag">TDS (Purity)</span>
+              <span class="metric-target-text">Band: 200–225</span>
+            </div>
+            <div class="metric-value-row">
+              <div>
+                <span class="metric-huge-val">218</span>
+                <span class="metric-unit">ppm</span>
+              </div>
+              <div class="metric-sub-val">1h avg: 221</div>
+            </div>
+            <!-- Gauge Bar: 150 to 300 range, 200-225 green target, 218 marker -->
+            <div class="gauge-bar-container" title="Target: 200-225 ppm | Alert: 260 ppm">
+              <div class="gauge-target-zone" style="left: 33%; width: 17%;"></div>
+              <div class="gauge-current-marker" style="left: 45%;"></div>
+            </div>
+          </div>
+
+          <!-- pH Tile -->
+          <div class="metric-tile">
+            <div class="metric-top">
+              <span class="metric-tag">Water pH</span>
+              <span class="metric-target-text">Target: 7.0–7.5</span>
+            </div>
+            <div class="metric-value-row">
+              <div>
+                <span class="metric-huge-val">7.24</span>
+                <span class="metric-unit">pH</span>
+              </div>
+              <div class="metric-sub-val" style="color:#10B981;">Optimal</div>
+            </div>
+            <!-- Gauge Bar: 6.5 to 8.0 range, 7.0-7.5 target zone, 7.24 marker -->
+            <div class="gauge-bar-container" title="Target: 7.0-7.5 pH">
+              <div class="gauge-target-zone" style="left: 33%; width: 34%;"></div>
+              <div class="gauge-current-marker" style="left: 49%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Footer -->
+        <div class="tank-card-footer">
+          <div class="footer-aux-info">
+            <span class="aux-chip"><span class="mdi mdi-white-balance-sunny aux-amber"></span> 420 lux</span>
+            <span class="aux-chip"><span class="mdi mdi-molecule-co2"></span> CO2 Off (Nov)</span>
+            <span class="aux-chip aux-active"><span class="mdi mdi-weather-windy"></span> Bubbler On</span>
+            <span class="aux-chip"><span class="mdi mdi-brain"></span> Model 94%</span>
+          </div>
+          <a href="screen-2-75-detail.html" class="detail-touch-btn">
+            <span>Details</span>
+            <span class="mdi mdi-chevron-right"></span>
+          </a>
+        </div>
+      </section>
+
+      <!-- TANK 2: FLUVAL SPEC 16 (16 GAL / ~14 GAL WATER) -->
+      <section class="tank-card">
+        <!-- Header -->
+        <div class="tank-card-header">
+          <div class="tank-title-wrap">
+            <span class="tank-name">Fluval Spec 16</span>
+            <span class="tank-badge">16 Gal • ~14 Gal Water</span>
+          </div>
+          <div class="tank-live-indicator">
+            <div class="live-dot"></div>
+            <span>BLE Live • 4s ago</span>
+          </div>
+        </div>
+
+        <!-- Headline Temperature Hero (Glanceable from 3m) -->
+        <div class="temp-hero-section">
+          <div class="temp-big-block">
+            <span class="temp-huge-num">74.4</span>
+            <span class="temp-huge-unit">°F</span>
+          </div>
+          <div class="temp-hero-right">
+            <div class="target-pill">
+              <span>Setpoint:</span>
+              <span class="target-val">74.5 °F</span>
+              <span style="color:#64748B;">(±0.5°)</span>
+            </div>
+            <div class="probes-gradient-row">
+              <span style="color:#94A3B8;">Single Probe Active</span>
+              <span>•</span>
+              <span class="gradient-pill grad-normal">Δ 0.0 °F</span>
+            </div>
+            <div class="drift-indicator" style="color:#94A3B8;">
+              <span class="mdi mdi-arrow-bottom-right"></span>
+              <span>-0.01 °F/min (Stable)</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actuators: Heater & Fan -->
+        <div class="actuator-strip">
+          <div class="actuator-box">
+            <div class="actuator-info">
+              <span class="mdi mdi-fire actuator-icon"></span>
+              <div>
+                <span class="actuator-label">Heater (Idle)</span>
+                <span class="actuator-duty">0% Duty (OFF)</span>
+              </div>
+            </div>
+            <div class="actuator-bar-wrap">
+              <div class="actuator-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <div class="actuator-box">
+            <div class="actuator-info">
+              <span class="mdi mdi-fan actuator-icon"></span>
+              <div>
+                <span class="actuator-label">Cooling Fan</span>
+                <span class="actuator-duty">0% Duty (OFF)</span>
+              </div>
+            </div>
+            <div class="actuator-bar-wrap">
+              <div class="actuator-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secondary Metrics: TDS & pH -->
+        <div class="metrics-dual-row">
+          <!-- TDS Tile -->
+          <div class="metric-tile">
+            <div class="metric-top">
+              <span class="metric-tag">TDS (Purity)</span>
+              <span class="metric-target-text">Target: 150–200</span>
+            </div>
+            <div class="metric-value-row">
+              <div>
+                <span class="metric-huge-val">162</span>
+                <span class="metric-unit">ppm</span>
+              </div>
+              <div class="metric-sub-val">1h avg: 164</div>
+            </div>
+            <!-- Gauge Bar -->
+            <div class="gauge-bar-container" title="Target: 150-200 ppm">
+              <div class="gauge-target-zone" style="left: 25%; width: 40%;"></div>
+              <div class="gauge-current-marker" style="left: 35%;"></div>
+            </div>
+          </div>
+
+          <!-- pH Tile (Wi-Fi Source) -->
+          <div class="metric-tile">
+            <div class="metric-top">
+              <span class="metric-tag">pH (Wi-Fi)</span>
+              <span class="metric-target-text">Target: 7.0–7.5</span>
+            </div>
+            <div class="metric-value-row">
+              <div>
+                <span class="metric-huge-val">6.90</span>
+                <span class="metric-unit">pH</span>
+              </div>
+              <div class="metric-sub-val" style="color:#FBBF24;">Near Band</div>
+            </div>
+            <!-- Gauge Bar -->
+            <div class="gauge-bar-container" title="Target: 7.0-7.5 pH">
+              <div class="gauge-target-zone" style="left: 33%; width: 34%;"></div>
+              <div class="gauge-current-marker" style="left: 27%; background-color:#FBBF24;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card Footer -->
+        <div class="tank-card-footer">
+          <div class="footer-aux-info">
+            <span class="aux-chip"><span class="mdi mdi-white-balance-sunny aux-amber"></span> 280 lux</span>
+            <span class="aux-chip aux-active"><span class="mdi mdi-molecule-co2"></span> CO2 On (Day)</span>
+            <span class="aux-chip"><span class="mdi mdi-weather-windy"></span> Bubbler Off</span>
+            <span class="aux-chip"><span class="mdi mdi-shield-check" style="color:#10B981;"></span> Safety OK</span>
+          </div>
+          <a href="screen-3-nano-detail.html" class="detail-touch-btn">
+            <span>Details</span>
+            <span class="mdi mdi-chevron-right"></span>
+          </a>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- COMPACT WATER FLOW & MAINTENANCE STRIP -->
+    <footer class="bottom-strip">
+
+      <!-- RO METER (RO Filter Output) -->
+      <div class="strip-card">
+        <div class="strip-header">
+          <div class="strip-title-group">
+            <span class="mdi mdi-filter-outline strip-icon"></span>
+            <span class="strip-title">RO Filter Output</span>
+          </div>
+          <span class="strip-status-badge badge-flowing">Flowing • 0.18 gpm</span>
+        </div>
+        <div class="strip-content-row">
+          <div class="strip-big-metric">
+            <span class="strip-num">3.4</span>
+            <span class="strip-unit">/ 5.0 gal</span>
+          </div>
+          <div class="strip-sub-info">68% of Target</div>
+        </div>
+        <div class="strip-progress-bar">
+          <div class="strip-progress-fill" style="width: 68%;"></div>
+        </div>
+        <div class="strip-footer-text">
+          <span>Target Reached: NO</span>
+          <span>Total: 1,420 gal</span>
+        </div>
+      </div>
+
+      <!-- WATER CHANGE HOSE METER -->
+      <div class="strip-card" style="border-color: #0284C7;">
+        <div class="strip-header">
+          <div class="strip-title-group">
+            <span class="mdi mdi-swap-horizontal-bold strip-icon" style="color:#38BDF8;"></span>
+            <span class="strip-title">Water Change Meter</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span style="font-size:11px; font-weight:700; color:#10B981;"><span class="mdi mdi-battery-80"></span> 88%</span>
+            <span class="strip-status-badge badge-idle">Ready</span>
+          </div>
+        </div>
+        <div class="strip-content-row" style="margin: 2px 0;">
+          <div>
+            <div style="font-size:11px; font-weight:600; color:#94A3B8;">Last Change: Oct 24 (5d ago)</div>
+            <div style="font-size:10px; color:#64748B;">75 Gal Net Volume: ~62 gal (Typical: 20 gal)</div>
+          </div>
+          <a href="screen-4-water-change.html" class="wc-action-btn" style="padding: 0 16px; height: 38px;">
+            <span class="mdi mdi-play-circle-outline"></span>
+            <span>Start Change</span>
+          </a>
+        </div>
+        <div class="strip-footer-text">
+          <span>Mode: Standby (Drain/Refill)</span>
+          <span>Flow: 0.0 gpm</span>
+        </div>
+      </div>
+
+      <!-- HOME ASSISTANT & TIMERS -->
+      <div class="strip-card">
+        <div class="strip-header">
+          <div class="strip-title-group">
+            <span class="mdi mdi-home-assistant strip-icon" style="color:#0284C7;"></span>
+            <span class="strip-title">Home Assistant</span>
+          </div>
+          <span class="strip-status-badge badge-idle" style="color:#34D399; background:#0F291E; border-color:#059669;">Sync OK</span>
+        </div>
+        <div class="ha-metric-stack">
+          <div class="ha-metric-item">
+            <span>Livestock Loss:</span>
+            <span class="ha-item-val" style="color:#10B981;">142 days clean</span>
+          </div>
+          <div class="ha-metric-item">
+            <span>Light Schedule:</span>
+            <span class="ha-item-val">65% (Dawn–Dusk)</span>
+          </div>
+          <div class="ha-metric-item">
+            <span>Active Alerts:</span>
+            <span class="ha-item-val" style="color:#38BDF8;">0 Warnings</span>
+          </div>
+        </div>
+      </div>
+
+    </footer>
+
+  </div>
+</body>
+</html>
