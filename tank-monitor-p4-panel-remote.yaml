@@ -16,7 +16,7 @@
 #
 # First boot: see boards/elecrow-crowpanel-p4-101.yaml. Check the board
 # revision (V1.0 needs the SDIO pins flipped), then press Install on
-# "C6 Radio Firmware" once so the radio gets Bluetooth.
+# "C6 Radio Firmware" once so the C6 matches ESPHome's ESP-Hosted build.
 #
 # device_name: must not collide with any tank-monitor-* device. The Home
 # Assistant side publishes to tank-monitor-panel/*, which is a fixed topic,

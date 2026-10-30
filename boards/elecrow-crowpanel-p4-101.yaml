@@ -3,9 +3,13 @@
 # the UI is packages/panel_p4_ui.yaml, the data is panel_p4_tank.yaml (x2)
 # and panel_p4_feeds.yaml.
 #
-# Sources, cross-checked: Elecrow's wiki pinout; vespassassina/crowpanel-ha
-# (9", same board family, on real hardware); espcontrol-community-devices
-# PR #156 (10.1", EK79007 panel = ESPHome's WAVESHARE-...-7B preset).
+# Sources, cross-checked: Elecrow's own repo (github.com/Elecrow-RD/
+# CrowPanel-Advanced-10.1inch-ESP32-P4-HMI-AI-Display-1024x600-IPS-Touch-Screen):
+# its official ESPHome example (example/V1.0/ESPHome) and the V1.2 hardware
+# driver guide compiled from the schematics (Eagle_SCH&PCB/1.2/readme.md);
+# vespassassina/crowpanel-ha (9", same family, on real hardware); and
+# espcontrol-community-devices PR #156 (10.1", EK79007 panel = ESPHome's
+# WAVESHARE-...-7B preset, which Elecrow's own example uses too).
 #
 # ---------------------------------------------------------------------
 # ESPHome version
@@ -17,24 +21,31 @@
 # The radio is a separate chip
 # ---------------------------------------------------------------------
 # The P4 has no radio. Wi-Fi AND Bluetooth come from the on-board C6 over
-# SDIO (ESP-Hosted). Elecrow ships the C6 with Wi-Fi-only firmware, so BLE
-# will not come up until the C6 is reflashed ONCE with ESPHome's Wi-Fi + BT
-# build: after first boot, press Install on the "C6 Radio Firmware" update
-# entity (or the web page). It flashes the C6 from the P4 over SDIO; no
-# cable, no buttons. The manifest only offers versions <= the ESP-Hosted
-# library compiled into this firmware, so the two halves cannot mismatch.
+# SDIO (ESP-Hosted). Elecrow ships the C6 with ESP-Hosted's stock slave
+# firmware (2.12.3 as of their 2026-04-08 release; early V1.0 boards had
+# 2.11.7), and that build has Bluetooth on by default (BT_ENABLED,
+# ESP_HOSTED_CP_BT). ESPHome 2026.10.1's host library is esp_hosted
+# 2.12.13, the same series, so Wi-Fi and BLE should both come up as shipped.
+# Even so, press Install on the "C6 Radio Firmware" update entity once after
+# first boot: it flashes the C6 from the P4 over SDIO (no cable) with
+# ESPHome's 2.12.13 build, so the two halves match exactly. The manifest
+# only offers versions <= the host library, so they cannot mismatch.
+# If BLE does not come up on the factory firmware, this update is the fix.
 #
-# That stock firmware allows 3 BLE connections (BT_LE_MAX_CONNECTIONS
-# default). This panel uses 2, one per tank.
+# The slave's BT_LE_MAX_CONNECTIONS default is 3. This panel uses 2, one per
+# tank.
 #
 # ---------------------------------------------------------------------
 # Two things that differ between boards and must be right
 # ---------------------------------------------------------------------
 # 1. BOARD REVISION (silkscreen V1.0 / V1.1 / V1.2). The SDIO data pins are
 #    in opposite order on V1.0. Wrong order = boot loop right after flashing.
-#    Default below is V1.1/V1.2; for V1.0 set c6_d0..d3 to 14,15,16,17.
+#    Default below is V1.1/V1.2, confirmed by Elecrow's V1.2 guide (P4
+#    GPIO14/15/16/17 = C6 D3/D2/D1/D0). For V1.0 set c6_d0..d3 to
+#    GPIO14,15,16,17, which is exactly what Elecrow's V1.0 ESPHome example uses.
 # 2. P4 CHIP REVISION. Below v3.0 is an engineering sample and needs
-#    engineering_sample: "true". The boot log prints the revision.
+#    engineering_sample: "true". The boot log prints the revision. Elecrow's
+#    own V1.0 example sets true, so expect early V1.0 boards to need it.
 
 substitutions:
   engineering_sample: "false"
@@ -65,10 +76,16 @@ psram:
   mode: hex
   speed: 200MHz
 
-# MIPI-DSI PHY supply.
+# P4 internal LDOs, as Elecrow's board support code sets them before any
+# peripheral starts (V1.2 guide: "this sequence must not be omitted"):
+# LDO3 2.5 V for the MIPI-DSI PHY, LDO4 3.3 V. ESPHome's LDO setting tops out
+# at 2.7 V; 3.3 V is "passthrough" (bypass), which is also how ESP-IDF
+# delivers a 3300 mV request on these channels.
 esp_ldo:
   - channel: 3
     voltage: 2.5V
+  - channel: 4
+    voltage: passthrough
 
 esp32_hosted:
   variant: esp32c6
@@ -110,6 +127,9 @@ i2c:
     frequency: 400kHz
 
 output:
+  # GPIO29 gates the backlight supply (Q11 -> LCD_BK_VDD, V1.2 guide). It is
+  # driven high while the light is on, the same level Elecrow's ESPHome
+  # example leaves it at.
   - platform: gpio
     id: backlight_power
     pin: GPIO29

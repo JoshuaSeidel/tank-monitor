@@ -556,10 +556,11 @@ this panel only once the old panel has let go of it.
   through ESPHome's SDL host platform with sample data and saves screenshots
   to `design/p4-panel/firmware-shots/`.
 
-Needs ESPHome 2026.10 or later. On first boot press **Install** on
-"C6 Radio Firmware": Elecrow ships the C6 with Wi-Fi-only firmware, and
-ESPHome's build adds Bluetooth. Check the board revision first: V1.0 has the
-SDIO pins in the opposite order (see `boards/elecrow-crowpanel-p4-101.yaml`).
+Needs ESPHome 2026.10 or later. Check the board revision first: V1.0 has
+the SDIO pins in the opposite order (see `boards/elecrow-crowpanel-p4-101.yaml`).
+On first boot press **Install** on "C6 Radio Firmware" once, so the C6 runs
+the exact ESP-Hosted build ESPHome's host library expects (2.12.13; Elecrow
+ships 2.12.3, same series, Bluetooth already on).
 
 ### Web interface
 
