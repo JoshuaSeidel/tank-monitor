@@ -256,5 +256,33 @@ inline std::vector<int> pick_minutes(const Plan &p, int step, int edge, int edge
   return ms;
 }
 
+// ---------------------------------------------------------------------
+// The clock the curve was written against
+// ---------------------------------------------------------------------
+// Every minute in a Plan is "minutes since `mid`", and `mid` is taken as
+// now.timestamp minus the local time of day -- local midnight AT THE
+// OFFSET IN FORCE WHEN IT WAS COMPUTED. Those minutes are wall-clock
+// minutes only while that offset holds. On a DST day it changes at 02:00:
+// a day computed at 00:00 EDT says dawn 07:08, which after the fall-back
+// is 06:08 EST on the lamp's resynced clock, so the tank ran an hour late
+// all of 2026-11-01. Spring-forward is the mirror image, an hour early.
+//
+// So a plan is stale when the day changes OR this offset changes, and the
+// boards compare it on every tick. Taken from the same ESPTime fields as
+// `mid` (not libc's localtime -- ESPHome evaluates the POSIX TZ itself),
+// so the two can never disagree. Minutes east of UTC mod 1440: unique,
+// which is all a change check needs, and free of sign conventions.
+//
+// The 75 gal's light_wrgb2.yaml computes the same expression inline (its
+// copy of this header lives in the chihiros fork); keep them alike.
+inline int utc_offset_min(time_t utc, int hour, int minute, int second) {
+  const long local_s = (long) hour * 3600L + (long) minute * 60L + (long) second;
+  const long utc_s = (long) (utc % 86400);
+  return (int) ((((local_s - utc_s) % 86400L) + 86400L) % 86400L / 60L);
+}
+
+// Signed hours for logs: 1140 -> -4 (EDT), 1080 -> -5 (EST).
+inline float offset_hours(int off_min) { return (off_min > 720 ? off_min - 1440 : off_min) / 60.0f; }
+
 }  // namespace daylight
 }  // namespace tank_monitor

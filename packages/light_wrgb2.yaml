@@ -323,7 +323,10 @@ globals:
   # The selected phase follows the sun: lp_on/off/ramp are computed, not
   # read from the table. lp_sun_day is the day of year they were computed
   # for (-1 = not yet), so the minute tick recomputes after midnight and
-  # once the clock first syncs.
+  # once the clock first syncs. lp_sun_off is the local UTC offset they
+  # were computed on (minutes east mod 1440, -1 = not yet): the computed
+  # times are wall-clock minutes only on that offset, so a DST change is a
+  # recompute too (see light_select_phase).
   - id: lp_sun
     type: bool
     restore_value: false
@@ -332,6 +335,16 @@ globals:
     type: int
     restore_value: false
     initial_value: '-1'
+  - id: lp_sun_off
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  # Set by light_sun_check when it recomputed the day; whoever acts on it
+  # (the minute tick pushes, light_push is already pushing) clears it.
+  - id: lp_sun_changed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   # Per phase: 1 = follows the sun (the daylight curve / single fade from
   # today's sun), 0 = the table's fixed times. Phase 0 (Off) never does.
   # Written ONLY by an explicit "Light Follows Sun" turn on/off after boot,
@@ -849,6 +862,17 @@ script:
           auto now = id(sntp_time).now();
           if (follow) {
             id(lp_sun_day) = now.is_valid() ? now.day_of_year : -1;
+            // `mid` is local midnight ON TODAY'S CURRENT OFFSET, so every
+            // minute below is a wall-clock minute only while that offset
+            // holds. Computed at 00:00 EDT on 2026-11-01 the day said dawn
+            // 07:08 / dusk 18:32; the 02:00 fall-back and the 03:00 lamp
+            // clock resync then ran it an hour late against the sun. So the
+            // offset is recorded with the day, and the minute tick and
+            // light_push recompute when it changes (both DST directions).
+            // Same expression as tank_monitor::daylight::utc_offset_min.
+            id(lp_sun_off) = now.is_valid()
+                ? (int) ((((long) (now.hour * 3600 + now.minute * 60 + now.second) - (long) (now.timestamp % 86400)) % 86400L + 86400L) % 86400L / 60L)
+                : -1;
             if (now.is_valid()) {
               const time_t mid = now.timestamp - (time_t) (now.hour * 3600 + now.minute * 60 + now.second);
               const float expo = std::max(0.3f, std::min(1.0f, id(light_day_expo)));
@@ -914,6 +938,9 @@ script:
                    id(lp_off_min) / 60, id(lp_off_min) % 60,
                    id(lp_ramp), id(lp_w), id(lp_r), id(lp_g), id(lp_b));
           if (id(lp_auto) && id(lp_sun))
+            ESP_LOGI("light", "  computed for day %d on UTC%+.1f%s", id(lp_sun_day),
+                     (id(lp_sun_off) > 720 ? id(lp_sun_off) - 1440 : id(lp_sun_off)) / 60.0f, now.is_dst ? " (DST)" : "");
+          if (id(lp_auto) && id(lp_sun))
             ESP_LOGI("light", "  dawn %02d:%02d rise %02d:%02d noon %02d:%02d set %02d:%02d dusk %02d:%02d, noon %.0f klx clear-sky",
                      id(lp_plan).d.dawn / 60, id(lp_plan).d.dawn % 60, id(lp_plan).d.rise / 60, id(lp_plan).d.rise % 60,
                      id(lp_plan).d.noon / 60, id(lp_plan).d.noon % 60, id(lp_plan).d.set / 60, id(lp_plan).d.set % 60,
@@ -924,6 +951,34 @@ script:
                      (int) (th * 100.0f + 0.5f),
                      std::max(0, id(lp_bright_on)) / 60, std::max(0, id(lp_bright_on)) % 60,
                      std::max(0, id(lp_bright_off)) / 60, std::max(0, id(lp_bright_off)) % 60);
+
+  # Is the computed day still today's, on today's clock? A sun-following
+  # phase is recomputed when the day of year changes (after midnight, and
+  # once the clock first syncs) AND when the local UTC offset changes --
+  # the DST switch at 02:00, both directions: the times are wall-clock
+  # minutes on the offset they were computed on, and the lamp's clock is
+  # resynced to the new one. Run on every minute tick and at the start of
+  # every push, so no push (the 03:00 clock resync, a reconnect, the
+  # button) can send a fresh clock with a stale day.
+  - id: light_sun_check
+    then:
+      - lambda: |-
+          auto i = id(light_phase).active_index();
+          if (!i.has_value() || *i == 0 || *i >= 5 || id(light_sun_follow)[*i] == 0) return;
+          auto now = id(sntp_time).now();
+          if (!now.is_valid()) return;
+          const int off = (int) ((((long) (now.hour * 3600 + now.minute * 60 + now.second) - (long) (now.timestamp % 86400)) % 86400L + 86400L) % 86400L / 60L);
+          const bool new_day = id(lp_sun_day) != now.day_of_year;
+          const bool new_off = id(lp_sun_off) >= 0 && id(lp_sun_off) != off;
+          if (!new_day && !new_off) return;
+          if (new_off && !new_day) {
+            auto hrs = [](int m) { return (m > 720 ? m - 1440 : m) / 60.0f; };
+            ESP_LOGW("light", "UTC offset changed (UTC%+.1f -> UTC%+.1f, DST): recomputing today's sun on the new clock",
+                     hrs(id(lp_sun_off)), hrs(off));
+          }
+          id(light_select_phase).execute();
+          id(light_refresh_controls).execute();
+          id(lp_sun_changed) = true;
 
   # The seven controls read the ACTIVE phase's slot; after a phase change
   # they are told to re-read at once rather than waiting for their poll.
@@ -959,6 +1014,9 @@ script:
   - id: light_push
     mode: restart
     then:
+      # The clock this push sends and the day it sends must agree.
+      - script.execute: light_sun_check
+      - lambda: id(lp_sun_changed) = false;
       - if:
           condition:
             lambda: return !id(lp_valid);
@@ -1194,22 +1252,22 @@ interval:
           if (!now.is_valid() || !id(lp_valid)) { id(light_expected) = 0; return; }
           const int m = now.hour * 60 + now.minute;
 
-          // Daily clock resync at 03:00, while the lamp is dark anyway, so
-          // its RTC never drifts off the schedule's edges.
-          if (now.hour == 3 && now.minute == 0) id(light_push).execute();
-
           // A sun-following phase moves every day: recompute after midnight
-          // (and once the clock first syncs) and push while the lamp is dark.
-          {
-            auto i = id(light_phase).active_index();
-            if (i.has_value() && *i > 0 && *i < 5 && id(light_sun_follow)[*i] != 0 &&
-                id(lp_sun_day) != now.day_of_year) {
-              id(light_select_phase).execute();
-              id(light_refresh_controls).execute();
-              id(light_push).execute();
-              return;
-            }
+          // (and once the clock first syncs), and when the UTC offset
+          // changes (DST: 01:00 EST in November, 03:00 EDT in March), and
+          // push while the lamp is dark. The push carries the lamp's clock.
+          id(light_sun_check).execute();
+          if (id(lp_sun_changed)) {
+            id(lp_sun_changed) = false;
+            id(light_push).execute();
+            return;
           }
+
+          // Daily clock resync at 03:00, while the lamp is dark anyway, so
+          // its RTC never drifts off the schedule's edges. light_push runs
+          // light_sun_check first, so the day it sends is on the clock it
+          // sends.
+          if (now.hour == 3 && now.minute == 0) id(light_push).execute();
 
           // What the lamp should be giving now, as a fraction of the phase's
           // full W/R/G/B: the daylight curve, or one scene's linear ramps.
@@ -1666,11 +1724,16 @@ button:
     on_press:
       - script.execute: light_release
 
+  # Recomputes from the clock as it is now, then pushes -- never re-sends
+  # cached times. On 2026-11-01 this button re-pushed the day computed at
+  # 00:00 EDT (07:08-18:32) onto a lamp clock already on EST.
   - platform: template
     name: "Push Light Phase Now"
     icon: mdi:clock-edit
     entity_category: diagnostic
     on_press:
+      - script.execute: light_select_phase
+      - script.execute: light_refresh_controls
       - script.execute: light_push
 
   - platform: template

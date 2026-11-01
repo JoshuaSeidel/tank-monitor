@@ -191,6 +191,9 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   static std::vector<uint8_t> spp_command_(const std::vector<std::pair<uint8_t, std::vector<uint8_t>>> &entries);
 
   std::vector<uint8_t> build_pro_schedule_();
+  // The clock frame alone. sync_clock() is this plus the DST check; the
+  // curve push calls this directly so the two always go out together.
+  bool queue_clock_();
   // Mix x sun x warm shift, for one minute of the day.
   std::vector<uint8_t> levels_at_(const tank_monitor::daylight::Plan &plan, int m, float frac);
 
@@ -227,6 +230,12 @@ class FluvalLight : public PollingComponent, public ble_client::BLEClientNode {
   std::vector<std::pair<std::vector<uint8_t>, std::string>> queue_frames_;
   uint32_t last_write_ms_{0};
   int last_push_day_{-1};
+  // The local UTC offset (daylight::utc_offset_min) the curve in the lamp
+  // was built for; -1 = nothing pushed since boot. When the clock's offset
+  // stops matching it -- a DST change, 2026-11-01 -- the curve is an hour
+  // off and is rebuilt and pushed with a fresh clock (update(), and
+  // sync_clock() on a reconnect).
+  int curve_off_{-1};
   // Cleared on every connect. update() retries the clock until it takes,
   // because the on-connect attempt usually beats SNTP to a valid time.
   bool clock_synced_{false};

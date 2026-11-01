@@ -317,6 +317,12 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
   }
   ESP_LOGI(TAG, "  %s", human.c_str());
 
+  // The offset this day's wall-clock minutes are on -- the same `now` as
+  // `mid`, so the record cannot straddle the switch.
+  this->curve_off_ = tank_monitor::daylight::utc_offset_min(now.timestamp, now.hour, now.minute, now.second);
+  ESP_LOGI(TAG, "  built for UTC%+.1f%s", tank_monitor::daylight::offset_hours(this->curve_off_),
+           now.is_dst ? " (DST)" : "");
+
   if (this->curve_sensor_ != nullptr)
     this->curve_sensor_->publish_state(human);
   if (this->points_sensor_ != nullptr)
@@ -331,6 +337,8 @@ std::vector<uint8_t> FluvalLight::build_pro_schedule_() {
 // Actions
 // ---------------------------------------------------------------------
 void FluvalLight::push_curve() {
+  // Always built from the clock as it is now -- nothing is cached between
+  // pushes -- so this button is also the manual fix for a stale curve.
   auto blob = this->build_pro_schedule_();
   if (blob.empty()) {
     // build_pro_schedule_() has already logged which of the three ways
@@ -341,6 +349,14 @@ void FluvalLight::push_curve() {
     this->publish_status_("curve not built");
     return;
   }
+  // The clock goes out first, from the same moment the curve was built
+  // for. A curve is a list of wall-clock times and the lamp runs it on its
+  // own clock: the two have to agree on the UTC offset, or the day runs an
+  // hour off. A push that changed the curve but left the lamp's clock on
+  // the old offset (the Push Curve button the morning after a DST change,
+  // with no reconnect in between) would be exactly that.
+  // build_pro_schedule_() has set curve_off_ to the offset it built for.
+  this->queue_clock_();
   this->queue_(spp_command_({{KEY_PRO_SCHEDULE, blob}}), "pro schedule");
   // Professional mode is what RUNS a Pro schedule. Writing the points
   // and leaving the lamp in Auto stores a curve it will never use --
@@ -352,9 +368,31 @@ void FluvalLight::push_curve() {
 
 void FluvalLight::sync_clock() {
 #ifdef USE_TIME
+  // A clock on a new UTC offset with the old curve is the DST bug in
+  // another form: the lamp would run yesterday's wall-clock times an hour
+  // off. If the curve it holds was built for a different offset, rebuild
+  // it -- push_curve() sends this clock frame first anyway.
+  if (this->time_ != nullptr && this->curve_off_ >= 0) {
+    auto now = this->time_->now();
+    if (now.is_valid()) {
+      const int off = tank_monitor::daylight::utc_offset_min(now.timestamp, now.hour, now.minute, now.second);
+      if (off != this->curve_off_) {
+        ESP_LOGI(TAG, "Clock is now UTC%+.1f but the lamp's curve was built for UTC%+.1f -- rebuilding it",
+                 tank_monitor::daylight::offset_hours(off), tank_monitor::daylight::offset_hours(this->curve_off_));
+        this->push_curve();
+        return;
+      }
+    }
+  }
+#endif
+  this->queue_clock_();
+}
+
+bool FluvalLight::queue_clock_() {
+#ifdef USE_TIME
   if (this->time_ == nullptr) {
     ESP_LOGW(TAG, "No time source configured -- cannot sync the clock");
-    return;
+    return false;
   }
   auto now = this->time_->now();
   if (!now.is_valid()) {
@@ -366,7 +404,7 @@ void FluvalLight::sync_clock() {
     // a board that said "connected" and then did nothing at all.
     ESP_LOGI(TAG, "Clock sync deferred: no valid time yet (SNTP still syncing)");
     this->publish_status_("waiting for time");
-    return;
+    return false;
   }
   // 0xCD + YY MM DD W hh mm ss, raw. NOT a CBOR map -- the clock is the
   // one frame on this transport that is not 0xD1-wrapped, and sending it
@@ -384,6 +422,9 @@ void FluvalLight::sync_clock() {
                          (uint8_t) now.second};
   this->queue_(f, "clock");
   this->clock_synced_ = true;
+  return true;
+#else
+  return false;
 #endif
 }
 
@@ -493,8 +534,28 @@ void FluvalLight::update() {
   if (now.hour == this->push_hour_ && now.minute >= 30 && now.day_of_year != this->last_push_day_) {
     this->last_push_day_ = now.day_of_year;
     ESP_LOGI(TAG, "Nightly push for day %d", now.day_of_year);
-    this->sync_clock();
-    this->push_curve();
+    this->push_curve();  // clock first, then the curve
+    return;
+  }
+
+  // The UTC offset changed under a pushed curve: a DST change. The
+  // nightly push at 01:30 lands BEFORE the 02:00 switch both ways, so the
+  // day it builds is on the old offset -- on 2026-11-01 it said dawn 07:08
+  // and the lamp ran an hour late against the sun. Rebuild on the new
+  // offset at the first tick after the switch (01:00 EST in November,
+  // 03:00 EDT in March, both dark) with a fresh clock. Only while
+  // connected: a reconnect gets the same check through sync_clock(), and a
+  // curve queued now could sit behind a stale clock frame for hours.
+  if (this->is_connected() && this->curve_off_ >= 0) {
+    const int off = tank_monitor::daylight::utc_offset_min(now.timestamp, now.hour, now.minute, now.second);
+    if (off != this->curve_off_) {
+      ESP_LOGI(TAG, "UTC offset changed (UTC%+.1f -> UTC%+.1f) -- DST; rebuilding the curve on the new clock",
+               tank_monitor::daylight::offset_hours(this->curve_off_), tank_monitor::daylight::offset_hours(off));
+      // Recorded before the push so a curve that cannot be built is
+      // reported once, not every minute.
+      this->curve_off_ = off;
+      this->push_curve();
+    }
   }
 #endif
 }
