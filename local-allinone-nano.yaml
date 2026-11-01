@@ -8,8 +8,8 @@ substitutions:
   device_name: tank-monitor-nano-aio-test
   friendly_name: Tank Monitor Nano AIO TEST
   fluval_mac: "C6:E2:28:EF:62:84"
-  fluval_latitude: "40.0"
-  fluval_longitude: "-75.13"
+  fluval_latitude: "39.8"
+  fluval_longitude: "-76.7"
   fluval_dose_hours: "7.0"
   fluval_ch1: "75"
   fluval_ch2: "75"
