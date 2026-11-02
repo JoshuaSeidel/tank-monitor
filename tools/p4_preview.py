@@ -166,6 +166,9 @@ def harness():
     }
     # Headless SDL has no window to take touches from.
     ui["lvgl"].pop("touchscreens", None)
+    # The panel is mounted upside down and rotates its UI 180 deg; the
+    # screenshots should show what you see on the wall, so render unrotated.
+    ui["lvgl"].pop("rotation", None)
     doc.update(ui)
     return doc
 

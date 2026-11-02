@@ -207,6 +207,26 @@ touchscreen:
     display: main_display
     reset_pin: GPIO40
     interrupt_pin: GPIO42
+    # Start after the display, as espcontrol's config confirmed on a 10.1"
+    # V1.2 does: bringing the DSI panel up can disturb a GT911 that is
+    # already initialised.
+    setup_priority: -200
+    # Every touch in the log (INFO, so it reaches the web log and MQTT):
+    # the quickest way to tell "no touches arrive" from "touches land in
+    # the wrong place". Raw = the GT911's own axes, x/y = after rotation.
+    on_touch:
+      - logger.log:
+          level: INFO
+          format: "touch x=%d y=%d (raw %d,%d)"
+          args: [touch.x, touch.y, touch.x_raw, touch.y_raw]
+
+binary_sensor:
+  # Whether the GT911 came up. A failed controller is otherwise silent: the
+  # screen draws fine and taps just do nothing.
+  - platform: template
+    name: "Touch Controller OK"
+    entity_category: diagnostic
+    lambda: "return !id(main_touch)->is_failed();"
 
 # Both tanks share one sun (see the controller configs): south-central PA.
 # Used for night mode and the dawn/dusk times on the detail screens.

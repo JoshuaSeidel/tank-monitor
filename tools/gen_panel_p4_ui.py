@@ -731,6 +731,19 @@ auto age_short = [](uint32_t ms, char *b, size_t n) {
   else if (s < 5400) snprintf(b, n, "%um", (unsigned) (s / 60));
   else snprintf(b, n, "%uh", (unsigned) (s / 3600));
 };
+// Time text. The chip's C library (newlib) has no "%-I"/"%-d", and ESPHome's
+// strftime prints "ERROR" when a format fails, so hours and days are built
+// by hand: "6:36 PM", "6:36", "6:36:05", "Nov 2".
+auto hm = [](const ESPTime &t, char *b, size_t n, int style) {
+  int h = t.hour % 12; if (h == 0) h = 12;
+  if (style == 1) snprintf(b, n, "%d:%02d", h, t.minute);
+  else if (style == 2) snprintf(b, n, "%d:%02d:%02d", h, t.minute, t.second);
+  else snprintf(b, n, "%d:%02d %s", h, t.minute, t.hour < 12 ? "AM" : "PM");
+};
+auto md = [](ESPTime t, char *b, size_t n) {
+  snprintf(b, n, "%s %d", t.strftime("%b").c_str(), t.day_of_month);
+};
+char tb1[24], tb2[24];
 // 1420 -> "1,420"
 auto thou = [](float v, char *b, size_t n) {
   const long x = lroundf(v);
@@ -814,8 +827,8 @@ if (compact) {
 
 // ----------------------------------------------------------- top bar
 if (tnow.is_valid()) {
-  txt(id(w_clock), "%s", tnow.strftime("%-I:%M %p").c_str());
-  txt(id(w_date), "%s", tnow.strftime("%a %b %-d").c_str());
+  hm(tnow, tb1, sizeof(tb1), 0); txt(id(w_clock), "%s", tb1);
+  md(tnow, tb2, sizeof(tb2)); txt(id(w_date), "%s %s", tnow.strftime("%a").c_str(), tb2);
 }
 show(id(w_date), !night);
 show(id(w_wake), night);
@@ -895,8 +908,9 @@ col(id(w_clock), C_TEXT);
   else {
     auto t = ESPTime::from_epoch_local(id(wc_last_start));
     const int days = tnow.is_valid() ? (int) ((tnow.timestamp - id(wc_last_start)) / 86400) : -1;
-    if (days >= 0) txt(id(w_wc_last), "Last Change: %s (%dd ago)", t.strftime("%b %-d").c_str(), days);
-    else txt(id(w_wc_last), "Last Change: %s", t.strftime("%b %-d").c_str());
+    md(t, tb1, sizeof(tb1));
+    if (days >= 0) txt(id(w_wc_last), "Last Change: %s (%dd ago)", tb1, days);
+    else txt(id(w_wc_last), "Last Change: %s", tb1);
   }
   col(id(w_wc_last), night ? 0x8C9CAE : 0xCBD5E1);
   if (std::isnan(id(wc_volume))) txt(id(w_wc_vol_h), "75 Gal Net Volume: --");
@@ -929,14 +943,14 @@ col(id(w_clock), C_TEXT);
     col(id(w_ha_alert), n_crit ? 0xEF4444 : 0xFBBF24);
     if (std::isnan(id(ha_livestock_days))) txt(id(w_ha_k3), "Losses: --");
     else txt(id(w_ha_k3), "Losses: %.0fd clean", id(ha_livestock_days));
-    if (dusk.has_value()) txt(id(w_ha_v3), "Dusk: %s", dusk->strftime("%-I:%M %p").c_str()); else txt(id(w_ha_v3), "");
+    if (dusk.has_value()) { hm(*dusk, tb1, sizeof(tb1), 0); txt(id(w_ha_v3), "Dusk: %s", tb1); } else txt(id(w_ha_v3), "%s", "");
     col(id(w_ha_v3), 0x94A3B8);
   } else {
     txt(id(w_ha_k1), "Livestock Loss:"); txt(id(w_ha_k2), "Civil Dusk:"); txt(id(w_ha_k3), "Active Alerts:");
     if (std::isnan(id(ha_livestock_days)) || !mqtt_ok) txt(id(w_ha_v1), "--");
     else txt(id(w_ha_v1), "%.0f days clean", id(ha_livestock_days));
     col(id(w_ha_v1), night ? 0x366B56 : 0x10B981);
-    if (dusk.has_value()) txt(id(w_ha_v2), "%s", dusk->strftime("%-I:%M %p").c_str()); else txt(id(w_ha_v2), "--");
+    if (dusk.has_value()) { hm(*dusk, tb1, sizeof(tb1), 0); txt(id(w_ha_v2), "%s", tb1); } else txt(id(w_ha_v2), "--");
     col(id(w_ha_v2), C_TEXT);
     if (!mqtt_ok) txt(id(w_ha_v3), "--"); else txt(id(w_ha_v3), "%d Warnings", n_warn);
     col(id(w_ha_v3), C_CYAN);
@@ -1015,8 +1029,9 @@ col(id(w_clock), C_TEXT);
   else {
     const int days = tnow.is_valid() ? (int) ((tnow.timestamp - id(wc_last_start)) / 86400) : -1;
     auto t = ESPTime::from_epoch_local(id(wc_last_start));
-    if (days >= 0) txt(id(w_wc_d_last), "%s (%dd ago)", t.strftime("%b %-d").c_str(), days);
-    else txt(id(w_wc_d_last), "%s", t.strftime("%b %-d").c_str());
+    md(t, tb1, sizeof(tb1));
+    if (days >= 0) txt(id(w_wc_d_last), "%s (%dd ago)", tb1, days);
+    else txt(id(w_wc_d_last), "%s", tb1);
   }
   if (std::isnan(id(wc_volume))) txt(id(w_wc_d_vol), "--"); else txt(id(w_wc_d_vol), "~%.1f gal", id(wc_volume));
 }
@@ -1059,8 +1074,8 @@ UPDATE_TANK = r"""
   } else {
     txt(id(w_@T@_lost_t), "%s", ever ? "BLUETOOTH LINK LOST" : "WAITING FOR BLUETOOTH LINK");
     if (id(@T@_stamp) != 0)
-      txt(id(w_@T@_lost_s), "Showing values from %s • offline %s",
-          ESPTime::from_epoch_local(id(@T@_stamp)).strftime("%-I:%M:%S").c_str(), ever ? a : "since boot");
+    { hm(ESPTime::from_epoch_local(id(@T@_stamp)), tb1, sizeof(tb1), 2);
+      txt(id(w_@T@_lost_s), "Showing values from %s • offline %s", tb1, ever ? a : "since boot"); }
     else
       txt(id(w_@T@_lost_s), "No data from the controller since the panel started");
     if (ever) txt(id(w_@T@_lost_pl), "STALE %s", as); else txt(id(w_@T@_lost_pl), "NO DATA");
@@ -1257,7 +1272,8 @@ UPDATE_TANK = r"""
     else txt(id(w_@T@_d_lux), "%.0f lux", lux);
     auto dawn = id(sun_pa).sunrise(-6.0); auto dusk = id(sun_pa).sunset(-6.0);
     if (dawn.has_value() && dusk.has_value())
-      txt(id(w_@T@_d_sun), "Civil Dawn (%s) – Dusk (%s)", dawn->strftime("%-I:%M").c_str(), dusk->strftime("%-I:%M").c_str());
+    { hm(*dawn, tb1, sizeof(tb1), 1); hm(*dusk, tb2, sizeof(tb2), 1);
+      txt(id(w_@T@_d_sun), "Civil Dawn (%s) – Dusk (%s)", tb1, tb2); }
     txt(id(w_@T@_d_co2), "%s", co2 < 0 ? "--" : (co2 ? "ON" : "OFF"));
     col(id(w_@T@_d_co2), co2 == 1 ? 0x38BDF8 : 0xF8FAFC);
     // Schedule notes from Home Assistant: "(Schedule off)", "(7:31–3:10)".
@@ -1547,6 +1563,9 @@ def build():
             "buffer_size": "25%",
             "bg_color": COL["canvas"],
             "page_wrap": False,
+            # The panel hangs with the board's top edge down: rotate the UI
+            # (and, with it, touch input) 180 deg. PPA-accelerated on the P4.
+            "rotation": 180,
             "theme": {
                 "label": {"text_font": "f13", "text_color": COL["text"]},
                 "obj": {"pad_all": 0, "border_width": 0},
