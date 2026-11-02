@@ -72,6 +72,13 @@ esp32:
       # and LVGL need. Engineering samples roll back without it.
       CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
 
+# Logs on UART0: the USB-C port you flash through (the one that needs BOOT
+# held) is the USB-UART bridge on UART0. ESPHome's P4 default is the chip's
+# own USB-Serial-JTAG, which is not that port, so without this the board
+# runs with no output where you are looking. Elecrow's example does the same.
+logger:
+  hardware_uart: UART0
+
 psram:
   mode: hex
   speed: 200MHz
