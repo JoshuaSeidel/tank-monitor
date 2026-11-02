@@ -291,9 +291,9 @@ lvgl:
         id: w_top_right
         align: TOP_RIGHT
         x: -16
-        y: 16
+        y: 12
         width: SIZE_CONTENT
-        height: 32
+        height: 40
         bg_opa: TRANSP
         border_width: 0
         pad_all: 0
@@ -440,16 +440,32 @@ lvgl:
                 text_color: 0xFBBF24
                 text_decor: UNDERLINE
             hidden: true
-        - label:
-            id: w_clock
-            text: --:--
-            text_font: f18
-            text_color: 0xF8FAFC
-        - label:
-            id: w_date
-            text: ''
-            text_font: f12
-            text_color: 0x94A3B8
+        - obj:
+            width: SIZE_CONTENT
+            height: 40
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            scrollbar_mode: 'OFF'
+            layout:
+              type: FLEX
+              flex_flow: COLUMN
+              pad_row: 0
+              flex_align_main: CENTER
+              flex_align_cross: END
+              flex_align_track: END
+            widgets:
+            - label:
+                id: w_clock
+                text: --:--
+                text_font: f18
+                text_color: 0xF8FAFC
+            - label:
+                id: w_date
+                text: ''
+                text_font: f11
+                text_color: 0x94A3B8
     - obj:
         id: w_t75_card
         x: 14
@@ -6454,14 +6470,42 @@ interval:
             va_list ap; va_start(ap, fmt); vsnprintf(b, sizeof(b), fmt, ap); va_end(ap);
             if (strcmp(lv_label_get_text(o), b) != 0) lv_label_set_text(o, b);
           };
-          auto col = [](lv_obj_t *o, uint32_t c) { lv_obj_set_style_text_color(o, lv_color_hex(c), 0); };
-          auto bg = [](lv_obj_t *o, uint32_t fill, uint32_t border) {
-            lv_obj_set_style_bg_color(o, lv_color_hex(fill), 0);
-            lv_obj_set_style_border_color(o, lv_color_hex(border), 0);
+          // Every write below is guarded: LVGL re-lays-out and redraws an object on
+          // every style write, even when the value is unchanged, and doing that to
+          // the whole screen once a second stalled the loop ~100 ms (with software
+          // rotation), long enough to swallow a whole tap. Only real changes write.
+          auto col = [](lv_obj_t *o, uint32_t c) {
+            const lv_color_t v = lv_color_hex(c);
+            if (!lv_color_eq(lv_obj_get_style_text_color(o, LV_PART_MAIN), v)) lv_obj_set_style_text_color(o, v, 0);
           };
-          auto fill = [](lv_obj_t *o, uint32_t c) { lv_obj_set_style_bg_color(o, lv_color_hex(c), 0); };
+          auto bg = [](lv_obj_t *o, uint32_t fill, uint32_t border) {
+            const lv_color_t f = lv_color_hex(fill), b = lv_color_hex(border);
+            if (!lv_color_eq(lv_obj_get_style_bg_color(o, LV_PART_MAIN), f)) lv_obj_set_style_bg_color(o, f, 0);
+            if (!lv_color_eq(lv_obj_get_style_border_color(o, LV_PART_MAIN), b)) lv_obj_set_style_border_color(o, b, 0);
+          };
+          auto fill = [](lv_obj_t *o, uint32_t c) {
+            const lv_color_t v = lv_color_hex(c);
+            if (!lv_color_eq(lv_obj_get_style_bg_color(o, LV_PART_MAIN), v)) lv_obj_set_style_bg_color(o, v, 0);
+          };
+          auto icon_set = [](lv_obj_t *o, const char *g) {
+            if (strcmp(lv_label_get_text(o), g) != 0) lv_label_set_text(o, g);
+          };
+          auto pos = [](lv_obj_t *o, int x, int y) {
+            if (lv_obj_get_style_x(o, LV_PART_MAIN) != x || lv_obj_get_style_y(o, LV_PART_MAIN) != y) lv_obj_set_pos(o, x, y);
+          };
+          // Put unit label u just right of value label v, bottoms aligned (what
+          // lv_obj_align_to(..., LV_ALIGN_OUT_RIGHT_BOTTOM, dx, dy) does), but only
+          // move it when v's size actually changed. lv_obj_update_layout is a no-op
+          // when nothing is dirty.
+          auto after = [&](lv_obj_t *u, lv_obj_t *v, int dx, int dy) {
+            lv_obj_update_layout(v);
+            pos(u, lv_obj_get_x(v) + lv_obj_get_width(v) + dx,
+                lv_obj_get_y(v) + lv_obj_get_height(v) - lv_obj_get_height(u) + dy);
+          };
           auto show = [](lv_obj_t *o, bool on) {
-            if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (on == lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+              if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            }
           };
           // "4m 12s", "38s", "2h 5m"
           auto age = [](uint32_t ms, char *b, size_t n) {
@@ -6500,11 +6544,13 @@ interval:
             const int w = lv_obj_get_width(trk);
             auto px = [&](float x) { return (int) roundf((std::min(mx, std::max(mn, x)) - mn) / (mx - mn) * (w - 6)); };
             const int a = std::isnan(lo) ? 0 : px(lo), b = std::isnan(hi) ? w : px(hi);
-            lv_obj_set_pos(band, a, 0); lv_obj_set_width(band, std::max(6, b - a));
-            if (std::isnan(v)) { lv_obj_add_flag(mark, LV_OBJ_FLAG_HIDDEN); return; }
-            lv_obj_remove_flag(mark, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(mark, px(v), -2);
-            lv_obj_set_style_bg_color(mark, lv_color_hex(mark_col), 0);
+            if (lv_obj_get_style_x(band, LV_PART_MAIN) != a) lv_obj_set_x(band, a);
+            if (lv_obj_get_style_width(band, LV_PART_MAIN) != std::max(6, b - a)) lv_obj_set_width(band, std::max(6, b - a));
+            if (std::isnan(v)) { if (!lv_obj_has_flag(mark, LV_OBJ_FLAG_HIDDEN)) lv_obj_add_flag(mark, LV_OBJ_FLAG_HIDDEN); return; }
+            if (lv_obj_has_flag(mark, LV_OBJ_FLAG_HIDDEN)) lv_obj_remove_flag(mark, LV_OBJ_FLAG_HIDDEN);
+            if (lv_obj_get_style_x(mark, LV_PART_MAIN) != px(v)) lv_obj_set_x(mark, px(v));
+            const lv_color_t mc = lv_color_hex(mark_col);
+            if (!lv_color_eq(lv_obj_get_style_bg_color(mark, LV_PART_MAIN), mc)) lv_obj_set_style_bg_color(mark, mc, 0);
           };
           // Band judgement shared by tiles and detail cards:
           // 0 in band, 1 near / above target (amber), 2 out / at alert (red), -1 unknown.
@@ -6526,7 +6572,7 @@ interval:
           const uint32_t C_BORDER = night ? 0x131C26 : 0x223142;
           const uint32_t C_LABEL = night ? 0x506173 : 0x94A3B8;
           const uint32_t C_CYAN = night ? 0x506173 : 0x38BDF8;
-          lv_obj_set_style_bg_color(id(w_page_home)->obj, lv_color_hex(night ? 0x040608 : 0x0B1015), 0);
+          fill(id(w_page_home)->obj, night ? 0x040608 : 0x0B1015);
           auto tnow = id(sntp_time).now();
           const bool mqtt_ok = id(mqtt_up);
           const bool l75 = id(t75_stamp_ms) != 0 && now_ms - id(t75_stamp_ms) < 45000;
@@ -6593,7 +6639,7 @@ interval:
             if (!std::isnan(bp)) {
               const bool chg = id(batt_state) == 1;
               txt(id(w_batt_l), "%.0f%%", bp);
-              lv_label_set_text(id(w_batt_i), chg ? "󰂄" : "󰁹");
+              icon_set(id(w_batt_i), chg ? "󰂄" : "󰁹");
               const uint32_t bc = chg ? 0x10B981 : (bp < 20.0f ? 0xFBBF24 : (night ? 0x506173 : 0x94A3B8));
               col(id(w_batt_i), bc); col(id(w_batt_l), chg || bp < 20.0f ? bc : (night ? 0x506173 : 0xCBD5E1));
               bg(id(w_batt), C_CARD, night ? 0x131C26 : 0x334155);
@@ -6643,8 +6689,7 @@ interval:
             else { txt(id(w_ro_pill_l), "IDLE"); col(id(w_ro_pill_l), C_LABEL); bg(id(w_ro_pill), C_CARD2, night ? 0x131C26 : 0x334155); }
             if (std::isnan(id(ro_fill))) txt(id(w_ro_val), "--"); else txt(id(w_ro_val), "%.1f", id(ro_fill));
             col(id(w_ro_val), C_TEXT);
-            lv_obj_update_layout(id(w_ro_val));
-            lv_obj_align_to(id(w_ro_of), id(w_ro_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+            after(id(w_ro_of), id(w_ro_val), 6, -5);
             if (std::isnan(id(ro_target))) txt(id(w_ro_of), "/ -- gal"); else txt(id(w_ro_of), "/ %.1f gal", id(ro_target));
             const bool pct_ok = !std::isnan(id(ro_fill)) && !std::isnan(id(ro_target)) && id(ro_target) > 0;
             const int pct = pct_ok ? (int) roundf(id(ro_fill) / id(ro_target) * 100.0f) : 0;
@@ -6741,12 +6786,13 @@ interval:
             txt(id(w_wc_big_cap), dr ? "WATER REMOVED THIS CHANGE" : "WATER ADDED THIS CHANGE");
             col(id(w_wc_big_cap), dr ? 0xFB923C : 0x38BDF8); col(id(w_wc_big_i), dr ? 0xFB923C : 0x38BDF8);
             if (std::isnan(big)) txt(id(w_wc_big), "--"); else txt(id(w_wc_big), "%.1f", big);
-            lv_obj_update_layout(id(w_wc_big));
-            lv_obj_align_to(id(w_wc_big_u), id(w_wc_big), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -10);
+            after(id(w_wc_big_u), id(w_wc_big), 6, -10);
             if (std::isnan(id(wc_volume))) txt(id(w_wc_vol), ""); else txt(id(w_wc_vol), "Actual Net Volume: ~%.0f Gal", id(wc_volume));
             if (std::isnan(id(wc_pct))) txt(id(w_wc_pct), "--"); else txt(id(w_wc_pct), "%.1f%%", id(wc_pct));
             lv_arc_set_value(id(w_wc_arc), std::isnan(id(wc_pct)) ? 0 : (int) std::min(1000.0f, id(wc_pct) * 10.0f));
-            lv_obj_set_style_arc_color(id(w_wc_arc), lv_color_hex(dr ? 0xFB923C : 0x0284C7), LV_PART_INDICATOR);
+            { const lv_color_t ac = lv_color_hex(dr ? 0xFB923C : 0x0284C7);
+              if (!lv_color_eq(lv_obj_get_style_arc_color(id(w_wc_arc), LV_PART_INDICATOR), ac))
+                lv_obj_set_style_arc_color(id(w_wc_arc), ac, LV_PART_INDICATOR); }
             if (std::isnan(id(wc_rate))) txt(id(w_wc_rate), "--"); else txt(id(w_wc_rate), "%.1f gpm", id(wc_flowing) ? id(wc_rate) : 0.0f);
             txt(id(w_wc_flowing), "Flowing: %s", id(wc_flowing) ? "YES" : "NO");
             col(id(w_wc_flowing), id(wc_flowing) ? 0x10B981 : 0x64748B);
@@ -6759,8 +6805,7 @@ interval:
             // RO card
             txt(id(w_ro_on_l), id(ro_online) ? "MQTT Online" : "Offline");
             if (std::isnan(id(ro_fill))) txt(id(w_ro_d_val), "--"); else txt(id(w_ro_d_val), "%.1f", id(ro_fill));
-            lv_obj_update_layout(id(w_ro_d_val));
-            lv_obj_align_to(id(w_ro_d_u), id(w_ro_d_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+            after(id(w_ro_d_u), id(w_ro_d_val), 6, -5);
             const float tgt = std::isnan(id(ro_target_pending)) ? id(ro_target) : id(ro_target_pending);
             if (std::isnan(tgt)) { txt(id(w_ro_d_of), ""); txt(id(w_ro_d_tgt), "SET TARGET (--)"); }
             else {
@@ -6840,7 +6885,8 @@ interval:
             if (stale) bg(id(w_t75_card), night ? 0x080D13 : 0x0E141B, 0x475569);
             else if (crit) bg(id(w_t75_card), night ? 0x080D13 : 0x1A1114, 0xEF4444);
             else bg(id(w_t75_card), C_CARD, C_BORDER);
-            lv_obj_set_style_border_width(id(w_t75_card), crit ? 2 : 1, 0);
+            if (lv_obj_get_style_border_width(id(w_t75_card), LV_PART_MAIN) != (crit ? 2 : 1))
+              lv_obj_set_style_border_width(id(w_t75_card), crit ? 2 : 1, 0);
             show(id(w_t75_head), !stale);
             show(id(w_t75_link), !stale);
             show(id(w_t75_lost), stale);
@@ -6864,10 +6910,10 @@ interval:
                crit ? 0xDC2626 : (live ? (night ? 0x131C26 : 0x243447) : 0x475569));
             if (std::isnan(temp)) txt(id(w_t75_temp), "--"); else txt(id(w_t75_temp), "%.1f", temp);
             col(id(w_t75_temp), stale ? 0x64748B : (crit ? 0xEF4444 : C_HEAD));
-            lv_obj_set_style_text_decor(id(w_t75_temp), stale && !std::isnan(temp) ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE, 0);
+            { const lv_text_decor_t d = stale && !std::isnan(temp) ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE;
+              if (lv_obj_get_style_text_decor(id(w_t75_temp), LV_PART_MAIN) != d) lv_obj_set_style_text_decor(id(w_t75_temp), d, 0); }
             col(id(w_t75_unit), stale ? 0x475569 : (crit ? 0xEF4444 : C_UNIT));
-            lv_obj_update_layout(id(w_t75_temp));
-            lv_obj_align_to(id(w_t75_unit), id(w_t75_temp), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -8);
+            after(id(w_t75_unit), id(w_t75_temp), 8, -8);
             txt(id(w_t75_sp_k), "%s", compact || stale ? "Target:" : "Setpoint:");
             if (std::isnan(sp)) txt(id(w_t75_sp_v), "--"); else txt(id(w_t75_sp_v), "%.1f °F", sp);
             if (stale) txt(id(w_t75_sp_s), "(Unknown)");
@@ -6948,8 +6994,7 @@ interval:
               txt(id(w_t75_tds_cap), "%s", stale ? "TDS (CACHED)" : "TDS (PURITY)");
               if (std::isnan(tds)) txt(id(w_t75_tds_val), "--"); else txt(id(w_t75_tds_val), "%.0f", tds);
               col(id(w_t75_tds_val), stale ? 0x64748B : C_TEXT);
-              lv_obj_update_layout(id(w_t75_tds_val));
-              lv_obj_align_to(id(w_t75_tds_unit), id(w_t75_tds_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t75_tds_unit), id(w_t75_tds_val), 6, -5);
               if (stale) { txt(id(w_t75_tds_tgt), "STALE"); col(id(w_t75_tds_tgt), 0xFBBF24); }
               else {
                 if (compact) txt(id(w_t75_tds_tgt), "%s", tj == 0 ? "In Target" : (tj > 0 ? TJ[tj] : ""));
@@ -6964,8 +7009,7 @@ interval:
               // detail
               if (std::isnan(tds)) txt(id(w_t75_d_tds), "--"); else txt(id(w_t75_d_tds), "%.0f", tds);
               col(id(w_t75_d_tds), stale ? 0x64748B : 0xF8FAFC);
-              lv_obj_update_layout(id(w_t75_d_tds));
-              lv_obj_align_to(id(w_t75_d_tds_u), id(w_t75_d_tds), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+              after(id(w_t75_d_tds_u), id(w_t75_d_tds), 8, -6);
               if (std::isnan(tm)) txt(id(w_t75_d_tds_m), ""); else txt(id(w_t75_d_tds_m), "1h Mean: %.0f ppm", tm);
               txt(id(w_t75_d_tds_st), "%s", stale ? "Stale" : (tj < 0 ? "" : TJ[tj]));
               col(id(w_t75_d_tds_st), stale ? 0xFBBF24 : tcol);
@@ -6986,8 +7030,7 @@ interval:
               else txt(id(w_t75_ph_cap), "%s", "WATER PH");
               if (std::isnan(ph)) txt(id(w_t75_ph_val), "--"); else txt(id(w_t75_ph_val), "%.2f", ph);
               col(id(w_t75_ph_val), ph_live ? C_TEXT : 0x64748B);
-              lv_obj_update_layout(id(w_t75_ph_val));
-              lv_obj_align_to(id(w_t75_ph_unit), id(w_t75_ph_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t75_ph_unit), id(w_t75_ph_val), 6, -5);
               if (!ph_live && !std::isnan(ph)) { txt(id(w_t75_ph_tgt), "STALE"); col(id(w_t75_ph_tgt), 0xFBBF24); }
               else {
                 if (compact) txt(id(w_t75_ph_tgt), "%s", pj < 0 ? "" : PJ[pj]);
@@ -7001,8 +7044,7 @@ interval:
                     plo, phi, 6.8f, 7.8f, pcol);
               if (std::isnan(ph)) txt(id(w_t75_d_ph), "--"); else txt(id(w_t75_d_ph), "%.2f", ph);
               col(id(w_t75_d_ph), ph_live ? 0xF8FAFC : 0x64748B);
-              lv_obj_update_layout(id(w_t75_d_ph));
-              lv_obj_align_to(id(w_t75_d_ph_u), id(w_t75_d_ph), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+              after(id(w_t75_d_ph_u), id(w_t75_d_ph), 8, -6);
               txt(id(w_t75_d_ph_st), "%s", ph_live ? (pj < 0 ? "" : PJ[pj]) : (std::isnan(ph) ? "No data" : "Stale"));
               col(id(w_t75_d_ph_st), ph_live ? pcol : 0xFBBF24);
               txt(id(w_t75_d_ph_tgt), "Target: %.2f – %.2f", plo, phi);
@@ -7024,7 +7066,7 @@ interval:
               if (!live || std::isnan(lux)) txt(id(w_t75_f_lux), "-- lux");
               else if (dark) txt(id(w_t75_f_lux), "%s", "Lights Off");
               else txt(id(w_t75_f_lux), "%.0f lux", lux);
-              lv_label_set_text(id(w_t75_fi_lux), dark ? "󰖔" : "󰖙");
+              icon_set(id(w_t75_fi_lux), dark ? "󰖔" : "󰖙");
               col(id(w_t75_fi_lux), night ? 0x506173 : 0xFBBF24);
               col(id(w_t75_f_lux), C_LABEL);
               txt(id(w_t75_f_co2), "CO2 %s", co2 < 0 ? "--" : (co2 ? "On" : "Off"));
@@ -7055,7 +7097,7 @@ interval:
               if (bn.empty()) txt(id(w_t75_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
               else txt(id(w_t75_d_bub), "Bubbler: %s (%s)", bub < 0 ? "--" : (bub ? "ON" : "OFF"), bn.c_str());
               col(id(w_t75_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
-              lv_label_set_text(id(w_t75_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
+              icon_set(id(w_t75_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
               col(id(w_t75_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);
               if (!live) { txt(id(w_t75_d_safe2), "Safety Tripped: --"); col(id(w_t75_d_safe2), 0x94A3B8); }
               else { txt(id(w_t75_d_safe2), "Safety Tripped: %s", id(t75_fault) ? "YES" : "NO"); col(id(w_t75_d_safe2), id(t75_fault) ? 0xEF4444 : 0x10B981); }
@@ -7090,14 +7132,12 @@ interval:
               bg(id(w_t75_learn), ln ? 0x0F291E : 0x1E293B, ln ? 0x059669 : 0x334155);
               if (std::isnan(temp)) txt(id(w_t75_d_pa), "--"); else txt(id(w_t75_d_pa), "%.1f", temp);
               col(id(w_t75_d_pa), live ? 0xF8FAFC : 0x64748B);
-              lv_obj_update_layout(id(w_t75_d_pa));
-              lv_obj_align_to(id(w_t75_d_pa_u), id(w_t75_d_pa), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t75_d_pa_u), id(w_t75_d_pa), 6, -5);
               {
                 const float tb = id(t75_temp_b), g = id(t75_grad);
                 if (std::isnan(tb)) txt(id(w_t75_d_pb), "--"); else txt(id(w_t75_d_pb), "%.1f", tb);
                 col(id(w_t75_d_pb), live ? 0xF8FAFC : 0x64748B);
-                lv_obj_update_layout(id(w_t75_d_pb));
-                lv_obj_align_to(id(w_t75_d_pb_u), id(w_t75_d_pb), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+                after(id(w_t75_d_pb_u), id(w_t75_d_pb), 6, -5);
                 if (std::isnan(g)) txt(id(w_t75_d_grad), "--"); else txt(id(w_t75_d_grad), "%+.2f °F", g);
                 if (!live || std::isnan(dr)) txt(id(w_t75_d_drift), "%s", "");
                 else txt(id(w_t75_d_drift), "%s %+.2f °F/min Drift", dr < -0.005f ? "↘" : (dr > 0.005f ? "↗" : "→"), dr);
@@ -7169,7 +7209,8 @@ interval:
             if (stale) bg(id(w_t16_card), night ? 0x080D13 : 0x0E141B, 0x475569);
             else if (crit) bg(id(w_t16_card), night ? 0x080D13 : 0x1A1114, 0xEF4444);
             else bg(id(w_t16_card), C_CARD, C_BORDER);
-            lv_obj_set_style_border_width(id(w_t16_card), crit ? 2 : 1, 0);
+            if (lv_obj_get_style_border_width(id(w_t16_card), LV_PART_MAIN) != (crit ? 2 : 1))
+              lv_obj_set_style_border_width(id(w_t16_card), crit ? 2 : 1, 0);
             show(id(w_t16_head), !stale);
             show(id(w_t16_link), !stale);
             show(id(w_t16_lost), stale);
@@ -7193,10 +7234,10 @@ interval:
                crit ? 0xDC2626 : (live ? (night ? 0x131C26 : 0x243447) : 0x475569));
             if (std::isnan(temp)) txt(id(w_t16_temp), "--"); else txt(id(w_t16_temp), "%.1f", temp);
             col(id(w_t16_temp), stale ? 0x64748B : (crit ? 0xEF4444 : C_HEAD));
-            lv_obj_set_style_text_decor(id(w_t16_temp), stale && !std::isnan(temp) ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE, 0);
+            { const lv_text_decor_t d = stale && !std::isnan(temp) ? LV_TEXT_DECOR_STRIKETHROUGH : LV_TEXT_DECOR_NONE;
+              if (lv_obj_get_style_text_decor(id(w_t16_temp), LV_PART_MAIN) != d) lv_obj_set_style_text_decor(id(w_t16_temp), d, 0); }
             col(id(w_t16_unit), stale ? 0x475569 : (crit ? 0xEF4444 : C_UNIT));
-            lv_obj_update_layout(id(w_t16_temp));
-            lv_obj_align_to(id(w_t16_unit), id(w_t16_temp), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -8);
+            after(id(w_t16_unit), id(w_t16_temp), 8, -8);
             txt(id(w_t16_sp_k), "%s", compact || stale ? "Target:" : "Setpoint:");
             if (std::isnan(sp)) txt(id(w_t16_sp_v), "--"); else txt(id(w_t16_sp_v), "%.1f °F", sp);
             if (stale) txt(id(w_t16_sp_s), "(Unknown)");
@@ -7266,8 +7307,7 @@ interval:
               txt(id(w_t16_tds_cap), "%s", stale ? "TDS (CACHED)" : "TDS (PURITY)");
               if (std::isnan(tds)) txt(id(w_t16_tds_val), "--"); else txt(id(w_t16_tds_val), "%.0f", tds);
               col(id(w_t16_tds_val), stale ? 0x64748B : C_TEXT);
-              lv_obj_update_layout(id(w_t16_tds_val));
-              lv_obj_align_to(id(w_t16_tds_unit), id(w_t16_tds_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t16_tds_unit), id(w_t16_tds_val), 6, -5);
               if (stale) { txt(id(w_t16_tds_tgt), "STALE"); col(id(w_t16_tds_tgt), 0xFBBF24); }
               else {
                 if (compact) txt(id(w_t16_tds_tgt), "%s", tj == 0 ? "In Target" : (tj > 0 ? TJ[tj] : ""));
@@ -7282,8 +7322,7 @@ interval:
               // detail
               if (std::isnan(tds)) txt(id(w_t16_d_tds), "--"); else txt(id(w_t16_d_tds), "%.0f", tds);
               col(id(w_t16_d_tds), stale ? 0x64748B : 0xF8FAFC);
-              lv_obj_update_layout(id(w_t16_d_tds));
-              lv_obj_align_to(id(w_t16_d_tds_u), id(w_t16_d_tds), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+              after(id(w_t16_d_tds_u), id(w_t16_d_tds), 8, -6);
               if (std::isnan(tm)) txt(id(w_t16_d_tds_m), ""); else txt(id(w_t16_d_tds_m), "1h Mean: %.0f ppm", tm);
               txt(id(w_t16_d_tds_st), "%s", stale ? "Stale" : (tj < 0 ? "" : TJ[tj]));
               col(id(w_t16_d_tds_st), stale ? 0xFBBF24 : tcol);
@@ -7304,8 +7343,7 @@ interval:
               else txt(id(w_t16_ph_cap), "%s", "PH (WI-FI)");
               if (std::isnan(ph)) txt(id(w_t16_ph_val), "--"); else txt(id(w_t16_ph_val), "%.2f", ph);
               col(id(w_t16_ph_val), ph_live ? C_TEXT : 0x64748B);
-              lv_obj_update_layout(id(w_t16_ph_val));
-              lv_obj_align_to(id(w_t16_ph_unit), id(w_t16_ph_val), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t16_ph_unit), id(w_t16_ph_val), 6, -5);
               if (!ph_live && !std::isnan(ph)) { txt(id(w_t16_ph_tgt), "STALE"); col(id(w_t16_ph_tgt), 0xFBBF24); }
               else {
                 if (compact) txt(id(w_t16_ph_tgt), "%s", pj < 0 ? "" : PJ[pj]);
@@ -7319,8 +7357,7 @@ interval:
                     plo, phi, 6.8f, 7.8f, pcol);
               if (std::isnan(ph)) txt(id(w_t16_d_ph), "--"); else txt(id(w_t16_d_ph), "%.2f", ph);
               col(id(w_t16_d_ph), ph_live ? 0xF8FAFC : 0x64748B);
-              lv_obj_update_layout(id(w_t16_d_ph));
-              lv_obj_align_to(id(w_t16_d_ph_u), id(w_t16_d_ph), LV_ALIGN_OUT_RIGHT_BOTTOM, 8, -6);
+              after(id(w_t16_d_ph_u), id(w_t16_d_ph), 8, -6);
               txt(id(w_t16_d_ph_st), "%s", ph_live ? (pj < 0 ? "" : PJ[pj]) : (std::isnan(ph) ? "No data" : "Stale"));
               col(id(w_t16_d_ph_st), ph_live ? pcol : 0xFBBF24);
               txt(id(w_t16_d_ph_tgt), "Target: %.2f – %.2f", plo, phi);
@@ -7342,7 +7379,7 @@ interval:
               if (!live || std::isnan(lux)) txt(id(w_t16_f_lux), "-- lux");
               else if (dark) txt(id(w_t16_f_lux), "%s", "Lights Off");
               else txt(id(w_t16_f_lux), "%.0f lux", lux);
-              lv_label_set_text(id(w_t16_fi_lux), dark ? "󰖔" : "󰖙");
+              icon_set(id(w_t16_fi_lux), dark ? "󰖔" : "󰖙");
               col(id(w_t16_fi_lux), night ? 0x506173 : 0xFBBF24);
               col(id(w_t16_f_lux), C_LABEL);
               txt(id(w_t16_f_co2), "CO2 %s", co2 < 0 ? "--" : (co2 ? "On" : "Off"));
@@ -7373,7 +7410,7 @@ interval:
               if (bn.empty()) txt(id(w_t16_d_bub), "Bubbler: %s", bub < 0 ? "--" : (bub ? "ON" : "OFF"));
               else txt(id(w_t16_d_bub), "Bubbler: %s (%s)", bub < 0 ? "--" : (bub ? "ON" : "OFF"), bn.c_str());
               col(id(w_t16_d_bub), bub == 1 ? 0x10B981 : 0x94A3B8);
-              lv_label_set_text(id(w_t16_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
+              icon_set(id(w_t16_d_bub_i), bub == 1 ? "󰗡" : "󰍷");
               col(id(w_t16_d_bub_i), bub == 1 ? 0x10B981 : 0x94A3B8);
               if (!live) { txt(id(w_t16_d_safe2), "Safety Tripped: --"); col(id(w_t16_d_safe2), 0x94A3B8); }
               else { txt(id(w_t16_d_safe2), "Safety Tripped: %s", id(t16_fault) ? "YES" : "NO"); col(id(w_t16_d_safe2), id(t16_fault) ? 0xEF4444 : 0x10B981); }
@@ -7408,8 +7445,7 @@ interval:
               bg(id(w_t16_learn), ln ? 0x0F291E : 0x1E293B, ln ? 0x059669 : 0x334155);
               if (std::isnan(temp)) txt(id(w_t16_d_pa), "--"); else txt(id(w_t16_d_pa), "%.1f", temp);
               col(id(w_t16_d_pa), live ? 0xF8FAFC : 0x64748B);
-              lv_obj_update_layout(id(w_t16_d_pa));
-              lv_obj_align_to(id(w_t16_d_pa_u), id(w_t16_d_pa), LV_ALIGN_OUT_RIGHT_BOTTOM, 6, -5);
+              after(id(w_t16_d_pa_u), id(w_t16_d_pa), 6, -5);
               if (!live || std::isnan(dr)) txt(id(w_t16_d_drift), "Drift --");
               else txt(id(w_t16_d_drift), "%s %+.2f °F/min (%s)", dr < -0.005f ? "↘" : (dr > 0.005f ? "↗" : "→"), dr,
                        dr < -0.02f ? "Falling" : (dr > 0.02f ? "Rising" : "Stable"));
@@ -7449,7 +7485,9 @@ interval:
             lv_label_set_text(o, b);
           };
           auto show = [](lv_obj_t *o, bool on) {
-            if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            if (on == lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN)) {
+              if (on) lv_obj_remove_flag(o, LV_OBJ_FLAG_HIDDEN); else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+            }
           };
 
           // ------------------------------------------------- chart, tank t75
