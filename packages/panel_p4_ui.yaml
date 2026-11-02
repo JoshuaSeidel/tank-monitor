@@ -3985,7 +3985,7 @@ lvgl:
                 - label:
                     id: w_t75_plot_empty
                     align: CENTER
-                    text: Collecting history (one point every 15 min)
+                    text: No history yet (one point every 15 min)
                     text_font: f12
                     text_color: 0x64748B
         - label:
@@ -5439,7 +5439,7 @@ lvgl:
                 - label:
                     id: w_t16_plot_empty
                     align: CENTER
-                    text: Collecting history (one point every 15 min)
+                    text: No history yet (one point every 15 min)
                     text_font: f12
                     text_color: 0x64748B
         - label:
@@ -7723,7 +7723,7 @@ interval:
             }
             show(id(w_t75_lg_b), use_b);
             show(id(w_t75_lg_sp), mode == 0);
-            show(id(w_t75_plot_empty), n < 2);
+
             static lv_point_precise_t pa_t75[96], pb_t75[96], ps_t75[2];
             auto build = [&](const std::array<float, 96> &S, lv_point_precise_t *pts) {
               int k = 0;
@@ -7737,6 +7737,7 @@ interval:
               return k;
             };
             const int ka = any ? build(A, pa_t75) : 0;
+            show(id(w_t75_plot_empty), ka < 2);
             lv_line_set_points(id(w_t75_ln_a)->obj, pa_t75, ka);
             const int kb = (any && use_b) ? build(B, pb_t75) : 0;
             lv_line_set_points(id(w_t75_ln_b)->obj, pb_t75, kb);
@@ -7797,7 +7798,7 @@ interval:
             }
             show(id(w_t16_lg_b), use_b);
             show(id(w_t16_lg_sp), mode == 0);
-            show(id(w_t16_plot_empty), n < 2);
+
             static lv_point_precise_t pa_t16[96], pb_t16[96], ps_t16[2];
             auto build = [&](const std::array<float, 96> &S, lv_point_precise_t *pts) {
               int k = 0;
@@ -7811,6 +7812,7 @@ interval:
               return k;
             };
             const int ka = any ? build(A, pa_t16) : 0;
+            show(id(w_t16_plot_empty), ka < 2);
             lv_line_set_points(id(w_t16_ln_a)->obj, pa_t16, ka);
             const int kb = (any && use_b) ? build(B, pb_t16) : 0;
             lv_line_set_points(id(w_t16_ln_b)->obj, pb_t16, kb);

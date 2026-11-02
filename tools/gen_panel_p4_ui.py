@@ -482,7 +482,7 @@ def detail_page(T):
                           "line_color": COL["violet"], "line_rounded": True}},
                 {"line": {"id": f"{w}_ln_a", "points": ["0,0", "1,0"], "line_width": 3,
                           "line_color": COL["cyan"], "line_rounded": True}},
-                label(f"{w}_plot_empty", "Collecting history (one point every 15 min)",
+                label(f"{w}_plot_empty", "No history yet (one point every 15 min)",
                       "f12", "muted", align="CENTER"),
             ]),
     ])
@@ -1468,7 +1468,7 @@ CHART_TANK = r"""
   }
   show(id(w_@T@_lg_b), use_b);
   show(id(w_@T@_lg_sp), mode == 0);
-  show(id(w_@T@_plot_empty), n < 2);
+
   static lv_point_precise_t pa_@T@[96], pb_@T@[96], ps_@T@[2];
   auto build = [&](const std::array<float, 96> &S, lv_point_precise_t *pts) {
     int k = 0;
@@ -1482,6 +1482,7 @@ CHART_TANK = r"""
     return k;
   };
   const int ka = any ? build(A, pa_@T@) : 0;
+  show(id(w_@T@_plot_empty), ka < 2);
   lv_line_set_points(id(w_@T@_ln_a)->obj, pa_@T@, ka);
   const int kb = (any && use_b) ? build(B, pb_@T@) : 0;
   lv_line_set_points(id(w_@T@_ln_b)->obj, pb_@T@, kb);

@@ -139,24 +139,39 @@ globals:
     restore_value: false
     initial_value: 'NAN'
 
-  # 24 h history, one sample every 15 min = 96 points per series, oldest
-  # first. Kept in RAM only: after a reboot the chart starts empty and fills
-  # from the left rather than drawing a flat line through hours nobody saw.
+  # 24 h history: 96 points per series, one per wall-clock quarter hour.
+  # a[95] is the quarter in ${tank}_hist_slot (epoch / 900), a[95-j] the one
+  # j quarters earlier; NAN = no data (a gap in the chart, never a made-up
+  # line). SAVED TO FLASH (restore_value): a reboot or power cut must never
+  # wipe the charts. Time the panel was off becomes a gap in the right place
+  # (see the interval below), and Home Assistant's recorder backfills it
+  # (the mqtt on_message below; automation "Aquarium - publish panel history
+  # to MQTT"). ESPHome writes changed globals to flash at most once a minute.
   - id: ${tank}_hist_temp
     type: std::array<float, 96>
-    restore_value: false
+    restore_value: true
+    initial_value: '[]{ std::array<float, 96> a; a.fill(NAN); return a; }()'
   - id: ${tank}_hist_temp_b
     type: std::array<float, 96>
-    restore_value: false
+    restore_value: true
+    initial_value: '[]{ std::array<float, 96> a; a.fill(NAN); return a; }()'
   - id: ${tank}_hist_tds
     type: std::array<float, 96>
-    restore_value: false
+    restore_value: true
+    initial_value: '[]{ std::array<float, 96> a; a.fill(NAN); return a; }()'
   - id: ${tank}_hist_ph
     type: std::array<float, 96>
-    restore_value: false
+    restore_value: true
+    initial_value: '[]{ std::array<float, 96> a; a.fill(NAN); return a; }()'
+  # Quarter-hour slot (epoch / 900) of a[95]. 0 = no history yet.
+  - id: ${tank}_hist_slot
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+  # 96 once any history exists (the charts read it); kept for the UI.
   - id: ${tank}_hist_n
     type: int
-    restore_value: false
+    restore_value: true
     initial_value: '0'
 
 text_sensor:
@@ -239,6 +254,47 @@ binary_sensor:
       return id(${tank}_stamp_ms) != 0 && (millis() - id(${tank}_stamp_ms)) < 45000;
 
 script:
+  - id: ${tank}_hist_merge
+    mode: queued
+    max_runs: 8
+    parameters:
+      payload: std::string
+      series: int
+    then:
+      - lambda: |-
+          const size_t p1 = payload.find('|');
+          const size_t p2 = p1 == std::string::npos ? std::string::npos : payload.find('|', p1 + 1);
+          if (p2 == std::string::npos) return;
+          const uint32_t t0 = strtoul(payload.c_str() + p1 + 1, nullptr, 10);
+          if (t0 == 0) return;
+          const uint32_t first = t0 / 900, newest = first + 95;
+          std::array<float, 96> *arrs[4] = {&id(${tank}_hist_temp), &id(${tank}_hist_temp_b),
+                                            &id(${tank}_hist_tds), &id(${tank}_hist_ph)};
+          uint32_t &have = id(${tank}_hist_slot);
+          // HA is ahead of the panel (just booted, or clock not set yet):
+          // move every series forward to HA's newest quarter first.
+          if (have == 0 || newest > have) {
+            const uint32_t d = (have == 0) ? 96 : std::min<uint32_t>(96, newest - have);
+            for (auto *a : arrs)
+              for (int i = 0; i < 96; i++) (*a)[i] = (i + (int) d < 96) ? (*a)[i + d] : NAN;
+            have = newest;
+          }
+          auto &a = *arrs[series];
+          int k = 0, filled = 0;
+          size_t i = p2 + 1;
+          while (k < 96 && i <= payload.size()) {
+            const size_t c = payload.find(',', i);
+            const std::string tok = payload.substr(i, c == std::string::npos ? std::string::npos : c - i);
+            const int idx = 95 - (int) (have - (first + k));
+            if (!tok.empty() && idx >= 0 && idx < 96) { a[idx] = atof(tok.c_str()); filled++; }
+            k++;
+            if (c == std::string::npos) break;
+            i = c + 1;
+          }
+          id(${tank}_hist_n) = 96;
+          id(redraw_charts) = true;
+          ESP_LOGI("${tank}", "history series %d: %d of %d points from Home Assistant", series, filled, k);
+
   # Setpoint changes are debounced: each tap restarts the 1.5 s wait, so
   # five quick taps send one command, not five.
   - id: ${tank}_send_sp
@@ -275,21 +331,50 @@ script:
             return id(${tank}_learn) ? std::vector<uint8_t>{'A', 'L', '1'} : std::vector<uint8_t>{'A', 'L', '0'};
 
 interval:
-  # History sample. Skips (stores NAN for) any series whose source is stale,
-  # so a link outage shows as a gap in the chart instead of a flat line.
-  - interval: 15min
+  # History sampler, on wall-clock quarter hours. Checked every 30 s: when
+  # the clock enters a new quarter, the arrays move along by however many
+  # quarters have passed (NAN for any the panel missed, e.g. while it was
+  # off), and the new quarter gets the live value if the source is fresh.
+  # A stale source stores NAN, so a link outage is a gap, not a flat line.
+  - interval: 30s
     then:
       - lambda: |-
+          auto t = id(sntp_time).now();
+          if (!t.is_valid()) return;
+          const uint32_t slot = (uint32_t) (t.timestamp / 900);
+          uint32_t &have = id(${tank}_hist_slot);
+          if (have == slot) return;
+          // New quarter. Advance (cap at a full window), then sample.
+          const uint32_t d = (have == 0 || slot < have) ? 96 : std::min<uint32_t>(96, slot - have);
+          for (auto *a : {&id(${tank}_hist_temp), &id(${tank}_hist_temp_b),
+                          &id(${tank}_hist_tds), &id(${tank}_hist_ph)}) {
+            for (int i = 0; i < 96; i++) (*a)[i] = (i + (int) d < 96) ? (*a)[i + d] : NAN;
+          }
+          have = slot;
+          id(${tank}_hist_n) = 96;
           const bool live = id(${tank}_stamp_ms) != 0 && (millis() - id(${tank}_stamp_ms)) < 45000;
           const bool ph_live = id(${tank}_ph_ms) != 0 && (millis() - id(${tank}_ph_ms)) < 3600000;
-          auto push = [](std::array<float, 96> &a, int n, float v) {
-            if (n < 96) { a[n] = v; return; }
-            for (int i = 0; i < 95; i++) a[i] = a[i + 1];
-            a[95] = v;
-          };
-          const int n = id(${tank}_hist_n);
-          push(id(${tank}_hist_temp),   n, live ? id(${tank}_temp)   : NAN);
-          push(id(${tank}_hist_temp_b), n, live ? id(${tank}_temp_b) : NAN);
-          push(id(${tank}_hist_tds),    n, live ? id(${tank}_tds)    : NAN);
-          push(id(${tank}_hist_ph),     n, ph_live ? id(${tank}_ph)  : NAN);
-          if (n < 96) id(${tank}_hist_n) = n + 1;
+          id(${tank}_hist_temp)[95]   = live ? id(${tank}_temp)   : NAN;
+          id(${tank}_hist_temp_b)[95] = live ? id(${tank}_temp_b) : NAN;
+          id(${tank}_hist_tds)[95]    = live ? id(${tank}_tds)    : NAN;
+          id(${tank}_hist_ph)[95]     = ph_live ? id(${tank}_ph)  : NAN;
+          id(redraw_charts) = true;
+
+# Home Assistant backfill: "series|t0|v1,...,v96", t0 = epoch of the first
+# point, 15 min apart, empty = no data. Merged point by point into the
+# panel's own history: HA fills gaps, and an empty HA point never erases a
+# point the panel has. Retained, so it arrives on every (re)connect.
+mqtt:
+  on_message:
+    - topic: tank-monitor-panel/hist/${tank}_temp
+      then:
+        - lambda: 'id(${tank}_hist_merge)->execute(x, 0);'
+    - topic: tank-monitor-panel/hist/${tank}_temp_b
+      then:
+        - lambda: 'id(${tank}_hist_merge)->execute(x, 1);'
+    - topic: tank-monitor-panel/hist/${tank}_tds
+      then:
+        - lambda: 'id(${tank}_hist_merge)->execute(x, 2);'
+    - topic: tank-monitor-panel/hist/${tank}_ph
+      then:
+        - lambda: 'id(${tank}_hist_merge)->execute(x, 3);'
