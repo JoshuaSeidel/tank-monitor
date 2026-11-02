@@ -78,6 +78,15 @@ esp32:
       # Keeps ESP-Hosted's buffers out of internal RAM, which the display
       # and LVGL need. Engineering samples roll back without it.
       CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
+      # TLS (the C6 firmware download, MQTT) allocates from PSRAM too. This
+      # panel runs more at once than any confirmed CrowPanel config (BLE to
+      # two tanks, MQTT, web server, LVGL), on a v1.x chip with little
+      # internal RAM; espcontrol's confirmed V1.2 config does the same.
+      CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC: y
+      # The ESP-Hosted task stack in PSRAM too. ESPHome only sets this for
+      # esp_hosted 3.x; 2026.10 uses 2.12.x, so it is set by hand, as in
+      # espcontrol's confirmed V1.2 config.
+      CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM: y
 
 # Logs on UART0 = J1, the USB-C port labelled UART0 (CH340K bridge on
 # GPIO37/38), per Elecrow's V1.2 hardware guide and their ESPHome example.
@@ -94,19 +103,22 @@ psram:
   mode: hex
   speed: 200MHz
 
-# P4 internal LDOs, as Elecrow's board support code sets them before any
-# peripheral starts (V1.2 guide: "this sequence must not be omitted"):
-# LDO3 2.5 V for the MIPI-DSI PHY, LDO4 3.3 V. ESPHome's LDO setting tops out
-# at 2.7 V; 3.3 V is "passthrough" (bypass), which is also how ESP-IDF
-# delivers a 3300 mV request on these channels.
+# P4 internal LDOs. LDO3 2.5 V feeds the MIPI-DSI PHY. LDO4 feeds VDDPST_5
+# (the LCD-reset pull-up and the I2C level shifters, per the V1.2 schematic).
+# Elecrow's ESP-IDF code asks for 3.3 V there, but every ESPHome config
+# confirmed on these boards either sets 2.5 V (Elecrow's own V1.1/V1.2
+# example, homeassistant_espscreen #116) or leaves it out (espcontrol,
+# crowpanel-ha), so this follows the proven ESPHome configs.
 esp_ldo:
   - channel: 3
     voltage: 2.5V
   - channel: 4
-    voltage: passthrough
+    voltage: 2.5V
 
 esp32_hosted:
   variant: esp32c6
+  # Transport buffers and the hosted task in PSRAM (as espcontrol's V1.2).
+  use_psram: true
   active_high: true
   reset_pin: GPIO32
   cmd_pin: GPIO19
@@ -115,6 +127,10 @@ esp32_hosted:
   d1_pin: ${c6_d1}
   d2_pin: ${c6_d2}
   d3_pin: ${c6_d3}
+
+# Wi-Fi/lwIP buffers in PSRAM (merges into packages/base.yaml's wifi:).
+wifi:
+  use_psram: true
 
 http_request:
   verify_ssl: true
@@ -145,9 +161,11 @@ i2c:
     frequency: 400kHz
 
 output:
-  # GPIO29 gates the backlight supply (Q11 -> LCD_BK_VDD, V1.2 guide). It is
-  # driven high while the light is on, the same level Elecrow's ESPHome
-  # example leaves it at.
+  # GPIO29 was meant to gate the backlight supply, but its MOSFET (Q11,
+  # AO3401) is marked NC on the V1.0, V1.1 and V1.2 schematics and R184 ties
+  # the backlight straight to 5 V: on these boards it does nothing. Driven
+  # high while lit, as every working config does, in case a later revision
+  # fits it. A dark screen is never this pin.
   - platform: gpio
     id: backlight_power
     pin: GPIO29
