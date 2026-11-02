@@ -79,13 +79,16 @@ esp32:
       # and LVGL need. Engineering samples roll back without it.
       CONFIG_ESP_HOSTED_MEMPOOL_PREFER_SPIRAM: y
 
-# Logs on the port labelled "USB": the P4's own USB-Serial-JTAG. On this
-# board that is the port that flashes (hold BOOT) and the one to read logs
-# on; the "UART0" port does not respond to the bootloader (confirmed on the
-# owner's V1.2, 2026-11-02). Elecrow's example uses UART0, which suits their
-# wiring of a separate USB-UART cable, not this board's USB-C ports.
+# Logs on UART0 = J1, the USB-C port labelled UART0 (CH340K bridge on
+# GPIO37/38), per Elecrow's V1.2 hardware guide and their ESPHome example.
+# The other USB-C port (J16, labelled USB) is the P4's USB 2.0 OTG: the ROM
+# can flash through it with BOOT held, but nothing logs there once the app
+# runs. The P4's USB-Serial-JTAG (GPIO24/25) is not wired to either
+# connector on this board, so ESPHome's P4 default would log nowhere.
+# macOS 26 needs WCH's CH34x driver for J1 to enumerate. Once on Wi-Fi the
+# logs are also on MQTT (tank-monitor-panel/debug).
 logger:
-  hardware_uart: USB_SERIAL_JTAG
+  hardware_uart: UART0
 
 psram:
   mode: hex
