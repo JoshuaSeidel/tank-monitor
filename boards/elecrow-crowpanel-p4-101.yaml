@@ -364,6 +364,20 @@ script:
                   return critical ? std::string("crit:d=8,o=6,b=200:a,p,a,p,a,2p,a,p,a,p,a")
                                   : std::string("warn:d=4,o=5,b=140:c6,8p,g5");
 
+button:
+  # Plays the warning chime (or the critical one) on demand, to check the
+  # speaker and set expectations for volume. Ignores night mode and the
+  # mute switch, since you pressed it.
+  - platform: template
+    name: "Test Chime"
+    icon: "mdi:volume-high"
+    on_press:
+      - switch.turn_on: speaker_amp
+      - delay: 50ms
+      - rtttl.play:
+          id: panel_rtttl
+          rtttl: "warn:d=4,o=5,b=140:c6,8p,g5"
+
 switch:
   - platform: template
     id: chime_enabled
