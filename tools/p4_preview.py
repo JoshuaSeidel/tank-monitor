@@ -59,6 +59,10 @@ def lifted_globals():
             text = text.replace("${" + k + "}", val)
         out += yaml.load(text, Loader=_Loose)["globals"]
     out += yaml.load((ROOT / "packages/panel_p4_feeds.yaml").read_text(), Loader=_Loose)["globals"]
+    # Board-file globals the UI reads (the board file itself is hardware).
+    out += [{"id": "batt_mv", "type": "float", "initial_value": "NAN"},
+            {"id": "batt_pct", "type": "float", "initial_value": "NAN"},
+            {"id": "batt_state", "type": "int", "initial_value": "-1"}]
     for g in out:
         g["restore_value"] = False
     return out
@@ -106,6 +110,7 @@ id(wc_batt_low) = false; id(wc_volume) = 62; id(wc_online) = true;
 id(wc_last_start) = epoch - 5 * 86400;
 id(ha_co2_t75) = 0; id(ha_bubbler_t75) = 1; id(ha_co2_t16) = 1; id(ha_bubbler_t16) = 1;
 id(ha_livestock_days) = 142;
+id(batt_mv) = 4050; id(batt_pct) = 87; id(batt_state) = 1;
 id(ha_co2_note_t75) = "Schedule off"; id(ha_bubbler_note_t75) = "24/7";
 id(ha_co2_note_t16) = "7:30–12:00"; id(ha_bubbler_note_t16) = "Off 7:30–5:00";
 id(redraw_charts) = true;

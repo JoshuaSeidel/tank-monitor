@@ -31,6 +31,12 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # millis() of the last broker connect. Alerts arriving in the next few
+  # seconds are the broker replaying retained ones, not new: no chime.
+  - id: mqtt_up_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
   # ---- RO meter ----
   - id: ro_fill
     type: float
@@ -232,7 +238,7 @@ sensor:
 
 mqtt:
   on_connect:
-    - lambda: 'id(mqtt_up) = true;'
+    - lambda: 'id(mqtt_up) = true; id(mqtt_up_ms) = millis();'
   on_disconnect:
     - lambda: 'id(mqtt_up) = false;'
   on_message:
@@ -280,5 +286,10 @@ mqtt:
             if (bar == std::string::npos) return;
             const std::string tag = x.substr(0, bar);
             const std::string rest = x.substr(bar + 1);
-            if (rest.empty()) id(alerts).erase(tag);
-            else id(alerts)[tag] = rest;
+            if (rest.empty()) { id(alerts).erase(tag); return; }
+            const bool is_new = id(alerts).find(tag) == id(alerts).end();
+            id(alerts)[tag] = rest;
+            // Chime only for an alert that is new while the panel is
+            // connected; the retained replay after (re)connect is old news.
+            if (is_new && millis() - id(mqtt_up_ms) > 10000)
+              id(alert_chime)->execute(rest.compare(0, 8, "critical") == 0);

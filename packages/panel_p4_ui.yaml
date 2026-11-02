@@ -122,6 +122,8 @@ font:
   size: 18
   bpp: 4
   glyphs:
+  - 󰁹
+  - 󰂄
   - 󰂯
   - 󰂲
   - 󰈐
@@ -154,6 +156,8 @@ font:
   size: 24
   bpp: 4
   glyphs:
+  - 󰁹
+  - 󰂄
   - 󰂯
   - 󰂲
   - 󰈐
@@ -369,6 +373,40 @@ lvgl:
                 text: BLE
                 text_font: f12
                 text_color: 0xCBD5E1
+        - obj:
+            id: w_batt
+            width: SIZE_CONTENT
+            height: 26
+            bg_color: 0x131B24
+            bg_opa: COVER
+            border_color: 0x334155
+            border_width: 1
+            radius: 6
+            pad_left: 8
+            pad_right: 8
+            pad_top: 0
+            pad_bottom: 0
+            scrollable: false
+            scrollbar_mode: 'OFF'
+            layout:
+              type: FLEX
+              flex_flow: ROW
+              pad_column: 6
+              flex_align_main: CENTER
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+            widgets:
+            - label:
+                id: w_batt_i
+                text: 󰁹
+                text_font: icon18
+                text_color: 0x94A3B8
+            - label:
+                id: w_batt_l
+                text: --
+                text_font: f12
+                text_color: 0xCBD5E1
+            hidden: true
         - obj:
             id: w_wake
             width: SIZE_CONTENT
@@ -6548,6 +6586,19 @@ interval:
           else if (l75 || l16) { txt(id(w_ble_l), "%s Connected", l75 ? "75G" : "Nano"); col(id(w_ble_l), 0x38BDF8); col(id(w_ble_i), 0x38BDF8); }
           else { txt(id(w_ble_l), "BLE Down"); col(id(w_ble_l), 0xFBBF24); col(id(w_ble_i), 0xFBBF24); }
           bg(id(w_logo), night ? 0x080D13 : 0x0C4A6E, night ? 0x131C26 : 0x0284C7);
+          {
+            // Battery: state 1 = charging (the only state code documented so far).
+            const float bp = id(batt_pct);
+            show(id(w_batt), !std::isnan(bp));
+            if (!std::isnan(bp)) {
+              const bool chg = id(batt_state) == 1;
+              txt(id(w_batt_l), "%.0f%%", bp);
+              lv_label_set_text(id(w_batt_i), chg ? "󰂄" : "󰁹");
+              const uint32_t bc = chg ? 0x10B981 : (bp < 20.0f ? 0xFBBF24 : (night ? 0x506173 : 0x94A3B8));
+              col(id(w_batt_i), bc); col(id(w_batt_l), chg || bp < 20.0f ? bc : (night ? 0x506173 : 0xCBD5E1));
+              bg(id(w_batt), C_CARD, night ? 0x131C26 : 0x334155);
+            }
+          }
           col(id(w_brand), C_TEXT);
           col(id(w_clock), C_TEXT);
           {

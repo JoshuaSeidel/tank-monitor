@@ -228,6 +228,158 @@ binary_sensor:
     entity_category: diagnostic
     lambda: "return !id(main_touch)->is_failed();"
 
+# ---------------------------------------------------------------------
+# Battery (STC8H1K08 housekeeping MCU)
+# ---------------------------------------------------------------------
+# The single-cell charger (TP4059) and the battery ADC sit behind a small
+# STC8 microcontroller, which the P4 reads over the touch I2C bus (STC8
+# P1.4/P1.5 -> R118/R119 0R -> I2C1_SDA/SCL_3V3 -> level shifter -> GPIO45/46,
+# V1.2 schematic). Elecrow's stock firmware reads it ("stc8 read battery info
+# fail", "bat_level = %d %%", "bat_state = %d" in esp_brookesia_demo.bin).
+#
+# Protocol, as implemented by hermes-gadget-sdk (firmware/drivers/
+# stc8_battery.cpp) and matching the stock firmware's log order: address
+# 0x2F, one register read per byte, registers 0-11:
+#   0-3  ADC voltage, mV, u32 little-endian
+#   4-7  battery voltage, mV, u32 LE (100k/39k divider on VBAT)
+#   8    charge level, %
+#   9    state: 1 = charging, 4 = error. Other codes are not documented
+#        anywhere public; the raw code is published (Battery State) and the
+#        raw record is logged on change, so the rest can be read off the
+#        board while plugging and unplugging the charger.
+# Nobody has published a validation of this layout on hardware; treat the
+# numbers as unverified until they match the stock firmware's display.
+globals:
+  - id: batt_mv
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: batt_pct
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: batt_state
+    type: int
+    restore_value: false
+    initial_value: '-1'
+
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          uint8_t raw[12];
+          for (uint8_t reg = 0; reg < 12; reg++) {
+            if (id(bus_a)->write_readv(0x2F, &reg, 1, &raw[reg], 1) != i2c::ERROR_OK) {
+              static bool warned = false;
+              if (!warned) ESP_LOGW("battery", "STC8 at 0x2F not answering (register %u)", reg);
+              warned = true;
+              id(batt_mv) = NAN; id(batt_pct) = NAN; id(batt_state) = -1;
+              return;
+            }
+          }
+          static uint8_t last[12] = {0};
+          if (memcmp(last, raw, 12) != 0) {
+            memcpy(last, raw, 12);
+            ESP_LOGI("battery", "STC8 raw: %02X %02X %02X %02X | %02X %02X %02X %02X | %u%% | state %u | %02X %02X",
+                     raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10], raw[11]);
+          }
+          const uint32_t mv = raw[4] | (raw[5] << 8) | (raw[6] << 16) | ((uint32_t) raw[7] << 24);
+          id(batt_mv) = mv <= 5000 ? (float) mv : NAN;
+          id(batt_pct) = raw[8] <= 100 ? (float) raw[8] : NAN;
+          id(batt_state) = raw[9];
+
+sensor:
+  - platform: template
+    name: "Battery Voltage"
+    unit_of_measurement: "V"
+    device_class: voltage
+    accuracy_decimals: 2
+    update_interval: 60s
+    lambda: "return std::isnan(id(batt_mv)) ? NAN : id(batt_mv) / 1000.0f;"
+  - platform: template
+    name: "Battery"
+    unit_of_measurement: "%"
+    device_class: battery
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: "return id(batt_pct);"
+  - platform: template
+    name: "Battery State"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: "return id(batt_state) < 0 ? NAN : (float) id(batt_state);"
+
+# ---------------------------------------------------------------------
+# Speaker
+# ---------------------------------------------------------------------
+# NS4263B amplifier fed straight from the P4's I2S (GPIO21 LRCLK, GPIO22
+# BCLK, GPIO23 DOUT); GPIO30 enables it, active low (V1.2 guide; same wiring
+# crowpanel-ha runs on a V1.2 9"). The amp hisses when left on, so it is on
+# only while a sound plays.
+i2s_audio:
+  - id: i2s_spk
+    i2s_lrclk_pin: GPIO21
+    i2s_bclk_pin: GPIO22
+
+speaker:
+  - platform: i2s_audio
+    id: panel_speaker
+    i2s_audio_id: i2s_spk
+    i2s_dout_pin: GPIO23
+    dac_type: external
+    channel: mono
+
+rtttl:
+  id: panel_rtttl
+  speaker: panel_speaker
+  gain: 0.6
+  on_finished_playback:
+    - delay: 300ms
+    - if:
+        condition:
+          lambda: "return !id(panel_rtttl).is_playing();"
+        then:
+          - switch.turn_off: speaker_amp
+
+# Alert chime: played by packages/panel_p4_feeds.yaml when a NEW alert
+# arrives (not the retained ones the broker replays on reconnect). Critical:
+# three urgent beeps, always. Warning: a soft two-note chime, skipped while
+# the panel is in night mode. "Alert Chime" in Home Assistant mutes both.
+script:
+  - id: alert_chime
+    mode: restart
+    parameters:
+      critical: bool
+    then:
+      - if:
+          condition:
+            lambda: "return id(chime_enabled).state && (critical || !id(night_on));"
+          then:
+            - switch.turn_on: speaker_amp
+            - delay: 50ms
+            - rtttl.play:
+                id: panel_rtttl
+                rtttl: !lambda |-
+                  return critical ? std::string("crit:d=8,o=6,b=200:a,p,a,p,a,2p,a,p,a,p,a")
+                                  : std::string("warn:d=4,o=5,b=140:c6,8p,g5");
+
+switch:
+  - platform: template
+    id: chime_enabled
+    name: "Alert Chime"
+    icon: "mdi:volume-high"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: gpio
+    id: speaker_amp
+    name: "Speaker Amp"
+    entity_category: diagnostic
+    restore_mode: ALWAYS_OFF
+    pin:
+      number: GPIO30
+      inverted: true
+
 # Both tanks share one sun (see the controller configs): south-central PA.
 # Used for night mode and the dawn/dusk times on the detail screens.
 sun:

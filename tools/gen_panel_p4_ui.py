@@ -78,7 +78,7 @@ ICON = {
     "filter": "\U000F0232", "water": "\U000F058C", "ha": "\U000F07D0",
     "shield": "\U000F0565", "check": "\U000F05E1", "minus_circle": "\U000F0377",
     "refresh": "\U000F0450", "play": "\U000F040D", "plus_circle": "\U000F0419",
-    "radio": "\U000F043E",
+    "radio": "\U000F043E", "batt": "\U000F0079", "batt_chg": "\U000F0084",
 }
 
 TANKS = [
@@ -224,6 +224,11 @@ def top_bar():
             pill("w_ble_pill", [icon("w_ble_i", "bt", 18, "label"),
                                 label("w_ble_l", "BLE", "f12", "text2")],
                  bg="card1", border="border_act", h=26, radius=6, pad=8),
+            # Battery from the STC8 (boards/elecrow-crowpanel-p4-101.yaml);
+            # hidden until it answers.
+            pill("w_batt", [icon("w_batt_i", "batt", 18, "label"),
+                            label("w_batt_l", "--", "f12", "text2")],
+                 bg="card1", border="border_act", h=26, radius=6, pad=8, hidden=True),
             pill("w_wake", [icon(None, "sun", 18, "amber"),
                             label(None, "WAKE SCREEN", "f13", "amber", text_decor="UNDERLINE")],
                  bg="card1", border="border_act", h=34, radius=8, pad=14, hidden=True),
@@ -841,6 +846,19 @@ if (l75 && l16) { txt(id(w_ble_l), "Dual BLE Active"); col(id(w_ble_l), 0xCBD5E1
 else if (l75 || l16) { txt(id(w_ble_l), "%s Connected", l75 ? "75G" : "Nano"); col(id(w_ble_l), 0x38BDF8); col(id(w_ble_i), 0x38BDF8); }
 else { txt(id(w_ble_l), "BLE Down"); col(id(w_ble_l), 0xFBBF24); col(id(w_ble_i), 0xFBBF24); }
 bg(id(w_logo), night ? 0x080D13 : 0x0C4A6E, night ? 0x131C26 : 0x0284C7);
+{
+  // Battery: state 1 = charging (the only state code documented so far).
+  const float bp = id(batt_pct);
+  show(id(w_batt), !std::isnan(bp));
+  if (!std::isnan(bp)) {
+    const bool chg = id(batt_state) == 1;
+    txt(id(w_batt_l), "%.0f%%", bp);
+    lv_label_set_text(id(w_batt_i), chg ? "@ICON_BATT_CHG@" : "@ICON_BATT@");
+    const uint32_t bc = chg ? 0x10B981 : (bp < 20.0f ? 0xFBBF24 : (night ? 0x506173 : 0x94A3B8));
+    col(id(w_batt_i), bc); col(id(w_batt_l), chg || bp < 20.0f ? bc : (night ? 0x506173 : 0xCBD5E1));
+    bg(id(w_batt), C_CARD, night ? 0x131C26 : 0x334155);
+  }
+}
 col(id(w_brand), C_TEXT);
 col(id(w_clock), C_TEXT);
 {
@@ -1599,7 +1617,8 @@ def build():
     }
 
     text = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True, width=1000)
-    update = UPDATE_COMMON + "".join(tank_code(UPDATE_TANK, T) for T in TANKS)
+    update = (UPDATE_COMMON.replace("@ICON_BATT_CHG@", ICON["batt_chg"]).replace("@ICON_BATT@", ICON["batt"])
+              + "".join(tank_code(UPDATE_TANK, T) for T in TANKS))
     chart = ("static uint32_t last = 0;\n"
              "if (!id(redraw_charts) && millis() - last < 60000) return;\n"
              "id(redraw_charts) = false; last = millis();\n"
