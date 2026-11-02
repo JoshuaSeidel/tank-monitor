@@ -43,12 +43,19 @@
 #    Default below is V1.1/V1.2, confirmed by Elecrow's V1.2 guide (P4
 #    GPIO14/15/16/17 = C6 D3/D2/D1/D0). For V1.0 set c6_d0..d3 to
 #    GPIO14,15,16,17, which is exactly what Elecrow's V1.0 ESPHome example uses.
-# 2. P4 CHIP REVISION. Below v3.0 is an engineering sample and needs
-#    engineering_sample: "true". The boot log prints the revision. Elecrow's
-#    own V1.0 example sets true, so expect early V1.0 boards to need it.
+# 2. P4 CHIP REVISION. Default "true": engineering-sample silicon (v1.x).
+#    Elecrow ships v1.3 even on V1.2 boards: the owner's V1.2 (bought Oct
+#    2026) is marked FEF0 on the manufacturing-code line, and Espressif's
+#    errata ("Chip Revision Identification") maps the 2nd letter E to v1.3;
+#    Elecrow's own example sets true as well. A "false" build only accepts
+#    v3.01+, so on this chip the bootloader refuses the app and the screen
+#    stays fully dark with nothing on the USB port (the refusal prints on
+#    UART0). A "true" build only accepts v0.0-v1.99. Read the 4-character
+#    manufacturing code on the chip: 2nd letter E = v1.3 (true), G = v3.1 and
+#    F = v3.0 (false). ESPHome caps engineering samples at 360 MHz.
 
 substitutions:
-  engineering_sample: "false"
+  engineering_sample: "true"
   c6_d0: GPIO17
   c6_d1: GPIO16
   c6_d2: GPIO15
