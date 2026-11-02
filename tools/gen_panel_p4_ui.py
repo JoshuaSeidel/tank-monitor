@@ -129,6 +129,10 @@ def _base(i, x=None, y=None, w=None, h=None, align=None, **st):
 
 def box(i, x, y, w, h, bg="card1", border="border", radius=12, bw=1, kids=(), align=None, **st):
     st.setdefault("bg_opa", "COVER")
+    # Containers never take taps. LVGL makes every plain obj clickable, and a
+    # tap stops at the first clickable object under the finger: a layout box
+    # centred inside a button swallowed every tap on the button's label.
+    st.setdefault("clickable", False)
     d = _base(i, x, y, w, h, align, bg_color=COL[bg],
               border_color=COL[border], border_width=bw, radius=radius,
               pad_all=0, scrollable=False, scrollbar_mode="OFF", **st)
@@ -147,6 +151,7 @@ def icon(i, name, size=18, color="cyan", x=None, y=None, align=None, **st):
 
 
 def row(i, x, y, kids, gap=8, align=None, h=28, w="SIZE_CONTENT", **st):
+    st.setdefault("clickable", False)  # see box()
     d = _base(i, x, y, w, h, align, bg_opa="TRANSP", border_width=0, pad_all=0,
               scrollable=False, scrollbar_mode="OFF",
               layout={"type": "FLEX", "flex_flow": "ROW", "pad_column": gap,
@@ -159,6 +164,7 @@ def row(i, x, y, kids, gap=8, align=None, h=28, w="SIZE_CONTENT", **st):
 def pill(i, kids, bg="card2", border="border_act", h=24, x=None, y=None, align=None,
          gap=6, pad=10, radius=20, **st):
     """A rounded box that sizes itself around a row of children."""
+    st.setdefault("clickable", False)  # see box()
     d = _base(i, x, y, "SIZE_CONTENT", h, align, bg_color=COL[bg], bg_opa="COVER",
               border_color=COL[border], border_width=1, radius=radius,
               pad_left=pad, pad_right=pad, pad_top=0, pad_bottom=0,
@@ -236,6 +242,7 @@ def top_bar():
             # the status pill once the battery pill joined it.
             {"obj": _base(None, None, None, "SIZE_CONTENT", 40, None, bg_opa="TRANSP",
                           border_width=0, pad_all=0, scrollable=False, scrollbar_mode="OFF",
+                          clickable=False,
                           layout={"type": "FLEX", "flex_flow": "COLUMN", "pad_row": 0,
                                   "flex_align_main": "CENTER", "flex_align_cross": "END",
                                   "flex_align_track": "END"},

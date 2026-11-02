@@ -211,7 +211,10 @@ touchscreen:
     # V1.2 does: bringing the DSI panel up can disturb a GT911 that is
     # already initialised.
     setup_priority: -200
-    # Touch diagnostics (INFO, so they reach the web log /events and MQTT).
+    # Touch diagnostics, at DEBUG: raise the logger to DEBUG to see them. At
+    # INFO they settled the 2026-11-02 "taps need many tries" hunt: every tap
+    # arrived cleanly (one finger, clean release, right place); the UI's
+    # inner layout boxes were catching the taps (fixed in the generator).
     # Logged: every new finger (id + position), every change in the SET of
     # fingers the GT911 reports, positions at most every 250 ms while held,
     # and every release, all with millis(). That separates "taps never
@@ -219,7 +222,7 @@ touchscreen:
     # glass edge) and "releases never arrive".
     on_touch:
       - lambda: |-
-          ESP_LOGI("touch", "%lu down id=%u x=%d y=%d raw=%d,%d (fingers=%u)",
+          ESP_LOGD("touch", "%lu down id=%u x=%d y=%d raw=%d,%d (fingers=%u)",
                    (unsigned long) millis(), touch.id, touch.x, touch.y, touch.x_raw, touch.y_raw,
                    (unsigned) touches.size());
     on_update:
@@ -234,10 +237,10 @@ touchscreen:
             for (auto &t : touches)
               if (n < (int) sizeof(b) - 40)
                 n += snprintf(b + n, sizeof(b) - n, " [id%u %d,%d st%d]", t.id, t.x, t.y, t.state);
-            ESP_LOGI("touch", "%s", b);
+            ESP_LOGD("touch", "%s", b);
           }
     on_release:
-      - lambda: 'ESP_LOGI("touch", "%lu release", (unsigned long) millis());'
+      - lambda: 'ESP_LOGD("touch", "%lu release", (unsigned long) millis());'
 
 binary_sensor:
   # Whether the GT911 came up. A failed controller is otherwise silent: the

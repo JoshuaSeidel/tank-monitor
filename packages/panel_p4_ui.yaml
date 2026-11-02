@@ -232,6 +232,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             align: CENTER
@@ -282,11 +283,13 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
         - label:
             id: w_status_l
             text: ''
             text_font: f13
             text_color: 0x10B981
+        clickable: false
     - obj:
         id: w_top_right
         align: TOP_RIGHT
@@ -340,6 +343,7 @@ lvgl:
                 text: MQTT
                 text_font: f12
                 text_color: 0xCBD5E1
+            clickable: false
         - obj:
             id: w_ble_pill
             width: SIZE_CONTENT
@@ -373,6 +377,7 @@ lvgl:
                 text: BLE
                 text_font: f12
                 text_color: 0xCBD5E1
+            clickable: false
         - obj:
             id: w_batt
             width: SIZE_CONTENT
@@ -407,6 +412,7 @@ lvgl:
                 text_font: f12
                 text_color: 0xCBD5E1
             hidden: true
+            clickable: false
         - obj:
             id: w_wake
             width: SIZE_CONTENT
@@ -440,6 +446,7 @@ lvgl:
                 text_color: 0xFBBF24
                 text_decor: UNDERLINE
             hidden: true
+            clickable: false
         - obj:
             width: SIZE_CONTENT
             height: 40
@@ -448,6 +455,7 @@ lvgl:
             pad_all: 0
             scrollable: false
             scrollbar_mode: 'OFF'
+            clickable: false
             layout:
               type: FLEX
               flex_flow: COLUMN
@@ -466,6 +474,7 @@ lvgl:
                 text: ''
                 text_font: f11
                 text_color: 0x94A3B8
+        clickable: false
     - obj:
         id: w_t75_card
         x: 14
@@ -480,6 +489,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - obj:
             id: w_t75_head
@@ -532,6 +542,8 @@ lvgl:
                     text: COMMUNITY
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - obj:
             id: w_t75_link
             align: TOP_RIGHT
@@ -564,11 +576,13 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - label:
                 id: w_t75_link_l
                 text: BLE --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
         - obj:
             id: w_t75_lost
             x: 16
@@ -584,6 +598,7 @@ lvgl:
             scrollbar_mode: 'OFF'
             hidden: true
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 align: LEFT_MID
@@ -635,6 +650,7 @@ lvgl:
                     text: STALE
                     text_font: f12
                     text_color: 0xFBBF24
+                clickable: false
         - obj:
             id: w_t75_hero
             x: 16
@@ -649,6 +665,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_temp
@@ -706,6 +723,7 @@ lvgl:
                     text: ''
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t75_probe_row
                 align: TOP_RIGHT
@@ -760,6 +778,8 @@ lvgl:
                         text_font: f12
                         text_color: 0x38BDF8
                     hidden: false
+                    clickable: false
+                clickable: false
             - label:
                 id: w_t75_drift
                 align: TOP_RIGHT
@@ -798,6 +818,7 @@ lvgl:
                 text_font: f11
                 text_color: 0xCBD5E1
             hidden: true
+            clickable: false
         - obj:
             id: w_t75_heat
             x: 16
@@ -812,6 +833,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_heat_i
@@ -865,6 +887,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_fan_i
@@ -918,6 +941,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_tds_cap
@@ -970,6 +994,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
                 widgets:
                 - obj:
                     id: w_t75_tds_trk_band
@@ -985,6 +1010,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     id: w_t75_tds_trk_mark
                     x: 0
@@ -999,6 +1025,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
         - obj:
             id: w_t75_ph
             x: 250
@@ -1013,6 +1040,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_ph_cap
@@ -1065,6 +1093,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
                 widgets:
                 - obj:
                     id: w_t75_ph_trk_band
@@ -1080,6 +1109,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     id: w_t75_ph_trk_mark
                     x: 0
@@ -1094,6 +1124,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
         - obj:
             id: w_t75_sep
             x: 16
@@ -1108,6 +1139,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
         - obj:
             id: w_t75_foot
             x: 16
@@ -1153,6 +1185,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -1179,6 +1212,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -1205,6 +1239,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -1231,6 +1266,8 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - button:
             id: w_t75_details
             x: 388
@@ -1272,6 +1309,7 @@ lvgl:
                     text: ›
                     text_font: f15
                     text_color: 0xCBD5E1
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -1301,6 +1339,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - obj:
             id: w_t16_head
@@ -1353,6 +1392,8 @@ lvgl:
                     text: 16 GAL • ~14 GAL WATER
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - obj:
             id: w_t16_link
             align: TOP_RIGHT
@@ -1385,11 +1426,13 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - label:
                 id: w_t16_link_l
                 text: BLE --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
         - obj:
             id: w_t16_lost
             x: 16
@@ -1405,6 +1448,7 @@ lvgl:
             scrollbar_mode: 'OFF'
             hidden: true
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 align: LEFT_MID
@@ -1456,6 +1500,7 @@ lvgl:
                     text: STALE
                     text_font: f12
                     text_color: 0xFBBF24
+                clickable: false
         - obj:
             id: w_t16_hero
             x: 16
@@ -1470,6 +1515,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_temp
@@ -1527,6 +1573,7 @@ lvgl:
                     text: ''
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t16_probe_row
                 align: TOP_RIGHT
@@ -1581,6 +1628,8 @@ lvgl:
                         text_font: f12
                         text_color: 0x38BDF8
                     hidden: true
+                    clickable: false
+                clickable: false
             - label:
                 id: w_t16_drift
                 align: TOP_RIGHT
@@ -1619,6 +1668,7 @@ lvgl:
                 text_font: f11
                 text_color: 0xCBD5E1
             hidden: true
+            clickable: false
         - obj:
             id: w_t16_heat
             x: 16
@@ -1633,6 +1683,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_heat_i
@@ -1686,6 +1737,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_fan_i
@@ -1739,6 +1791,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_tds_cap
@@ -1791,6 +1844,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
                 widgets:
                 - obj:
                     id: w_t16_tds_trk_band
@@ -1806,6 +1860,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     id: w_t16_tds_trk_mark
                     x: 0
@@ -1820,6 +1875,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
         - obj:
             id: w_t16_ph
             x: 250
@@ -1834,6 +1890,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_ph_cap
@@ -1886,6 +1943,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
                 widgets:
                 - obj:
                     id: w_t16_ph_trk_band
@@ -1901,6 +1959,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     id: w_t16_ph_trk_mark
                     x: 0
@@ -1915,6 +1974,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
         - obj:
             id: w_t16_sep
             x: 16
@@ -1929,6 +1989,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
         - obj:
             id: w_t16_foot
             x: 16
@@ -1974,6 +2035,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -2000,6 +2062,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -2026,6 +2089,7 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 width: SIZE_CONTENT
                 height: 24
@@ -2052,6 +2116,8 @@ lvgl:
                     text: --
                     text_font: f12
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - button:
             id: w_t16_details
             x: 388
@@ -2093,6 +2159,7 @@ lvgl:
                     text: ›
                     text_font: f15
                     text_color: 0xCBD5E1
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -2122,6 +2189,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 14
@@ -2166,6 +2234,7 @@ lvgl:
                 text: --
                 text_font: f11
                 text_color: 0x38BDF8
+            clickable: false
         - label:
             id: w_ro_val
             x: 14
@@ -2233,6 +2302,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 14
@@ -2303,6 +2373,8 @@ lvgl:
                     text: --
                     text_font: f11
                     text_color: 0xCBD5E1
+                clickable: false
+            clickable: false
         - label:
             id: w_wc_last
             x: 14
@@ -2366,6 +2438,7 @@ lvgl:
                     text: START CHANGE
                     text_font: f13
                     text_color: 0xF8FAFC
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -2394,6 +2467,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             id: w_ha_i
@@ -2439,6 +2513,7 @@ lvgl:
                 text: --
                 text_font: f11
                 text_color: 0x10B981
+            clickable: false
         - label:
             id: w_ha_k1
             x: 14
@@ -2509,6 +2584,7 @@ lvgl:
         scrollbar_mode: 'OFF'
         hidden: true
         bg_opa: COVER
+        clickable: false
         widgets:
         - obj:
             id: w_alert_disc
@@ -2525,6 +2601,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 align: CENTER
@@ -2592,6 +2669,7 @@ lvgl:
                     text: OPEN
                     text_font: f13
                     text_color: 0xF8FAFC
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -2654,6 +2732,7 @@ lvgl:
                 text: Home
                 text_font: f13
                 text_color: 0xF8FAFC
+            clickable: false
         pressed:
           bg_color: 0x212E3D
         on_click:
@@ -2717,11 +2796,14 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - label:
                 id: w_t75_d_link_l
                 text: BLE --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
+        clickable: false
     - obj:
         align: TOP_RIGHT
         x: -16
@@ -2774,6 +2856,7 @@ lvgl:
                 text: SAFETY --
                 text_font: f12
                 text_color: 0x10B981
+            clickable: false
         - obj:
             width: SIZE_CONTENT
             height: 28
@@ -2800,6 +2883,8 @@ lvgl:
                 text: 'NET VOLUME: ~62 GAL'
                 text_font: f12
                 text_color: 0xCBD5E1
+            clickable: false
+        clickable: false
     - obj:
         x: 14
         y: 66
@@ -2813,6 +2898,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -2851,6 +2937,7 @@ lvgl:
                 text: ''
                 text_font: f11
                 text_color: 0x38BDF8
+            clickable: false
         - obj:
             x: 16
             y: 42
@@ -2864,6 +2951,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - button:
                 id: w_t75_minus
@@ -2980,6 +3068,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 align: LEFT_MID
@@ -3039,6 +3128,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -3066,6 +3156,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 12
@@ -3100,6 +3191,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 12
@@ -3134,6 +3226,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 14
@@ -3169,6 +3262,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_d_heat_i
@@ -3229,6 +3323,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_d_fan_i
@@ -3288,6 +3383,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -3339,6 +3435,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - obj:
                 id: w_t75_d_tds_trk_band
@@ -3354,6 +3451,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - obj:
                 id: w_t75_d_tds_trk_mark
                 x: 0
@@ -3368,6 +3466,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
         - label:
             id: w_t75_d_tds_t1
             x: 16
@@ -3404,6 +3503,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -3455,6 +3555,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - obj:
                 id: w_t75_d_ph_trk_band
@@ -3470,6 +3571,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - obj:
                 id: w_t75_d_ph_trk_mark
                 x: 0
@@ -3484,6 +3586,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
         - label:
             id: w_t75_d_ph_t1
             x: 16
@@ -3519,6 +3622,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - button:
             id: w_t75_tab0
@@ -3639,11 +3743,13 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t75_lg_a_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t75_lg_b
                 width: SIZE_CONTENT
@@ -3672,11 +3778,13 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t75_lg_b_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t75_lg_sp
                 width: SIZE_CONTENT
@@ -3705,11 +3813,14 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t75_lg_sp_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - obj:
             id: w_t75_plot
             x: 16
@@ -3724,6 +3835,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t75_yl0
@@ -3774,6 +3886,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: TRANSP
+                clickable: false
                 widgets:
                 - obj:
                     x: 0
@@ -3788,6 +3901,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 37
@@ -3801,6 +3915,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 74
@@ -3814,6 +3929,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 111
@@ -3827,6 +3943,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 148
@@ -3840,6 +3957,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - line:
                     id: w_t75_ln_sp
                     points:
@@ -3918,6 +4036,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -3991,6 +4110,7 @@ lvgl:
                 text: ''
                 text_font: f12
                 text_color: 0x64748B
+            clickable: false
         - obj:
             x: 214
             y: 88
@@ -4019,6 +4139,7 @@ lvgl:
                 text: ''
                 text_font: f12
                 text_color: 0x10B981
+            clickable: false
         - label:
             x: 430
             y: 16
@@ -4089,6 +4210,7 @@ lvgl:
                 text: Home
                 text_font: f13
                 text_color: 0xF8FAFC
+            clickable: false
         pressed:
           bg_color: 0x212E3D
         on_click:
@@ -4152,11 +4274,14 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - label:
                 id: w_t16_d_link_l
                 text: BLE --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
+        clickable: false
     - obj:
         align: TOP_RIGHT
         x: -16
@@ -4209,6 +4334,7 @@ lvgl:
                 text: SAFETY --
                 text_font: f12
                 text_color: 0x10B981
+            clickable: false
         - obj:
             width: SIZE_CONTENT
             height: 28
@@ -4235,6 +4361,8 @@ lvgl:
                 text: 'NET VOLUME: ~14 GAL (16 GAL TANK)'
                 text_font: f12
                 text_color: 0xCBD5E1
+            clickable: false
+        clickable: false
     - obj:
         x: 14
         y: 66
@@ -4248,6 +4376,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -4286,6 +4415,7 @@ lvgl:
                 text: ''
                 text_font: f11
                 text_color: 0x38BDF8
+            clickable: false
         - obj:
             x: 16
             y: 42
@@ -4299,6 +4429,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - button:
                 id: w_t16_minus
@@ -4415,6 +4546,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 align: LEFT_MID
@@ -4474,6 +4606,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -4501,6 +4634,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 14
@@ -4559,6 +4693,7 @@ lvgl:
                     text: ''
                     text_font: f12
                     text_color: 0xCBD5E1
+                clickable: false
             - label:
                 id: w_t16_d_aligned
                 align: TOP_RIGHT
@@ -4581,6 +4716,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_d_heat_i
@@ -4641,6 +4777,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_d_fan_i
@@ -4700,6 +4837,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -4751,6 +4889,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - obj:
                 id: w_t16_d_tds_trk_band
@@ -4766,6 +4905,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - obj:
                 id: w_t16_d_tds_trk_mark
                 x: 0
@@ -4780,6 +4920,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
         - label:
             id: w_t16_d_tds_t1
             x: 16
@@ -4816,6 +4957,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -4867,6 +5009,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - obj:
                 id: w_t16_d_ph_trk_band
@@ -4882,6 +5025,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - obj:
                 id: w_t16_d_ph_trk_mark
                 x: 0
@@ -4896,6 +5040,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
         - label:
             id: w_t16_d_ph_t1
             x: 16
@@ -4931,6 +5076,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - button:
             id: w_t16_tab0
@@ -5051,11 +5197,13 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t16_lg_a_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t16_lg_b
                 width: SIZE_CONTENT
@@ -5084,11 +5232,13 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t16_lg_b_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
             - obj:
                 id: w_t16_lg_sp
                 width: SIZE_CONTENT
@@ -5117,11 +5267,14 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - label:
                     id: w_t16_lg_sp_l
                     text: ''
                     text_font: f11
                     text_color: 0x94A3B8
+                clickable: false
+            clickable: false
         - obj:
             id: w_t16_plot
             x: 16
@@ -5136,6 +5289,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 id: w_t16_yl0
@@ -5186,6 +5340,7 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: TRANSP
+                clickable: false
                 widgets:
                 - obj:
                     x: 0
@@ -5200,6 +5355,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 37
@@ -5213,6 +5369,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 74
@@ -5226,6 +5383,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 111
@@ -5239,6 +5397,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - obj:
                     x: 0
                     y: 148
@@ -5252,6 +5411,7 @@ lvgl:
                     scrollable: false
                     scrollbar_mode: 'OFF'
                     bg_opa: COVER
+                    clickable: false
                 - line:
                     id: w_t16_ln_sp
                     points:
@@ -5330,6 +5490,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 16
@@ -5403,6 +5564,7 @@ lvgl:
                 text: ''
                 text_font: f12
                 text_color: 0x64748B
+            clickable: false
         - obj:
             x: 214
             y: 88
@@ -5431,6 +5593,7 @@ lvgl:
                 text: ''
                 text_font: f12
                 text_color: 0x10B981
+            clickable: false
         - label:
             x: 430
             y: 16
@@ -5501,6 +5664,7 @@ lvgl:
                 text: Home
                 text_font: f13
                 text_color: 0xF8FAFC
+            clickable: false
         pressed:
           bg_color: 0x212E3D
         on_click:
@@ -5564,11 +5728,14 @@ lvgl:
                 scrollable: false
                 scrollbar_mode: 'OFF'
                 bg_opa: COVER
+                clickable: false
             - label:
                 id: w_wc_state_l
                 text: --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
+        clickable: false
     - obj:
         align: TOP_RIGHT
         x: -16
@@ -5621,6 +5788,7 @@ lvgl:
                 text: 'Hose Batt: --'
                 text_font: f12
                 text_color: 0x10B981
+            clickable: false
         - obj:
             id: w_wc_mqtt_pill
             width: SIZE_CONTENT
@@ -5653,6 +5821,8 @@ lvgl:
                 text: MQTT --
                 text_font: f12
                 text_color: 0x38BDF8
+            clickable: false
+        clickable: false
     - obj:
         x: 14
         y: 66
@@ -5666,6 +5836,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - button:
             id: w_wc_drain
@@ -5711,6 +5882,7 @@ lvgl:
                     text: 'MODE: DRAINING'
                     text_font: f15
                     text_color: 0xFB923C
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -5762,6 +5934,7 @@ lvgl:
                     text: SWITCH TO REFILL
                     text_font: f15
                     text_color: 0x94A3B8
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_click:
@@ -5782,6 +5955,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 20
@@ -5825,6 +5999,7 @@ lvgl:
                 text: WATER REMOVED THIS CHANGE
                 text_font: f11
                 text_color: 0xFB923C
+            clickable: false
         - label:
             id: w_wc_big
             x: 20
@@ -5891,6 +6066,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 14
@@ -5994,6 +6170,7 @@ lvgl:
                 text: SWITCH MODE
                 text_font: f13
                 text_color: 0xCBD5E1
+            clickable: false
         pressed:
           bg_color: 0x212E3D
         on_click:
@@ -6055,6 +6232,7 @@ lvgl:
                 text: (hold)
                 text_font: f11
                 text_color: 0x64748B
+            clickable: false
         pressed:
           bg_color: 0x212E3D
         on_long_press:
@@ -6074,6 +6252,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 18
@@ -6118,6 +6297,7 @@ lvgl:
                 text: --
                 text_font: f11
                 text_color: 0x38BDF8
+            clickable: false
         - obj:
             x: 16
             y: 62
@@ -6131,6 +6311,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - label:
                 x: 14
@@ -6239,6 +6420,7 @@ lvgl:
             scrollable: false
             scrollbar_mode: 'OFF'
             bg_opa: COVER
+            clickable: false
             widgets:
             - button:
                 id: w_ro_minus
@@ -6299,6 +6481,7 @@ lvgl:
                     text: SET TARGET (--)
                     text_font: f13
                     text_color: 0xCBD5E1
+                clickable: false
             - button:
                 id: w_ro_plus
                 align: RIGHT_MID
@@ -6375,6 +6558,7 @@ lvgl:
                     text: (hold)
                     text_font: f11
                     text_color: 0x64748B
+                clickable: false
             pressed:
               bg_color: 0x212E3D
             on_long_press:
@@ -6394,6 +6578,7 @@ lvgl:
         scrollable: false
         scrollbar_mode: 'OFF'
         bg_opa: COVER
+        clickable: false
         widgets:
         - label:
             x: 18
