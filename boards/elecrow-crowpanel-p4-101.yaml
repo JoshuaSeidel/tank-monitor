@@ -211,14 +211,33 @@ touchscreen:
     # V1.2 does: bringing the DSI panel up can disturb a GT911 that is
     # already initialised.
     setup_priority: -200
-    # Every touch in the log (INFO, so it reaches the web log and MQTT):
-    # the quickest way to tell "no touches arrive" from "touches land in
-    # the wrong place". Raw = the GT911's own axes, x/y = after rotation.
+    # Touch diagnostics (INFO, so they reach the web log /events and MQTT).
+    # Logged: every new finger (id + position), every change in the SET of
+    # fingers the GT911 reports, positions at most every 250 ms while held,
+    # and every release, all with millis(). That separates "taps never
+    # arrive", "a phantom finger is held down" (e.g. the case pressing the
+    # glass edge) and "releases never arrive".
     on_touch:
-      - logger.log:
-          level: INFO
-          format: "touch x=%d y=%d (raw %d,%d)"
-          args: [touch.x, touch.y, touch.x_raw, touch.y_raw]
+      - lambda: |-
+          ESP_LOGI("touch", "%lu down id=%u x=%d y=%d raw=%d,%d (fingers=%u)",
+                   (unsigned long) millis(), touch.id, touch.x, touch.y, touch.x_raw, touch.y_raw,
+                   (unsigned) touches.size());
+    on_update:
+      - lambda: |-
+          static uint32_t last_log = 0, last_sig = 0;
+          uint32_t sig = touches.size();
+          for (auto &t : touches) sig = sig * 31 + t.id + 1;
+          const uint32_t now = millis();
+          if (sig != last_sig || now - last_log >= 250) {
+            last_sig = sig; last_log = now;
+            char b[200]; int n = snprintf(b, sizeof(b), "%lu held n=%u:", (unsigned long) now, (unsigned) touches.size());
+            for (auto &t : touches)
+              if (n < (int) sizeof(b) - 40)
+                n += snprintf(b + n, sizeof(b) - n, " [id%u %d,%d st%d]", t.id, t.x, t.y, t.state);
+            ESP_LOGI("touch", "%s", b);
+          }
+    on_release:
+      - lambda: 'ESP_LOGI("touch", "%lu release", (unsigned long) millis());'
 
 binary_sensor:
   # Whether the GT911 came up. A failed controller is otherwise silent: the
