@@ -74,11 +74,13 @@ sensor:
     entity_category: diagnostic
     accuracy_decimals: 0
     filters:
-      # Under 1k is a short (or red on GND and nothing on the pin); over
-      # 1M is an open circuit -- the pin sitting at 3V3 through the 47k.
+      # Under 1k is a short (or red on GND and nothing on the pin). Over
+      # 300k is an open circuit: the pin sits at 3V3 through the 47k, the
+      # ADC tops out near 3.13 V, and that reads as a steady ~870-890k --
+      # not infinity. The highest real value is a 50k part at 32 F, ~168k.
       # Neither is a temperature, so both read unknown.
       - lambda: |-
-          if (std::isnan(x) || x < 1000.0f || x > 1000000.0f) return NAN;
+          if (std::isnan(x) || x < 1000.0f || x > 300000.0f) return NAN;
           return x;
 
   - platform: template
