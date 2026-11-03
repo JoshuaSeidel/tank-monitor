@@ -25,6 +25,7 @@
 #   signal                 HEADER PIN   notes
 #   flow pulse (divided)   27           plain GPIO, interrupt input
 #   battery sense          35           ADC1_CH7, input-only -- change unit
+#   RO water temperature   34           ADC1_CH6, input-only -- RO unit
 #   status LED (on-board)  22           active low
 #
 # Why these:
@@ -40,12 +41,16 @@
 #                  27 does not care.
 #   GPIO35         ADC1 and input-only: exactly a divider input, and it
 #                  keeps output-capable pins free.
+#   GPIO34         the same, for the RO unit's thermistor divider (47k from
+#                  3V, thermistor to GND). No internal pull exists on 34-39,
+#                  so nothing disturbs the divider.
 #
 # The divider's 20k bottom leg holds GPIO27 low with the sensor unplugged,
 # so no internal pull is configured.
 substitutions:
   flow_pin: GPIO27
   battery_pin: GPIO35
+  temp_pin: GPIO34
 
 esp32:
   board: lolin32_lite

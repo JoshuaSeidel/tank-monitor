@@ -12,6 +12,7 @@
 # and wire to that board file's pads -- see water-flow/README.md.
 #
 # No battery package: this unit runs from USB and has no battery to report.
+# ro_temperature.yaml reads the flow sensor's built-in thermistor.
 substitutions:
   # Exactly this name: Home Assistant's entity ids (sensor.water_flow_ro_*)
   # and MQTT topics (water-flow-ro/...) derive from it.
@@ -26,6 +27,7 @@ packages:
       - packages/base.yaml
       - water-flow/packages/flow_meter.yaml
       - water-flow/packages/ro_fill.yaml
+      - water-flow/packages/ro_temperature.yaml
       - water-flow/boards/esp32-lite.yaml
     # refresh defaults to 1d, which would silently build yesterday's config.
     refresh: 0s

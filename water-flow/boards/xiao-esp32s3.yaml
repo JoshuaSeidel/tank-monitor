@@ -7,12 +7,15 @@
 #   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
 #
 # WHAT THIS FILE OWES water-flow/packages/flow_meter.yaml -- the whole
-# board contract is two pins, given as substitutions so the shared package
+# board contract is three pins, given as substitutions so the shared package
 # can stay pin-free:
 #
 #   signal               SILKSCREEN   GPIO
 #   flow pulse (divided)  D3          4     interrupt input, 3.3 V logic
 #   battery sense         D1          2     ADC1 -- change unit only
+#   RO water temperature  D1          2     ADC1 -- RO unit only. The RO unit has
+#                                           no battery, so its thermistor takes
+#                                           the battery pad
 #
 # Why these two:
 #   - D2 (GPIO3) is an ESP32-S3 STRAPPING PIN ({0, 3, 45, 46}). The pulse
@@ -32,6 +35,7 @@
 substitutions:
   flow_pin: GPIO4
   battery_pin: GPIO2
+  temp_pin: GPIO2
 
 esp32:
   board: seeed_xiao_esp32s3

@@ -6,7 +6,7 @@ estimated: *how much water we take out during changes and fillings*.
 
 | Unit | Device name | Line | Power | Measures |
 |---|---|---|---|---|
-| RO | `water-flow-ro` | 1/4" RO product line | USB-C 5 V | per-fill gallons, lifetime gallons, fill-to-target signal |
+| RO | `water-flow-ro` | 1/4" RO product line | USB-C 5 V | per-fill gallons, lifetime gallons, fill-to-target signal, RO water temperature |
 | Change | `water-flow-change` | 1/2" water-change hose, both directions | sealed 1S LiPo | gallons removed / added per change, % changed, net, lifetime |
 
 Both report to Home Assistant over MQTT with discovery, like every other
@@ -25,6 +25,7 @@ calibration constant, because that is how the sensor datasheets state them.
 | `packages/flow_meter.yaml` | shared core: pulse input, flow sessions, flow rate, persistence, network tuning |
 | `packages/battery.yaml` | LiPo voltage / percent / low-battery (change unit only) |
 | `packages/ro_fill.yaml` | RO unit logic |
+| `packages/ro_temperature.yaml` | RO water temperature from the flow sensor's built-in thermistor (RO unit only) |
 | `packages/water_change.yaml` | change unit logic |
 | `boards/esp32-lite.yaml` | AITRIP ESP32 Lite V1.0.0 (LOLIN32 Lite clone) -- **the default** |
 | `boards/xiao-esp32s3.yaml` | Seeed XIAO ESP32-S3 -- alternative |
@@ -68,8 +69,8 @@ LDO budget for the RO unit's boost on 3V3: the ESP32's Wi-Fi peaks at
 sensor 15 mA at 5 V (~88 % efficient) plus a few mA for its power LED.
 All inside the ME6211's 500 mA.
 
-Header pins are labelled with GPIO numbers. **3V, GND, 22, 27, 35** are the
-only five this project uses.
+Header pins are labelled with GPIO numbers. **3V, GND, 22, 27, 34, 35** are
+the only six this project uses (34 on the RO unit, 35 on the change unit).
 
 ---
 
@@ -88,7 +89,9 @@ only five this project uses.
 
 | Part | Notes |
 |---|---|
-| **uxcell 1/4" quick-connect hall flow sensor**, DC 5 V, 0.05-0.8 L/min | in the RO product line. A 100 GPD membrane makes ~0.26 L/min |
+| **uxcell 1/4" quick-connect hall flow sensor**, DC 5 V, 0.05-0.8 L/min | in the RO product line. A 100 GPD membrane makes ~0.26 L/min. Its second red/blue pair is a built-in NTC thermistor |
+| 47 kΩ resistor, ¼ W | thermistor divider top leg |
+| Optional: 100 nF ceramic | across the thermistor, steadies the reading |
 | USB-C 5 V wall adapter, ≥ 500 mA | preferred. The unit draws ~100-130 mA |
 | *or* USB-C power bank with an **always-on / low-current mode** | portable alternative. At ~100 mA this board stays above most banks' auto-off threshold, but the margin is small -- use the mode if the bank has one |
 
@@ -170,8 +173,29 @@ goes to OUT-, which is also the board's GND through IN-.
   yellow ──[ 10 kΩ ]──┬───── 27
                       └─[ 20 kΩ ]── GND
 
+ WATER TEMPERATURE (the sensor's red/blue thermistor pair)
+  3V ──[ 47 kΩ ]──┬───── 34
+                  ├───── thermistor red
+                  └─[ 100 nF, optional ]── GND
+  thermistor blue ────── GND
+
   35 unused (no battery on this unit). Status LED: 22, on the board.
 ```
+
+* **The sensor has two red wires.** The flow sensor's red is +5 V from the
+  boost; the thermistor's red is the one paired with the blue. 5 V on 34
+  can damage the pin -- trace each red back to the sensor before
+  soldering. The thermistor itself has no polarity: red and blue either
+  way round.
+* The 47 kΩ's 3V end shares the 3V pin with the boost's IN+.
+* uxcell does not say whether the thermistor is a 10k or a 50k part, and
+  no meter is needed to find out: the firmware tells them apart by
+  resistance (a 10k part reads under 30 kΩ and a 50k part over it, from
+  36 °F to 98 °F). 47 kΩ keeps pin 34 at ~0.4-2.3 V for either part over
+  that range. Once "Thermistor Resistance" has shown which it is, set
+  **Thermistor Type** to it rather than leaving Auto.
+* The thermistor is in the sensor body: it reads the water while water
+  flows, and drifts to room temperature when the line is idle.
 
 ### Change unit -- `water-flow-change`
 
@@ -265,7 +289,8 @@ finish the change in progress, not to start another.
 | Signal | ESP32 Lite (default) | XIAO ESP32-S3 | XIAO ESP32-C3 |
 |---|---|---|---|
 | Flow pulse (divided) | GPIO27 | D3 = GPIO4 | D3 = GPIO5 |
-| Battery sense (ADC1) | GPIO35 | D1 = GPIO2 | D1 = GPIO3 |
+| Battery sense (ADC1), change unit | GPIO35 | D1 = GPIO2 | D1 = GPIO3 |
+| RO water temperature (ADC1), RO unit | GPIO34 | D1 = GPIO2 | D1 = GPIO3 |
 | Status LED | GPIO22 (on-board, active low) | GPIO21 (on-board) | none |
 | Sensor 5 V | boost from 3V (RO) / switched battery (change) | see below | see below |
 
@@ -350,6 +375,11 @@ rather than trusting the moulded lines.
    **Measured Step**, press calibrate again. "Refill Pulses per Litre" is
    set.
 
+**RO water temperature** -- optional. While RO water is flowing, check it
+with a trusted thermometer in a cup at the outlet, and enter the
+difference (true minus shown) in **Temperature Offset**. The tank's
+probe in a cup of that same water works too.
+
 Calibration rejects nonsense (no measurement entered, < 100 pulses, or a
 result outside the plausible range) and logs why. The lifetime totals are
 never restated -- Home Assistant reads any decrease in a `total_increasing`
@@ -363,7 +393,7 @@ mark; repeat the same procedure if it drifts.
 
 | Value | Persisted |
 |---|---|
-| calibration constants, fill target, tank volume, mode | yes |
+| calibration constants, fill target, tank volume, mode, thermistor type, temperature offset | yes |
 | last fill / last step (as raw pulses), this change's removed / added | yes |
 | lifetime totals | yes |
 | live flow rate, Flowing, measured-gallons input | no |
@@ -407,6 +437,10 @@ entity name. Every unit also gets the repo-standard diagnostics from
 | `number.water_flow_ro_calibration_pulses_per_litre` | | config |
 | `number.water_flow_ro_measured_fill` | gal | config |
 | `button.water_flow_ro_calibrate_from_measured_fill` | | config |
+| `sensor.water_flow_ro_water_temperature` | °F | water temperature while flowing, room temperature when idle |
+| `sensor.water_flow_ro_thermistor_resistance` | Ω | diagnostic; unknown if the thermistor is open or shorted |
+| `select.water_flow_ro_thermistor_type` | | config: Auto / 10k / 50k |
+| `number.water_flow_ro_temperature_offset` | °F | config: correction against a trusted thermometer |
 
 ### `water-flow-change` (friendly name "Water Flow Change")
 

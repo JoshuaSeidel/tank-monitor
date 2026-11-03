@@ -1,0 +1,140 @@
+# RO water temperature -- the NTC thermistor built into the uxcell 1/4"
+# flow sensor (its separate red/blue pair). Included by the RO unit only.
+#
+# Why it is worth reading: membrane output falls ~3 % per degree C colder
+# feed, so a slow winter fill is visible as cold water rather than a fouled
+# membrane, and water topped off straight from the line can be checked
+# against the shrimp's ~75 F before it goes in.
+#
+# Hardware: 47k from 3V3 to temp_pin, thermistor (red/blue, either way
+# round) from temp_pin to GND. A 100 nF from temp_pin to GND is optional.
+#
+#   3V3 --[ 47k ]--+-- temp_pin
+#                  |
+#             thermistor
+#                  |
+#                 GND
+#
+# uxcell does not say whether the part is a 10k or a 50k NTC, so the board
+# works it out: from 36 F to 98 F a 10k part reads under 30k and a 50k part
+# over 30k, with no overlap. 47k keeps the pin at ~0.4-2.3 V for either part
+# over the whole range -- inside the ADC's accurate span at 12 dB. "Thermistor
+# Type" pins it once it is known; "Thermistor Resistance" is the reading to
+# decide it from.
+#
+# The thermistor sits in the sensor body, so this is the water temperature
+# while water flows. With the line idle it drifts to room temperature.
+substitutions:
+  # Fixed resistor between 3V3 and temp_pin.
+  ntc_fixed_resistor: 47kOhm
+  # Beta. 3950 is the common value for both 10k and 50k parts of this kind;
+  # an error here is ~0 at 77 F and grows away from it, which the offset
+  # below takes out at the temperature it is set at.
+  ntc_beta: "3950"
+  # Auto-detect boundary between a 10k and a 50k part.
+  ntc_auto_threshold_ohms: "30000"
+
+globals:
+  # 0 = Auto, 1 = 10k, 2 = 50k.
+  - id: ro_ntc_type
+    type: int
+    restore_value: true
+    initial_value: '0'
+  # Stored in Celsius, shown in Fahrenheit -- packages/sensors.yaml's
+  # cal_temp_offset_c does the same.
+  - id: ro_temp_offset_c
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+
+sensor:
+  - platform: adc
+    id: ro_ntc_voltage
+    pin: ${temp_pin}
+    attenuation: 12db
+    internal: true
+    update_interval: 2s
+    filters:
+      # Ten samples over 20 s, published every 10 s: the reading moves with
+      # the water, not with ADC noise.
+      - sliding_window_moving_average:
+          window_size: 10
+          send_every: 5
+
+  - platform: resistance
+    id: ro_ntc_resistance
+    name: "Thermistor Resistance"
+    sensor: ro_ntc_voltage
+    # Thermistor between the pin and GND, fixed resistor above it.
+    configuration: DOWNSTREAM
+    resistor: ${ntc_fixed_resistor}
+    reference_voltage: 3.3V
+    icon: "mdi:omega"
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    filters:
+      # Under 1k is a short (or red on GND and nothing on the pin); over
+      # 1M is an open circuit -- the pin sitting at 3V3 through the 47k.
+      # Neither is a temperature, so both read unknown.
+      - lambda: |-
+          if (std::isnan(x) || x < 1000.0f || x > 1000000.0f) return NAN;
+          return x;
+
+  - platform: template
+    name: "Water Temperature"
+    id: ro_water_temp
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      const float r = id(ro_ntc_resistance).state;
+      if (std::isnan(r)) return NAN;
+      int type = id(ro_ntc_type);
+      if (type == 0) type = r < ${ntc_auto_threshold_ohms}.0f ? 1 : 2;
+      const float r25 = type == 1 ? 10000.0f : 50000.0f;
+      const float inv_t = 1.0f / 298.15f + logf(r / r25) / ${ntc_beta}.0f;
+      const float c = 1.0f / inv_t - 273.15f + id(ro_temp_offset_c);
+      return c * 9.0f / 5.0f + 32.0f;
+
+select:
+  - platform: template
+    name: "Thermistor Type"
+    id: ro_ntc_type_select
+    icon: "mdi:thermometer-lines"
+    entity_category: config
+    options:
+      - "Auto"
+      - "10k"
+      - "50k"
+    update_interval: 60s
+    lambda: |-
+      const int t = id(ro_ntc_type);
+      return std::string(t == 1 ? "10k" : t == 2 ? "50k" : "Auto");
+    set_action:
+      - lambda: |-
+          id(ro_ntc_type) = x == "10k" ? 1 : x == "50k" ? 2 : 0;
+          ESP_LOGI("ro", "thermistor type -> %s", x.c_str());
+      - component.update: ro_ntc_type_select
+      - component.update: ro_water_temp
+      - script.execute: flow_save_now
+
+number:
+  - platform: template
+    name: "Temperature Offset"
+    id: ro_temp_offset_num
+    icon: "mdi:thermometer-plus"
+    entity_category: config
+    mode: box
+    min_value: -10.0
+    max_value: 10.0
+    step: 0.1
+    unit_of_measurement: "°F"
+    update_interval: 60s
+    lambda: "return id(ro_temp_offset_c) * 9.0f / 5.0f;"
+    set_action:
+      - lambda: id(ro_temp_offset_c) = x * 5.0f / 9.0f;
+      - component.update: ro_temp_offset_num
+      - component.update: ro_water_temp
+      - script.execute: flow_save_now
