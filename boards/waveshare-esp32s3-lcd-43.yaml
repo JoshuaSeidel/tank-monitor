@@ -64,6 +64,23 @@ substitutions:
   # fan duty and the light level instead. Pasted into the lambdas as a C++
   # bool, so it must be exactly true or false.
   dual_system: "true"
+  # The header on every page. f_small's glyph set: letters, digits, space
+  # and .,:-+/%° only -- an apostrophe would silently not draw.
+  tank_title: "Display Tank"
+  # Single-system only (dual_system "false"). The heater sits at
+  # heater_inset_in from the LEFT; the probe and the rim-clipped cooling
+  # fan are placed from the left as well.
+  probe_from_left_in: "10"
+  fan_from_left_in:   "16"
+  # Interior height, inches. Single-system only: the drawing takes its
+  # proportions from width:height. The 75 keeps its fixed frame.
+  tank_height_in: "21"
+  # "true": a dual sponge filter -- two sponges on one lift tube -- standing
+  # on the substrate instead of the intake and spray bar. Centred at
+  # sponge_from_left_in, sponge_spacing_in centre to centre.
+  sponge_filters: "false"
+  sponge_from_left_in: "12"
+  sponge_spacing_in: "4.5"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -226,7 +243,7 @@ display:
 
           // ---- static chrome: once per page show ----
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             it.print(612, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "BLE");
             it.print(668, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LINK");
             frect(0, 432, 800, 1, HAIR);
@@ -371,7 +388,8 @@ display:
       - id: page_vessel
         lambda: |-
           float *SLOTS = id(p2_last);
-          enum { SLOT_CLOCK = 0, SLOT_TA, SLOT_TB, SLOT_G, SLOT_GH, SLOT_GI, SLOT_HEAT, SLOT_FAN };
+          enum { SLOT_CLOCK = 0, SLOT_TA, SLOT_TB, SLOT_G, SLOT_GH, SLOT_GI, SLOT_HEAT, SLOT_FAN,
+                 SLOT_FAN_ON };
           const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
           const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
           const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
@@ -437,7 +455,7 @@ display:
           };
 
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             // Labels sit under the hardware they name, so they are placed
             // from the same inch->pixel mapping the tank uses (see below).
             {
@@ -445,14 +463,26 @@ display:
               const int hx_a = 130 + (int) (${heater_inset_in} * ppi);
               const int hx_b = 446 - (int) (${heater_inset_in} * ppi);
               const int ix   = 130 + (int) (${intake_from_left_in} * ppi);
-              it.print(ix,   418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
               if (${dual_system}) {
+                it.print(ix,   418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
                 it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
                 it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES  |  SPRAY BAR");
                 it.print(hx_b, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
               } else {
+                // Two rows, alternating, so neighbours on a narrow tank do
+                // not print over each other.
+                const int px = 130 + (int) (${probe_from_left_in} * ppi);
+                const int fx = 130 + (int) (${fan_from_left_in} * ppi);
                 it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HEATER");
-                it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBE  |  SPRAY BAR");
+                it.print(px,   418, id(f_micro), MUTED, TextAlign::CENTER, "PROBE");
+                it.print(fx,   404, id(f_micro), MUTED, TextAlign::CENTER, "FAN");
+                if (${sponge_filters}) {
+                  it.print(130 + (int) (${sponge_from_left_in} * ppi), 404, id(f_micro), MUTED,
+                           TextAlign::CENTER, "SPONGE FILTER");
+                } else {
+                  it.print(ix,  418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
+                  it.print(288, 404, id(f_micro), MUTED, TextAlign::CENTER, "SPRAY BAR");
+                }
               }
             }
             frect(0, 432, 800, 1, HAIR);
@@ -468,12 +498,36 @@ display:
           const float gh = id(r_grad_heating), gi = id(r_grad_idle);
 
           // ---- the tank: only when the glow needs to change ----
-          const bool tank_redraw = changed(SLOTS, SLOT_HEAT, id(r_heat_on) ? 1.0f : 0.0f);
+          // Both evaluated every frame: || would skip the fan's slot update
+          // whenever the heater had already changed. The fan is only drawn
+          // on a single-system tank, so the 75 never repaints for it.
+          const bool heat_changed = changed(SLOTS, SLOT_HEAT, id(r_heat_on) ? 1.0f : 0.0f);
+          const bool fan_changed = !${dual_system} &&
+                                   changed(SLOTS, SLOT_FAN_ON, id(r_fan_on) ? 1.0f : 0.0f);
+          const bool tank_redraw = heat_changed || fan_changed;
+          // Top of the front glass. Fixed on the 75; on a single-system tank
+          // it comes from the tank's width:height, on a 528 px wide opening.
+          const int TANK_TOP = ${dual_system} ? 56
+              : 386 - std::min(330, std::max(150, (int) (528.0f * ${tank_height_in} / ${tank_width_in})));
           if (tank_redraw) {
             // ---- tank geometry ----
-            const int FX0 = 24, FY0 = 56, FX1 = 552, FY1 = 386;   // front opening
-            const int BX0 = 130, BY0 = 104, BX1 = 446, BY1 = 302;  // back wall
+            // The 75 keeps its fixed frame. A single-system tank is drawn to
+            // its own width:height (TANK_TOP), standing on the same floor
+            // line, and the back wall is the front scaled 0.6 about the
+            // vanishing point -- which is exactly how 104/302 fall out of
+            // 56/386.
+            const int FX0 = 24, FY0 = TANK_TOP, FX1 = 552, FY1 = 386;   // front opening
+            const int vpy = FY0 + (int) ((FY1 - FY0) * 120.0f / 330.0f);
+            const int BX0 = 130, BX1 = 446;                              // back wall
+            const int BY0 = ${dual_system} ? 104 : vpy + (int) ((FY0 - vpy) * 0.6f);
+            const int BY1 = ${dual_system} ? 302 : vpy + (int) ((FY1 - vpy) * 0.6f);
             const Color WATER(20, 74, 106);
+            // Every height below was laid out on the 75's frame. These carry
+            // a y from that frame onto this one: vy for anything on the back
+            // wall, fy for the front glass. Both are the identity on the 75.
+            auto vy = [&](int y) { return BY0 + (int) ((y - 104) * (float) (BY1 - BY0) / 198.0f); };
+            auto fy = [&](int y) { return FY0 + (int) ((y - 56) * (float) (FY1 - FY0) / 330.0f); };
+            const float fs = (float) (FY1 - FY0) / 330.0f;
 
             // Every quad below is drawn as ONE bulk span per row. filled_triangle
             // is per-pixel on this driver and the two panes alone were ~55k
@@ -513,7 +567,7 @@ display:
             }
 
             // Substrate: black sand cap over Stratum, banked up at the back.
-            const int SFY = 356, SBY = 296;
+            const int SFY = fy(356), SBY = vy(296);
             for (int y = SBY; y <= FY1; y++) {
               const float p = (float) (y - SBY) / (FY1 - SBY);
               const int xl = (int) (BX0 + (FX0 - BX0) * p);
@@ -521,9 +575,10 @@ display:
               frect(xl, y, xr - xl, 1, mix(Color(53, 67, 78), Color(36, 36, 42), p));
             }
             // Cross-section through the front glass: 1.5in sand over 2in Stratum.
-            frect(FX0, SFY, FX1 - FX0, 12, Color(38, 38, 44));
-            frect(FX0, SFY + 12, FX1 - FX0, 16, Color(45, 34, 24));
-            frect(FX0, SFY + 12, FX1 - FX0, 1, Color(74, 58, 42));
+            const int sand = (int) (12 * fs), soil = (int) (16 * fs);
+            frect(FX0, SFY, FX1 - FX0, sand, Color(38, 38, 44));
+            frect(FX0, SFY + sand, FX1 - FX0, soil, Color(45, 34, 24));
+            frect(FX0, SFY + sand, FX1 - FX0, 1, Color(74, 58, 42));
 
             // Inch -> pixel on the back wall. The back wall spans BX0..BX1 and
             // represents the tank's full interior width.
@@ -533,28 +588,28 @@ display:
             const Color HOSE(31, 63, 80);
 
             // Spray bar: centred, ${spray_bar_len_in} in long, fed from its middle
-            // by a pipe down from the rim.
-            {
+            // by a pipe down from the rim. Not on a sponge-filtered tank.
+            if (!${sponge_filters}) {
               const int half = (int) (${spray_bar_len_in} * ppi / 2.0f);
-              frect(cxm - 4, BY0, 8, 118 - BY0, HOSE);
-              frect(cxm - half, 118, 2 * half, 8, Color(23, 67, 90));
+              frect(cxm - 4, BY0, 8, vy(118) - BY0, HOSE);
+              frect(cxm - half, vy(118), 2 * half, 8, Color(23, 67, 90));
               for (int x = cxm - half + 8; x <= cxm + half - 8; x += 14)
-                it.filled_circle(x, 128, 2, Color(58, 125, 153));
+                it.filled_circle(x, vy(128), 2, Color(58, 125, 153));
             }
 
             // Intake, ${intake_from_left_in} in from the LEFT end: a tube from
             // the rim down to about half depth, and a slotted strainer that
             // hangs well clear of the substrate. It is a thing hung from the
             // rim, not a bar standing on the floor.
-            {
+            if (!${sponge_filters}) {
               const int ix = BX0 + (int) (${intake_from_left_in} * ppi);
-              frect(ix - 4, BY0, 8, 226 - BY0, Color(18, 48, 63));
-              frect(ix - 3, BY0, 1, 226 - BY0, Color(46, 88, 108));   // highlight
+              frect(ix - 4, BY0, 8, vy(226) - BY0, Color(18, 48, 63));
+              frect(ix - 3, BY0, 1, vy(226) - BY0, Color(46, 88, 108));   // highlight
               // Strainer: wider cylinder, slotted, rounded off at the bottom.
-              frect(ix - 8, 226, 16, 34, Color(24, 58, 74));
-              for (int y = 231; y < 258; y += 5)
+              frect(ix - 8, vy(226), 16, vy(260) - vy(226), Color(24, 58, 74));
+              for (int y = vy(231); y < vy(258); y += 5)
                 frect(ix - 6, y, 12, 1, Color(58, 125, 153));
-              it.filled_circle(ix, 260, 8, Color(24, 58, 74));
+              it.filled_circle(ix, vy(260), 8, Color(24, 58, 74));
             }
 
             // Heaters: vertical, one near each end.
@@ -573,12 +628,12 @@ display:
                     // Clip to the back wall: the heaters sit near the ends
                     // and the glow would otherwise paint onto the side panes.
                     const int x0 = std::max(cx - half, BX0), x1 = std::min(cx + half, BX1);
-                    frect(x0, 216 + dy, x1 - x0, 1, c);
+                    frect(x0, vy(216) + dy, x1 - x0, 1, c);
                   }
                 }
               }
-              frect(cx - 6, 150, 12, 108, Color(45, 77, 95));
-              frect(cx - 4, 166, 8, 84, on ? Color(232, 130, 63) : Color(70, 86, 96));
+              frect(cx - 6, vy(150), 12, vy(258) - vy(150), Color(45, 77, 95));
+              frect(cx - 4, vy(166), 8, vy(250) - vy(166), on ? Color(232, 130, 63) : Color(70, 86, 96));
             };
             // ${heater_inset_in} in from each end -- near the corners, not inboard.
             // A single-system tank has the left one only.
@@ -588,11 +643,54 @@ display:
 
             // Probes: mirrored inboard, lateral to each heater.
             auto probe = [&](int cx) {
-              frect(cx - 4, 172, 8, 66, Color(38, 54, 63));
-              it.filled_circle(cx, 242, 6, Color(74, 163, 240));
+              frect(cx - 4, vy(172), 8, vy(238) - vy(172), Color(38, 54, 63));
+              it.filled_circle(cx, vy(242), 6, Color(74, 163, 240));
             };
-            probe(250);
-            if (${dual_system}) probe(326);
+            if (${dual_system}) { probe(250); probe(326); }
+            else probe(BX0 + (int) (${probe_from_left_in} * ppi));
+
+            // Dual sponge filter: two foam cylinders on one base, their tops
+            // joined by a T into a single lift tube, the airline down into it
+            // from the rim. Drawn after the heater so its glow stays behind.
+            if (${sponge_filters}) {
+              const int cx = BX0 + (int) (${sponge_from_left_in} * ppi);
+              const int off = (int) (${sponge_spacing_in} * ppi / 2.0f);   // centre to each sponge
+              const int w = std::max(20, (int) (3.0f * ppi));                // ~3 in foam
+              const int top = vy(226), bot = vy(300), tee = top - 14, lift = vy(132);
+              const Color CAP(40, 52, 58), FOAM(46, 58, 54), PORE(30, 38, 36);
+              const Color TUBE(70, 120, 140), SHINE(120, 175, 195);
+              frect(cx + 6, BY0, 2, lift - BY0, Color(150, 170, 180));        // airline
+              frect(cx - 4, lift, 8, tee - lift, TUBE);                        // lift tube
+              frect(cx - 3, lift, 1, tee - lift, SHINE);
+              for (int y = lift + 8; y < tee - 4; y += 12)                     // bubbles
+                it.filled_circle(cx, y, 2, Color(190, 225, 240));
+              frect(cx - off - 4, tee, 2 * off + 8, 7, TUBE);                  // the T
+              frect(cx - off - 4, tee, 2 * off + 8, 1, SHINE);
+              for (int sx : {cx - off, cx + off}) {
+                frect(sx - 4, tee + 7, 8, top - 6 - tee - 7, TUBE);            // riser
+                frect(sx - w / 2 - 2, top - 6, w + 4, 6, CAP);
+                frect(sx - w / 2, top, w, bot - top, FOAM);
+                for (int y = top + 5; y < bot - 2; y += 7)
+                  for (int x = sx - w / 2 + 4 + ((y / 7) & 1) * 3; x < sx + w / 2 - 2; x += 6)
+                    frect(x, y, 2, 2, PORE);
+              }
+              frect(cx - off - w / 2 - 4, bot, 2 * off + w + 8, 5, CAP);      // shared base
+            }
+
+            // Cooling fan clipped to the back rim, blowing across the
+            // surface. Blue while it runs. Single-system only: the 75 has
+            // its fans off the drawing.
+            if (!${dual_system}) {
+              const int fx = BX0 + (int) (${fan_from_left_in} * ppi), fy = BY0 - 30;
+              const Color BODY(40, 52, 60);
+              frect(fx - 3, BY0 - 4, 6, 18, BODY);          // clip over the glass
+              frect(fx - 2, fy + 10, 4, BY0 - 4 - fy - 10, BODY);   // arm
+              it.filled_circle(fx, fy, 15, BODY);
+              it.filled_circle(fx, fy, 12, id(r_fan_on) ? Color(57, 135, 229) : Color(70, 86, 96));
+              for (int a = 45; a < 405; a += 90)
+                it.line_at_angle(fx, fy, a, 3, 11, BODY);
+              it.filled_circle(fx, fy, 3, BODY);
+            }
 
             // Rimless glass: thin bright edges, no plastic chrome.
             const Color EDGE(143, 196, 220);
@@ -604,7 +702,7 @@ display:
             it.line(BX0, BY0, BX0, BY1, EDGE);
             it.line(BX0, BY1, FX0, FY1, EDGE);
             it.line(BX0, BY0, BX1, BY0, EDGE);
-            frect(282, FY0, 13, 48, Color(168, 216, 236));
+            frect(282, FY0, 13, BY0 - FY0, Color(168, 216, 236));
 
           }
 
@@ -617,7 +715,10 @@ display:
             if (std::isnan(v)) it.print(x + 42, y + 16, id(f_med), MUTED, TextAlign::CENTER, "--");
             else it.printf(x + 42, y + 16, id(f_med), INK, TextAlign::CENTER, "%.1f", v);
           };
-          callout(SLOT_TA, 176, 70, ta_f);
+          // Single-system: the one readout sits over the one probe.
+          callout(SLOT_TA, ${dual_system} ? 176
+                  : 130 + (int) (${probe_from_left_in} * (446.0f - 130.0f) / ${tank_width_in}) - 42,
+                  ${dual_system} ? 70 : std::max(44, TANK_TOP - 40), ta_f);
           if (${dual_system}) callout(SLOT_TB, 330, 70, tb_f);
 
           // ---- right rail: three independent cards ----
@@ -741,7 +842,7 @@ display:
           }
 
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "Display Tank");
+            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             frect(0, 432, 800, 1, HAIR);
             it.filled_circle(722, 457, 3, TRACK);
             it.filled_circle(740, 457, 3, TRACK);
@@ -834,7 +935,7 @@ globals:
     type: float[13]
     restore_value: false
   - id: p2_last
-    type: float[8]
+    type: float[9]
     restore_value: false
   - id: p3_last
     type: float[11]
@@ -929,7 +1030,8 @@ font:
   - file: "gfonts://Inter@600"
     id: f_big
     size: 38
-    glyphs: "0123456789 .,:-+°"
+    # % for the single-system heater/fan duty cards.
+    glyphs: "0123456789 .,:-+°%"
   - file: "gfonts://Inter@600"
     id: f_hero
     size: 78
