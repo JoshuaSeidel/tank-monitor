@@ -1,0 +1,15 @@
+# Local build of tank-monitor-15g-panel-remote.yaml against this checkout
+# instead of git main. For compile checks before pushing.
+substitutions:
+  device_name: tank-monitor-15g
+  friendly_name: Tank Monitor 15G Panel
+  s3_ble_mac: "E0:72:A1:F7:D6:86"
+  dual_system: "false"
+  tank_width_in: "24"
+
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui.yaml
+  link: !include packages/ble_link_panel_v3.yaml
+  chem: !include packages/chemistry.yaml
+  board: !include boards/waveshare-esp32s3-lcd-43.yaml

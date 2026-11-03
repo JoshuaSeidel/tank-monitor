@@ -1,0 +1,13 @@
+# Local build of tank-monitor-15g-remote.yaml against this checkout instead
+# of git main. Same files, same order. For compile checks before pushing.
+substitutions:
+  device_name: tank-monitor-15-gallon
+  friendly_name: Tank Monitor 15 Gallon
+
+packages:
+  base: !include packages/base.yaml
+  webui: !include packages/webui.yaml
+  control: !include packages/control.yaml
+  sensors: !include packages/sensors.yaml
+  link: !include packages/ble_link_v3.yaml
+  board: !include boards/xiao-esp32s3-15g.yaml

@@ -59,6 +59,11 @@ substitutions:
   heater_inset_in:   "4"     # each heater this far in from its end
   spray_bar_len_in:  "12"    # centred on the back wall
   intake_from_left_in: "1"   # intake pipe, measured from the LEFT end
+  # "true": two heaters, two probes, the L-R gradient -- the 75's layout.
+  # "false": one heater, one probe; the half/gradient cards show heater and
+  # fan duty and the light level instead. Pasted into the lambdas as a C++
+  # bool, so it must be exactly true or false.
+  dual_system: "true"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -158,7 +163,7 @@ display:
         lambda: |-
           float *SLOTS = id(p1_last);
           enum { SLOT_CLOCK = 0, SLOT_T, SLOT_SP, SLOT_STATE, SLOT_TB, SLOT_G, SLOT_PH, SLOT_TDS,
-                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE };
+                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE, SLOT_AUX };
           const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
           const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
           const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
@@ -300,6 +305,13 @@ display:
               it.print(x + 16 + 96, y + h / 2 + 14, id(f_small), MUTED, TextAlign::CENTER_LEFT, unit);
             }
           };
+          if (!${dual_system}) {
+            // One heater, one probe: no halves and no gradient to show, so
+            // the same three cards carry the relays' duty and the light.
+            tile(SLOT_TB,  1, 326,  46, 224, 124, "HEATER DUTY", id(r_heat), "%.0f", "%", HEAT);
+            tile(SLOT_AUX, 1, 558,  46, 224, 124, "FAN DUTY",    id(r_fan),  "%.0f", "%", BLUE);
+            tile(SLOT_G,   1, 326, 178, 456, 124, "LIGHT", id(tank_lux).state, "%.0f", "lx", INK);
+          } else {
           tile(SLOT_TB, 10, 558, 46, 224, 124, "RIGHT HALF", tb_f, "%.1f", "F", INK);
           {
             // Left half shows the same t_f the gauge does, but the gauge
@@ -333,6 +345,7 @@ display:
               else         frect(bx + half - len, by, len, 5, BLUE);
               frect(bx + half, by - 4, 2, 13, MUTED);
             }
+          }
           }
           tile(SLOT_PH,  100, 326, 310, 224, 116, "PH",  id(water_ph).state, "%.2f", "", INK);
           tile(SLOT_TDS,   1, 558, 310, 224, 116, "TDS", id(tds_mean).state, "%.0f", "ppm", INK);
@@ -433,9 +446,14 @@ display:
               const int hx_b = 446 - (int) (${heater_inset_in} * ppi);
               const int ix   = 130 + (int) (${intake_from_left_in} * ppi);
               it.print(ix,   418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
-              it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
-              it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES  |  SPRAY BAR");
-              it.print(hx_b, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
+              if (${dual_system}) {
+                it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
+                it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES  |  SPRAY BAR");
+                it.print(hx_b, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
+              } else {
+                it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HEATER");
+                it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBE  |  SPRAY BAR");
+              }
             }
             frect(0, 432, 800, 1, HAIR);
             it.filled_circle(722, 457, 3, TRACK);
@@ -563,8 +581,10 @@ display:
               frect(cx - 4, 166, 8, 84, on ? Color(232, 130, 63) : Color(70, 86, 96));
             };
             // ${heater_inset_in} in from each end -- near the corners, not inboard.
+            // A single-system tank has the left one only.
             heater(BX0 + (int) (${heater_inset_in} * ppi), id(r_heat_on));
-            heater(BX1 - (int) (${heater_inset_in} * ppi), id(r_heat_on));
+            if (${dual_system})
+              heater(BX1 - (int) (${heater_inset_in} * ppi), id(r_heat_on));
 
             // Probes: mirrored inboard, lateral to each heater.
             auto probe = [&](int cx) {
@@ -572,7 +592,7 @@ display:
               it.filled_circle(cx, 242, 6, Color(74, 163, 240));
             };
             probe(250);
-            probe(326);
+            if (${dual_system}) probe(326);
 
             // Rimless glass: thin bright edges, no plastic chrome.
             const Color EDGE(143, 196, 220);
@@ -598,7 +618,7 @@ display:
             else it.printf(x + 42, y + 16, id(f_med), INK, TextAlign::CENTER, "%.1f", v);
           };
           callout(SLOT_TA, 176, 70, ta_f);
-          callout(SLOT_TB, 330, 70, tb_f);
+          if (${dual_system}) callout(SLOT_TB, 330, 70, tb_f);
 
           // ---- right rail: three independent cards ----
           {
@@ -617,6 +637,21 @@ display:
                        TextAlign::CENTER_LEFT, id(r_heat_on) ? "HEATING" : "IDLE");
             }
           }
+          if (!${dual_system}) {
+            // No gradient on one probe: the two lower cards are the relays.
+            if (changed(SLOTS, SLOT_G, q(id(r_heat), 1))) {
+              rr(568, 178, 214, 96, 15, CARD);
+              it.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATER DUTY");
+              if (std::isnan(id(r_heat))) it.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              else it.printf(584, 240, id(f_big), HEAT, TextAlign::CENTER_LEFT, "%.0f%%", id(r_heat));
+            }
+            if (changed(SLOTS, SLOT_FAN, q(id(r_fan), 1))) {
+              rr(568, 284, 214, 102, 15, CARD);
+              it.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "FAN DUTY");
+              if (std::isnan(id(r_fan))) it.print(584, 352, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              else it.printf(584, 352, id(f_big), BLUE, TextAlign::CENTER_LEFT, "%.0f%%", id(r_fan));
+            }
+          } else {
           if (changed(SLOTS, SLOT_G, q(g, 100))) {
             rr(568, 178, 214, 96, 15, CARD);
             it.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
@@ -634,6 +669,7 @@ display:
               if (std::isnan(gi)) it.print(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
               else it.printf(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "%+.2f", gi);
             }
+          }
           }
 
       # ===========================================================
@@ -795,7 +831,7 @@ globals:
   # Last-drawn value per element, per page. Not restored: the framebuffer
   # is garbage after a reboot and panel_dirty forces a full paint anyway.
   - id: p1_last
-    type: float[12]
+    type: float[13]
     restore_value: false
   - id: p2_last
     type: float[8]

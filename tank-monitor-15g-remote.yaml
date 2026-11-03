@@ -1,0 +1,38 @@
+# KAIDEN'S 15 GAL controller -- the old nano XIAO ESP32-S3, reused.
+# Put THIS in the ESPHome dashboard.
+#
+# Heater, fan, one temperature probe, TDS, BH1750 lux. No pH yet: the wire
+# is run to D3 but nothing is configured on it (see the board file).
+#
+# Everything below packages: is pulled from git on every build; this wrapper
+# is the one file that is not, so nothing load-critical lives here.
+#
+# device_name is load-bearing: MQTT topic prefix, discovery ids, mDNS host
+# and LWT all derive from it. This board last ran as tank-monitor-s3, and
+# that name now belongs to the nano's all-in-one -- reusing it would put two
+# devices on one set of entities. Must not collide with tank-monitor-75-gallon,
+# -75g, -s3, -panel or any other tank-monitor-*.
+#
+# The panel needs this board's BLE MAC. After the first flash, read
+# "Controller BLE MAC" (diagnostic) or the boot log line
+# "[esp32_ble:...] ESP-IDF BLE MAC address: ..." and put it in
+# tank-monitor-15g-panel-remote.yaml as s3_ble_mac.
+substitutions:
+  device_name: tank-monitor-15-gallon
+  friendly_name: Tank Monitor 15 Gallon
+
+packages:
+  tank_monitor:
+    url: https://github.com/JoshuaSeidel/tank-monitor
+    ref: main
+    files:
+      - packages/base.yaml
+      - packages/webui.yaml
+      - packages/control.yaml
+      - packages/sensors.yaml
+      # v3, because the 4.3" panel this tank inherits speaks nothing else.
+      # The board file supplies the second-probe and pH fields as not fitted.
+      - packages/ble_link_v3.yaml
+      - boards/xiao-esp32s3-15g.yaml
+    # refresh defaults to 1d, which would silently build yesterday's config.
+    refresh: 0s
