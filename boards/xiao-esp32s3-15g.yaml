@@ -22,7 +22,7 @@
 #   I2C SDA (BH1750)    D6           43     orange
 #   I2C SCL (BH1750)    D7           44     brown
 #   heater relay IN+    D8           7      white
-#   fan relay IN+       D9           8      (seventh wire)
+#   fan relay IN+       D9           8      gray
 #
 # Spare: D0 (GPIO1), D4 (GPIO5), D10 (GPIO9).
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and nothing may hold it
