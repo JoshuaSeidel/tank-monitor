@@ -22,6 +22,14 @@
 # turns that into today / this month correctly whether or not this board
 # was powered at midnight -- which an on-device daily counter on a board
 # that is off most of the day could not.
+#
+# RO water temperature lives in ro_temperature.yaml and comes in through
+# this file, not through the wrapper: the ESPHome dashboard keeps its own
+# copy of the wrapper and pulls only packages/ and boards/ from git, so a
+# package added to the wrapper's file list never reaches a dashboard build.
+packages:
+  temperature: !include ro_temperature.yaml
+
 substitutions:
   # ---------------------------------------------------------------------
   # Calibration starting point -- CORRECT IT AFTER THE FIRST MEASURED FILL

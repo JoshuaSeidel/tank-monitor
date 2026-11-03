@@ -1,5 +1,6 @@
 # RO water temperature -- the NTC thermistor built into the uxcell 1/4"
-# flow sensor (its separate red/blue pair). Included by the RO unit only.
+# flow sensor (its separate red/blue pair). Included by ro_fill.yaml, so
+# the RO unit only -- never list it in a wrapper as well.
 #
 # Why it is worth reading: membrane output falls ~3 % per degree C colder
 # feed, so a slow winter fill is visible as cold water rather than a fouled

@@ -25,7 +25,7 @@ calibration constant, because that is how the sensor datasheets state them.
 | `packages/flow_meter.yaml` | shared core: pulse input, flow sessions, flow rate, persistence, network tuning |
 | `packages/battery.yaml` | LiPo voltage / percent / low-battery (change unit only) |
 | `packages/ro_fill.yaml` | RO unit logic |
-| `packages/ro_temperature.yaml` | RO water temperature from the flow sensor's built-in thermistor (RO unit only) |
+| `packages/ro_temperature.yaml` | RO water temperature from the flow sensor's built-in thermistor -- pulled in by `ro_fill.yaml`, not by the wrapper |
 | `packages/water_change.yaml` | change unit logic |
 | `boards/esp32-lite.yaml` | AITRIP ESP32 Lite V1.0.0 (LOLIN32 Lite clone) -- **the default** |
 | `boards/xiao-esp32s3.yaml` | Seeed XIAO ESP32-S3 -- alternative |

@@ -14,5 +14,4 @@ packages:
   base: !include ../packages/base.yaml
   flow: !include packages/flow_meter.yaml
   unit: !include packages/ro_fill.yaml
-  temperature: !include packages/ro_temperature.yaml
   board: !include boards/esp32-lite.yaml
