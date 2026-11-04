@@ -1,0 +1,172 @@
+# CO2 solenoid and bubbler on a schedule kept ON THE DEVICE -- no Home
+# Assistant. The relays (co2_relay, bubbler_relay) are the board file's.
+#
+# Rules:
+#   - CO2 runs from "CO2 On At" to "CO2 Off At", only while "CO2 Schedule"
+#     is on. It ships OFF: there is no pH probe on this tank, so nothing
+#     measures what the gas does. Turn it on from the web page once the
+#     bubble rate is set and the fish have been watched through a first day.
+#   - The bubbler is OFF from "CO2 On At" until "Bubbler On At", so it does
+#     not strip out the gas being added, and ON the rest of the time. With
+#     the CO2 schedule off, the bubbler simply runs.
+#   - The schedule acts on its own EDGES. The CO2 and Bubbler switches on
+#     the web page override it until the schedule's next change.
+#   - Failsafes: no clock -> CO2 off and bubbler on. CO2 left on outside its
+#     window, or the bubbler left off outside its off-window, for 2 hours ->
+#     put back. Times wrap past midnight.
+
+datetime:
+  - platform: template
+    type: time
+    id: co2_on_at
+    name: "CO2 On At"
+    icon: "mdi:clock-start"
+    optimistic: true
+    restore_value: true
+    initial_value: "08:00:00"
+  - platform: template
+    type: time
+    id: co2_off_at
+    name: "CO2 Off At"
+    icon: "mdi:clock-end"
+    optimistic: true
+    restore_value: true
+    initial_value: "14:00:00"
+  - platform: template
+    type: time
+    id: bubbler_on_at
+    name: "Bubbler On At"
+    icon: "mdi:clock-outline"
+    optimistic: true
+    restore_value: true
+    initial_value: "15:00:00"
+
+switch:
+  - platform: template
+    id: co2_schedule
+    name: "CO2 Schedule"
+    icon: "mdi:calendar-clock"
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  # Tell the panel at once (push_aux, packages/standalone_controller.yaml)
+  # rather than at the next 30 s tick.
+  - id: !extend co2_relay
+    on_turn_on:
+      - lambda: id(aux_co2) = 1;
+      - script.execute: push_aux
+    on_turn_off:
+      - lambda: id(aux_co2) = 0;
+      - script.execute: push_aux
+  - id: !extend bubbler_relay
+    on_turn_on:
+      - lambda: id(aux_air) = 1;
+      - script.execute: push_aux
+    on_turn_off:
+      - lambda: id(aux_air) = 0;
+      - script.execute: push_aux
+
+globals:
+  # What the schedule last asked for: -1 unknown (boot, or clock lost),
+  # 0 off, 1 on. A relay is only switched when this changes.
+  - id: co2_last_want
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: air_last_want
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  # Seconds each relay has spent against the schedule, for the failsafes.
+  - id: co2_stray_s
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: air_stray_s
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          // Mirrored for the panel every tick as well as on change, so the
+          // boot states reach it even if no edge has fired yet.
+          id(aux_co2) = id(co2_relay).state;
+          id(aux_air) = id(bubbler_relay).state;
+          auto now = id(sntp_time).now();
+          if (!now.is_valid()) {
+            // No clock, no window: the safe states, and forget the edges so
+            // the schedule re-applies the moment the time comes back.
+            if (id(co2_relay).state) {
+              ESP_LOGW("co2", "no clock: CO2 off");
+              id(co2_relay).turn_off();
+            }
+            if (!id(bubbler_relay).state) id(bubbler_relay).turn_on();
+            id(co2_last_want) = -1;
+            id(air_last_want) = -1;
+            return;
+          }
+          const int m = now.hour * 60 + now.minute;
+          auto mins = [](datetime::TimeEntity *t) { return t->hour * 60 + t->minute; };
+          auto within = [](int x, int a, int b) { return a <= b ? (x >= a && x < b) : (x >= a || x < b); };
+          const int on = mins(id(co2_on_at)), off = mins(id(co2_off_at)), back = mins(id(bubbler_on_at));
+          const bool sched = id(co2_schedule).state;
+          const bool want_co2 = sched && on != off && within(m, on, off);
+          const bool want_air = !(sched && on != back && within(m, on, back));
+
+          if ((int) want_co2 != id(co2_last_want)) {
+            ESP_LOGI("co2", "schedule: CO2 %s", want_co2 ? "on" : "off");
+            if (want_co2) id(co2_relay).turn_on(); else id(co2_relay).turn_off();
+            id(co2_last_want) = want_co2;
+          }
+          if ((int) want_air != id(air_last_want)) {
+            ESP_LOGI("co2", "schedule: bubbler %s", want_air ? "on" : "off");
+            if (want_air) id(bubbler_relay).turn_on(); else id(bubbler_relay).turn_off();
+            id(air_last_want) = want_air;
+          }
+
+          // Failsafes: a manual override is allowed, a forgotten one is not.
+          if (id(co2_relay).state && !want_co2) {
+            id(co2_stray_s) += 30;
+            if (id(co2_stray_s) >= 7200) {
+              ESP_LOGW("co2", "CO2 on outside its window for 2 h: off");
+              id(co2_relay).turn_off();
+              id(co2_stray_s) = 0;
+            }
+          } else {
+            id(co2_stray_s) = 0;
+          }
+          if (!id(bubbler_relay).state && want_air) {
+            id(air_stray_s) += 30;
+            if (id(air_stray_s) >= 7200) {
+              ESP_LOGW("co2", "bubbler off outside its window for 2 h: on");
+              id(bubbler_relay).turn_on();
+              id(air_stray_s) = 0;
+            }
+          } else {
+            id(air_stray_s) = 0;
+          }
+
+sensor:
+  # 100 while on, 0 while off: averaged into history as the share of each
+  # slot the outlet was on.
+  - platform: template
+    id: hist_co2
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(co2_relay).state ? 100.0f : 0.0f;'
+  - platform: template
+    id: hist_air
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(bubbler_relay).state ? 100.0f : 0.0f;'
+
+tank_history:
+  series:
+    - name: co2
+      sensor: hist_co2
+      scale: 10
+    - name: air
+      sensor: hist_air
+      scale: 10

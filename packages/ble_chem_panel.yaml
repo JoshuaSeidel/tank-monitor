@@ -1,0 +1,74 @@
+# Water tests on the PANEL, from the controller over BLE -- the no-Home-
+# Assistant replacement for packages/chemistry.yaml. Defines the same ids
+# (chem_ph ... chem_stamp), so the board file's chemistry page reads them
+# unchanged. NEVER load both: they collide on every id.
+#
+# Rides the existing BLE connection (ctrl_ble in ble_link_panel_v3.yaml)
+# on its own characteristic -- see packages/standalone_controller.yaml.
+# The line is "C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh>,<kh>,<co2>,<air>",
+# -999 = not tested; co2/air are the extra outlets, -1 not fitted. The
+# stamp is the TEST's time, so the panel's age is how old the water test
+# is, not when this panel last heard about it.
+
+globals:
+  - id: chem_ph
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_nh3
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_gh
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_kh
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_no2
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_no3
+    type: float
+    restore_value: true
+    initial_value: 'NAN'
+  - id: chem_stamp
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
+
+text_sensor:
+  - platform: ble_client
+    ble_client_id: ctrl_ble
+    id: ble_chem
+    internal: true
+    service_uuid: "6e400101-b5a3-f393-e0a9-e50e24dcca9e"
+    characteristic_uuid: "6e400102-b5a3-f393-e0a9-e50e24dcca9e"
+    notify: true
+    on_value:
+      - lambda: |-
+          // Exactly ten fields or nothing, the same rule as telemetry: a
+          // truncated read must not become a plausible wrong value.
+          unsigned stamp = 0;
+          float v[6];
+          int co2 = -1, air = -1, used = 0;
+          if (sscanf(x.c_str(), "C,%u,%f,%f,%f,%f,%f,%f,%d,%d%n", &stamp, &v[0], &v[1], &v[2], &v[3],
+                     &v[4], &v[5], &co2, &air, &used) != 9 || used != (int) x.size()) {
+            ESP_LOGW("chem", "bad water-test frame: %s", x.c_str());
+            return;
+          }
+          const auto val = [](float f) { return f <= -998.0f ? NAN : f; };
+          id(chem_ph) = val(v[0]);
+          id(chem_nh3) = val(v[1]);
+          id(chem_no2) = val(v[2]);
+          id(chem_no3) = val(v[3]);
+          id(chem_gh) = val(v[4]);
+          id(chem_kh) = val(v[5]);
+          id(chem_stamp) = stamp;
+          // The CO2 and bubbler outlets (globals in the board file): -1 means
+          // the controller has none, and the panel draws no pill for it.
+          id(r_co2) = co2;
+          id(r_air) = air;

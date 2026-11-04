@@ -1,0 +1,125 @@
+/* The standalone tank site. Same palette as the 4.3" panel's lambdas, so
+   the page and the glass read as one thing. No web fonts: everything comes
+   from this device. */
+:root {
+  --bg: #070b0f; --card: #1a2028; --hair: #2a323c; --track: #1e252e;
+  --ink: #fff; --ink2: #b9c2cc; --muted: #6f7b88;
+  --blue: #3987e5; --orange: #d95926; --heat: #ff8a5c;
+  --good: #0ca30c; --bad: #d03b3b; --amber: #ffb020; --aqua: #199e70;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.4 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+button, input, select { font: inherit; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 14px 16px 40px; }
+
+header { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 4px 2px 12px; }
+header h1 { font-size: 17px; font-weight: 500; color: var(--ink2); margin: 0; }
+header .dots { display: flex; gap: 14px; margin-left: auto; align-items: center;
+  font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--muted); }
+header .dots span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); display: inline-block; }
+.dot.on { background: var(--good); }
+header .clock { color: var(--ink2); font-size: 15px; font-variant-numeric: tabular-nums; }
+
+nav { display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--hair);
+  padding-bottom: 10px; margin-bottom: 16px; }
+nav a { color: var(--muted); text-decoration: none; padding: 7px 13px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; letter-spacing: .03em; }
+nav a.on { background: var(--card); color: var(--ink); }
+
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); }
+.card { background: var(--card); border-radius: 15px; padding: 16px 18px; min-width: 0; }
+.span2 { grid-column: span 2; } .span3 { grid-column: span 3; } .span4 { grid-column: 1 / -1; }
+.row2 { grid-row: span 2; }
+.lbl { font-size: 11px; font-weight: 600; letter-spacing: .07em; color: var(--muted); text-transform: uppercase; }
+.big { font-size: 38px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; margin-top: 8px; }
+.big small { font-size: 17px; color: var(--muted); font-weight: 500; margin-left: 6px; }
+.med { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.muted { color: var(--muted); } .heat { color: var(--heat); } .blue { color: var(--blue); }
+.bad { color: var(--bad); } .good { color: var(--good); } .amber { color: var(--amber); }
+
+/* Page 1: the gauge card */
+.gauge { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.gauge svg { width: 100%; max-width: 300px; }
+.gauge .state { font-size: 12px; font-weight: 700; letter-spacing: .08em; margin-top: -6px; }
+.step { display: flex; align-items: center; gap: 14px; margin-top: 12px; color: var(--muted); }
+.step button { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--hair);
+  background: var(--track); color: var(--ink); font-size: 20px; cursor: pointer; }
+.step button:disabled { opacity: .35; cursor: default; }
+.pills { display: flex; gap: 8px; margin-top: 4px; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 13px;
+  background: var(--card); font-size: 11px; font-weight: 600; letter-spacing: .06em; color: var(--muted); }
+.pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pill.heat.on { background: #341e14; color: var(--heat); } .pill.heat.on i { background: var(--heat); }
+.pill.fan.on { background: #142034; color: var(--blue); } .pill.fan.on i { background: var(--blue); }
+.pill.co2.on { background: #0f2a20; color: var(--aqua); } .pill.co2.on i { background: var(--aqua); }
+.aqua { color: var(--aqua); }
+
+.gbar { height: 5px; background: var(--track); border-radius: 3px; position: relative; margin-top: 12px; }
+.gbar i { position: absolute; top: 0; bottom: 0; border-radius: 3px; }
+
+/* Page 2: the vessel */
+.vessel { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 12px; }
+.vessel svg { width: 100%; height: auto; display: block; }
+.rail { display: flex; flex-direction: column; gap: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.fanblades.on { animation: spin 1.2s linear infinite; }
+
+/* History */
+.seg { display: inline-flex; background: var(--track); border-radius: 999px; padding: 3px; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 5px 14px; border-radius: 999px;
+  cursor: pointer; font-size: 13px; font-weight: 600; }
+.seg button.on { background: var(--card); color: var(--ink); }
+.chart { width: 100%; height: 190px; display: block; margin-top: 8px; }
+.chart text { fill: var(--muted); font-size: 11px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+.legend i { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+
+/* Forms and tables */
+.form { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+.fld { display: flex; flex-direction: column; gap: 5px; }
+input, select { background: var(--track); color: var(--ink); border: 1px solid var(--hair);
+  border-radius: 9px; padding: 8px 10px; width: 100%; }
+input:disabled, select:disabled { opacity: .5; }
+.btn { background: var(--track); color: var(--ink); border: 1px solid var(--hair); border-radius: 10px;
+  padding: 8px 16px; cursor: pointer; font-weight: 600; }
+.btn.primary { background: var(--blue); border-color: var(--blue); }
+.btn.warn { color: var(--bad); }
+.btn:disabled { opacity: .4; cursor: default; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+.msg { font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--hair); }
+td { padding: 7px 8px; border-bottom: 1px solid var(--track); vertical-align: top; }
+td.v { text-align: right; } th.v { text-align: right; }
+.tog { display: flex; justify-content: space-between; align-items: center; padding: 10px 0;
+  border-bottom: 1px solid var(--track); gap: 12px; }
+.tog:last-child { border-bottom: 0; }
+.sw { width: 44px; height: 24px; border-radius: 12px; border: 0; background: var(--track); position: relative; cursor: pointer; }
+.sw::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--muted); transition: left .15s; }
+.sw.on { background: #123a1c; } .sw.on::after { left: 23px; background: var(--good); }
+.sw:disabled { opacity: .4; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere; }
+.log { background: #04070a; border-radius: 10px; padding: 10px; height: 280px; overflow: auto;
+  font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; color: var(--ink2); }
+.log .w { color: var(--amber); } .log .e { color: var(--bad); }
+.alert { background: #3a1416; color: #ffb4b4; border-radius: 12px; padding: 10px 14px; margin-bottom: 12px;
+  font-size: 14px; display: none; }
+.alert.show { display: block; }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .span3, .span4 { grid-column: 1 / -1; }
+  .vessel { grid-template-columns: 1fr; }
+  .rail { flex-direction: row; flex-wrap: wrap; } .rail .card { flex: 1 1 160px; }
+}
+@media (max-width: 520px) {
+  .grid { grid-template-columns: 1fr; } .span2 { grid-column: auto; }
+}

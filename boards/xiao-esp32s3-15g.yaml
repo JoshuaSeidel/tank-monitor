@@ -23,8 +23,10 @@
 #   I2C SCL (BH1750)    D7           44     brown
 #   heater relay IN+    D8           7      white
 #   fan relay IN+       D9           8      gray
+#   CO2 solenoid IN+    D4           5      (3rd relay outlet)
+#   bubbler IN+         D10          9      (4th relay outlet)
 #
-# Spare: D0 (GPIO1), D4 (GPIO5), D10 (GPIO9).
+# Spare: D0 (GPIO1).
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and nothing may hold it
 # at a level during boot.
 #
@@ -45,6 +47,7 @@
 #   adc sensor id: tds_voltage   -> packages/sensors.yaml
 #   output id: heater_output     -> packages/control.yaml
 #   output id: fan_output        -> packages/control.yaml
+#   switch id: co2_relay, bubbler_relay -> packages/co2_bubbler.yaml
 #   water_temp_b, temp_gradient, water_ph,
 #   grad_ema_heating, grad_ema_idle  -> packages/ble_link_v3.yaml
 
@@ -55,11 +58,8 @@ esp32:
   framework:
     type: esp-idf
 
-# See boards/xiao-esp32s3.yaml. The default "legacy" unique_id generator has
-# no device name in it, so this board's "Water Temperature" would collide
-# with every other controller's and Home Assistant would silently drop it.
-mqtt:
-  discovery_unique_id_generator: mac
+# No mqtt: block. This tank has no Home Assistant and no broker;
+# packages/standalone.yaml removes MQTT entirely.
 
 # One probe, one bus. With a single bus the address-less dallas_temp in
 # packages/sensors.yaml binds to it without an !extend.
@@ -185,3 +185,30 @@ text_sensor:
     entity_category: diagnostic
     update_interval: 60s
     lambda: 'return {id(ble_tx)};'
+
+# ---------------------------------------------------------------
+# CO2 solenoid and bubbler -- the relay box's 3rd and 4th outlets
+# ---------------------------------------------------------------
+# Same active-high relay module as the heater and fan: voltage on IN+
+# closes the outlet. The schedule that drives these is
+# packages/co2_bubbler.yaml; the pins are here because they are the board's.
+#
+# Boot states are the safe ones, whatever was running before: CO2 OFF (gas
+# with no one watching is the dangerous failure) and the bubbler ON (air
+# is never the dangerous failure). The schedule sets both properly within
+# 30 s of the clock being known.
+switch:
+  - platform: gpio
+    id: co2_relay
+    name: "CO2"
+    icon: "mdi:molecule-co2"
+    # Silkscreen D4.
+    pin: GPIO5
+    restore_mode: ALWAYS_OFF
+  - platform: gpio
+    id: bubbler_relay
+    name: "Bubbler"
+    icon: "mdi:chart-bubble"
+    # Silkscreen D10.
+    pin: GPIO9
+    restore_mode: ALWAYS_ON

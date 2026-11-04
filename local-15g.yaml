@@ -10,4 +10,9 @@ packages:
   control: !include packages/control.yaml
   sensors: !include packages/sensors.yaml
   link: !include packages/ble_link_v3.yaml
+  layout: !include packages/layout_15g.yaml
+  standalone_controller: !include packages/standalone_controller.yaml
   board: !include boards/xiao-esp32s3-15g.yaml
+  co2: !include packages/co2_bubbler.yaml
+  standalone: !include packages/standalone.yaml
+

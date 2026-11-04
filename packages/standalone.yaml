@@ -1,0 +1,32 @@
+# A device with NO Home Assistant and NO MQTT broker. Load this LAST in the
+# wrapper's files: list, after the board file -- board files set mqtt
+# options, and a later package would bring a half-configured mqtt: back.
+#
+# Why MQTT has to go, not just sit unused: with no broker to reach, ESPHome's
+# MQTT client reboots the device every 15 minutes (its reboot_timeout). The
+# tank would regulate between reboots and lose its BLE link, its history
+# accumulators and its control state four times an hour.
+#
+# What replaces Home Assistant: the device's own web page (web_server, which
+# base.yaml already runs), history and water tests kept on the controller
+# (components/tank_history), and firmware updates uploaded through that
+# page.
+#
+# Wi-Fi is the tank's own network. Add to secrets.yaml (and to the ESPHome
+# add-on's secrets.yaml, which is a separate file):
+#   standalone_wifi_ssid: "..."
+#   standalone_wifi_password: "..."
+# If the network changes or the device is flashed somewhere else, it falls
+# back to its own access point ("<device_name> setup", base.yaml) and the
+# captive portal there sets new credentials -- no reflash needed.
+mqtt: !remove
+
+wifi:
+  ssid: !secret standalone_wifi_ssid
+  password: !secret standalone_wifi_password
+
+# Firmware updates without ESPHome on the same network: build the .bin
+# anywhere, then upload it on the device's web page (Diagnostics -> Update
+# firmware). The ESPHome OTA from base.yaml stays for when you are there.
+ota:
+  - platform: web_server

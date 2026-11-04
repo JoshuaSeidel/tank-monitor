@@ -1,0 +1,166 @@
+# The controller side of a tank with no Home Assistant: history, water
+# tests, the whole-tank web page, crash records, and the water tests' BLE
+# path to the panel. Pair with packages/standalone.yaml (loaded last) and a
+# layout package (packages/layout_15g.yaml) for the drawing.
+#
+# Needs from the rest of the build: water_temp_f, tds, tds_1h, tank_lux
+# (packages/sensors.yaml); controller, target_temperature, heater_duty
+# (packages/control.yaml); sntp_time (packages/base.yaml); and the BLE
+# server from packages/ble_link_v3.yaml.
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [tank_history, crash_report]
+    refresh: 0s
+
+# The whole-tank site in place of the standard page. The layout is the same
+# set of substitutions the panel draws from.
+tank_webui:
+  ui: standalone
+  layout:
+    title: "${tank_title}"
+    width_in: "${tank_width_in}"
+    height_in: "${tank_height_in}"
+    sponge_filters: "${sponge_filters}"
+    sponge_in: "${sponge_from_left_in}"
+    sponge_spacing_in: "${sponge_spacing_in}"
+    heater_in: "${heater_inset_in}"
+    probe_in: "${probe_from_left_in}"
+    fan_in: "${fan_from_left_in}"
+
+# 24 h at 5 min and 30 days at 1 h, in flash. The scale is the stored
+# resolution (value x scale fits an int16).
+tank_history:
+  id: history
+  time_id: sntp_time
+  series:
+    - name: temp
+      sensor: water_temp_f
+      scale: 100
+    - name: target
+      sensor: hist_target
+      scale: 100
+    - name: tds
+      sensor: tds_1h
+      scale: 1
+    - name: tdsraw
+      sensor: tds
+      scale: 1
+    - name: lux
+      sensor: tank_lux
+      scale: 1
+    - name: heat
+      sensor: heater_duty
+      scale: 10
+    - name: fan
+      sensor: hist_fan
+      scale: 10
+
+sensor:
+  # The setpoint is a number, not a sensor; this is it as one, so the chart
+  # can draw the target under the temperature.
+  - platform: template
+    id: hist_target
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(target_temperature).state;'
+  # Fan duty in percent, straight from the controller.
+  - platform: template
+    id: hist_fan
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(controller).get_fan_duty();'
+
+# WHY IT LAST CRASHED, kept across reboots and power cuts. With no Home
+# Assistant history, this is the only record a crash leaves.
+crash_report:
+  id: crash
+
+text_sensor:
+  # control.yaml takes a model seed from Home Assistant over MQTT. There is
+  # neither here, so the subscription goes and an empty stand-in keeps the
+  # id its Seed Status reads: "idle", and the controller learns from scratch
+  # as it always can.
+  - id: !remove seed_payload
+  - platform: template
+    id: seed_payload
+    internal: true
+    update_interval: never
+
+  - platform: template
+    name: "Last Crash"
+    icon: "mdi:alert-octagon-outline"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(crash).summary()};'
+  - platform: template
+    name: "Last Crash Backtrace"
+    icon: "mdi:format-list-numbered"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(crash).backtrace()};'
+
+button:
+  - platform: template
+    name: "Clear Crash Report"
+    icon: "mdi:delete-sweep-outline"
+    entity_category: config
+    on_press:
+      - lambda: id(crash).clear();
+
+# ---------------------------------------------------------------------
+# Water tests -> panel
+# ---------------------------------------------------------------------
+# A second service beside the v3 telemetry one, so the 20-field frame and
+# its strict parser stay exactly as they are. The panel subscribes to this
+# characteristic as well; one line, the newest test and the two extra
+# outlets:
+#   C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh ppm>,<kh ppm>,<co2>,<air>
+# -999 = not tested; co2/air -1 = not fitted, 0 off, 1 on.
+esp32_ble_server:
+  services:
+    - uuid: "6e400101-b5a3-f393-e0a9-e50e24dcca9e"
+      advertise: false
+      characteristics:
+        - id: chem_char
+          uuid: "6e400102-b5a3-f393-e0a9-e50e24dcca9e"
+          read: true
+          notify: true
+          value: "C,0,-999,-999,-999,-999,-999,-999,-1,-1"
+
+# Every 30 s, and at once whenever an outlet changes (packages/co2_bubbler
+# runs push_aux), so a panel that connects late is current within 30 s.
+interval:
+  - interval: 30s
+    then:
+      - script.execute: push_aux
+
+globals:
+  # The CO2 and bubbler outlets for the panel: -1 not fitted, 0 off, 1 on.
+  # Set by packages/co2_bubbler.yaml when it is loaded.
+  - id: aux_co2
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: aux_air
+    type: int
+    restore_value: false
+    initial_value: '-1'
+
+script:
+  - id: push_aux
+    mode: queued
+    max_runs: 2
+    then:
+      - ble_server.characteristic.set_value:
+          id: chem_char
+          value: !lambda |-
+            char tail[16];
+            snprintf(tail, sizeof(tail), ",%d,%d", id(aux_co2), id(aux_air));
+            const std::string f = id(history).chem_frame() + tail;
+            return std::vector<uint8_t>(f.begin(), f.end());
+      - ble_server.characteristic.notify:
+          id: chem_char

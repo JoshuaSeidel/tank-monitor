@@ -180,7 +180,7 @@ display:
         lambda: |-
           float *SLOTS = id(p1_last);
           enum { SLOT_CLOCK = 0, SLOT_T, SLOT_SP, SLOT_STATE, SLOT_TB, SLOT_G, SLOT_PH, SLOT_TDS,
-                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE, SLOT_AUX };
+                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE, SLOT_AUX, SLOT_CO2, SLOT_AIR };
           const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
           const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
           const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
@@ -376,6 +376,10 @@ display:
           };
           pill(SLOT_HEAT, 18,  "HEATER", id(r_heat_on), HEAT);
           pill(SLOT_FAN,  134, "FANS",   id(r_fan_on),  BLUE);
+          // A controller with CO2 and bubbler outlets reports them (r_co2 /
+          // r_air >= 0); one without draws no pill for them.
+          if (id(r_co2) >= 0) pill(SLOT_CO2, 250, "CO2", id(r_co2) == 1, AQUA);
+          if (id(r_air) >= 0) pill(SLOT_AIR, 366, "AIR", id(r_air) == 1, BLUE);
 
       # ===========================================================
       # PAGE 2 -- VESSEL. One-point perspective interior.
@@ -850,7 +854,25 @@ display:
           }
 
           // ---- pH card ----
+          // A single-system tank has no pH probe; the card shows the last
+          // manual water test instead (its age is under GH/KH below).
           const float ph = id(water_ph).state;
+          if (!${dual_system}) {
+            if (changed(SLOTS, SLOT_PH, (float) (id(chem_stamp) % 1000003u))) {
+              rr(18, 46, 380, 250, 15, CARD);
+              it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LAST WATER TEST");
+              auto row = [&](int y, const char *label, float v, const char *fmt, const char *unit) {
+                it.print(36, y, id(f_small), INK2, TextAlign::CENTER_LEFT, label);
+                if (std::isnan(v)) it.print(250, y, id(f_med), MUTED, TextAlign::CENTER_RIGHT, "--");
+                else it.printf(250, y, id(f_med), INK, TextAlign::CENTER_RIGHT, fmt, v);
+                it.print(262, y, id(f_micro), MUTED, TextAlign::CENTER_LEFT, unit);
+              };
+              row(112, "pH",      id(chem_ph),  "%.1f", "");
+              row(158, "Ammonia", id(chem_nh3), "%.2f", "ppm");
+              row(204, "Nitrite", id(chem_no2), "%.2f", "ppm");
+              row(250, "Nitrate", id(chem_no3), "%.0f", "ppm");
+            }
+          } else
           if (changed(SLOTS, SLOT_PH, q(ph, 100))) {
             rr(18, 46, 380, 250, 15, CARD);
             it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH  24 HOURS");
@@ -925,6 +947,16 @@ globals:
   # change. Each page lambda does one full clear when it sees this, then
   # lowers it. Not restored: after a reboot the framebuffer is garbage and
   # must be cleared regardless.
+  # The controller's CO2 and bubbler outlets, from packages/ble_chem_panel:
+  # -1 not fitted (and on any panel that never hears of them), 0 off, 1 on.
+  - id: r_co2
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: r_air
+    type: int
+    restore_value: false
+    initial_value: '-1'
   - id: panel_dirty
     type: bool
     restore_value: false
@@ -932,7 +964,7 @@ globals:
   # Last-drawn value per element, per page. Not restored: the framebuffer
   # is garbage after a reboot and panel_dirty forces a full paint anyway.
   - id: p1_last
-    type: float[13]
+    type: float[15]
     restore_value: false
   - id: p2_last
     type: float[9]

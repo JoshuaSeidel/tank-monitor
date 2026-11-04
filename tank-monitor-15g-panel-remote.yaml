@@ -3,9 +3,11 @@
 #
 # The 4.3" panel the 75 used until the P4 wall panel replaced it, reflashed
 # for the 15 gal. Pairs with tank-monitor-15g-remote.yaml over BLE, payload
-# v3, and with nothing else. Same hardware and board file as
-# tank-monitor-lg-panel-remote.yaml; only the names, the MAC and the tank
-# drawing differ.
+# v3, plus a second characteristic carrying the newest water test. No Home
+# Assistant and no MQTT: the panel needs Wi-Fi only for its clock.
+#
+# What it draws comes from packages/layout_15g.yaml, the same file the
+# controller's web page draws from.
 #
 # ---------------------------------------------------------------------
 # s3_ble_mac -- the 15 gal controller's BLE address
@@ -13,40 +15,15 @@
 # The value below is what this XIAO reported as the nano controller on
 # 2026-10-06 (the AMOLED wrapper's s3_ble_mac then). It is the same chip,
 # so it should be the same address -- but confirm it against the 15 gal
-# controller's "Controller BLE MAC" sensor after its first flash. A wrong
-# MAC compiles cleanly and then never connects.
+# controller's "Controller BLE MAC" (its web page, Diagnostics) after its
+# first flash. A wrong MAC compiles cleanly and then never connects.
 #
-# ---------------------------------------------------------------------
-# device_name
-# ---------------------------------------------------------------------
-# packages/chemistry.yaml subscribes to ${device_name}/chem/*. Nothing in
-# Home Assistant publishes to tank-monitor-15g/chem/* yet, so page 3's
-# GH/KH read "--" until an automation does.
-# Must not collide with tank-monitor-15-gallon, -75g, -75-gallon, -s3,
-# -panel or any other tank-monitor-*.
+# device_name must not collide with tank-monitor-15-gallon, -75g,
+# -75-gallon, -s3, -panel or any other tank-monitor-*.
 substitutions:
   device_name: tank-monitor-15g
   friendly_name: Tank Monitor 15G Panel
   s3_ble_mac: "E0:72:A1:F7:D6:86"
-
-  tank_title: "15 Gallon"
-
-  # One heater, one probe, one fan: no halves, no gradient.
-  dual_system: "false"
-
-  # ---- Where the hardware is, in inches from the LEFT end ----
-  # The Vessel page draws everything from these, and takes its proportions
-  # from width:height. A 15 long is 24 x 12 x 12. Measure the real tank and
-  # change them here; the probe's temperature readout sits over the probe,
-  # so keep the fan at least ~5 in from it or the two overlap on screen.
-  tank_width_in: "24"
-  tank_height_in: "12"
-  sponge_filters: "true"
-  sponge_from_left_in: "12"
-  sponge_spacing_in: "4.5"
-  heater_inset_in: "4"
-  probe_from_left_in: "7.5"
-  fan_from_left_in: "19"
 
 packages:
   tank_monitor:
@@ -54,10 +31,14 @@ packages:
     ref: main
     files:
       - packages/base.yaml
-      - packages/webui.yaml
       # Display-only: this REPLACES control.yaml and sensors.yaml. Loading
       # either alongside it collides on every id.
       - packages/ble_link_panel_v3.yaml
-      - packages/chemistry.yaml
+      # Water tests from the controller over BLE -- in place of
+      # packages/chemistry.yaml, which takes them from Home Assistant.
+      - packages/ble_chem_panel.yaml
+      - packages/layout_15g.yaml
       - boards/waveshare-esp32s3-lcd-43.yaml
+      # LAST: removes MQTT and sets Kaiden's Wi-Fi.
+      - packages/standalone.yaml
     refresh: 0s
