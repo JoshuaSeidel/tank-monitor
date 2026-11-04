@@ -50,7 +50,7 @@ const E = {
 };
 
 const PAGES = [["tank", "Tank"], ["vessel", "Vessel"], ["history", "History"],
-  ["tests", "Water tests"], ["settings", "Settings"], ["diag", "Diagnostics"]];
+  ["tests", "Water tests"], ["settings", "Settings"], ["archive", "Archive"], ["diag", "Diagnostics"]];
 
 // The panel's colours, as CSS.
 const C = { bg: "#070b0f", card: "#1a2028", track: "#1e252e", ink: "#fff", ink2: "#b9c2cc",
@@ -465,7 +465,7 @@ class TankSite extends HTMLElement {
     const start = d.end - (n - 1) * d.step, ticks = W < 520 ? 3 : 6;
     for (let k = 0; k <= ticks; k++) {
       const i = Math.round((n - 1) * k / ticks);
-      s += `<text x="${xs(i)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === ticks ? "end" : "middle"}">${fmtTime(start + i * d.step, d.step >= 3600)}</text>`;
+      s += `<text x="${xs(i)}" y="${H - 6}" text-anchor="${k === 0 ? "start" : k === ticks ? "end" : "middle"}">${fmtTime(start + i * d.step, (n - 1) * d.step > 86400)}</text>`;
     }
     for (const ln of lines) {
       let p = "", pen = false;
@@ -686,6 +686,215 @@ class TankSite extends HTMLElement {
     this.$("s_caltds").disabled = !(this.ids[E.calTds] && !isNaN(this.n(E.calStd)));
     this.$("s_restart").disabled = !this.ids[E.restart];
     this.$("s_reset").disabled = !this.ids[E.reset];
+  }
+
+  // ---------------------------------------------------------- page: archive
+  // Everything on the panel's SD card, reached directly from this page: the
+  // controller finds the panel by mDNS (/peer.json) and the panel answers
+  // with CORS. A remembered address is the fallback.
+  page_archive() {
+    return `<div class="grid">
+      <div class="card span4"><div class="lbl">SD card on the panel</div>
+        <dl class="kv" id="a_status" style="margin-top:10px"><dt>Panel</dt><dd>looking&hellip;</dd></dl>
+        <div class="actions"><button class="btn" id="a_now" disabled>Back up now</button>
+          <span class="msg" id="a_msg"></span>
+          <span style="margin-left:auto" class="sub">Panel address <input id="a_ip" style="width:150px;display:inline-block" placeholder="auto"></span></div>
+        <div class="note">The panel writes a history row every 5 minutes and, every night at 03:00, saves this
+          controller's settings, learned heat model and water tests, plus a copy of any firmware it has not seen.</div></div>
+      <div class="card span4"><div class="lbl">History beyond 30 days</div>
+        <div class="actions" style="margin-top:6px"><select id="a_month" style="max-width:200px"></select>
+          <a class="btn" id="a_csv">Download CSV</a><span class="sub" id="a_hmsg"></span></div>
+        <svg class="chart" id="ac_temp"></svg>
+        <div class="legend"><span><i style="background:#fff"></i>water &deg;F</span><span><i style="background:${C.muted}"></i>target</span></div>
+        <svg class="chart" id="ac_tds"></svg>
+        <div class="legend"><span><i style="background:${C.blue}"></i>TDS hour mean</span></div></div>
+      <div class="card span4"><div class="lbl">Settings backups</div>
+        <div style="overflow:auto;margin-top:6px"><table id="a_backups"></table></div>
+        <div class="note">Restore puts this controller back the way it was that night. Choose what to bring back:
+          settings (targets, tank details, calibration, CO2 times), the learned heat model, and water tests
+          (merged &mdash; nothing logged since is lost).</div></div>
+      <div class="card span4"><div class="lbl">Firmware</div>
+        <dl class="kv" id="a_slots" style="margin-top:10px"></dl>
+        <div class="actions"><button class="btn warn" id="a_rollback" disabled>Roll back to the previous firmware</button>
+          <span class="msg" id="a_fmsg"></span></div>
+        <div style="overflow:auto;margin-top:12px"><table id="a_fw"></table></div>
+        <div class="note">Roll back uses the build this controller ran before its last update &mdash; no SD needed.
+          The SD keeps every build ever run; Install puts one of those back. Panel builds install from the panel's
+          own page.</div></div>
+    </div>`;
+  }
+
+  // The panel's base URL, or "" while unknown.
+  panelBase() {
+    const manual = (localStorage.getItem("panel_ip") || "").trim();
+    const ip = manual || this.peerIp || "";
+    return ip ? "http://" + ip : "";
+  }
+
+  wire_archive() {
+    const ipBox = this.$("a_ip");
+    ipBox.value = localStorage.getItem("panel_ip") || "";
+    ipBox.onchange = () => { localStorage.setItem("panel_ip", ipBox.value.trim()); this.loadArchive(); };
+    this.$("a_now").onclick = () => {
+      fetch(this.panelBase() + "/sd/backup-now", { method: "POST" })
+        .then(() => this.set("a_msg", "Started -- refresh in a minute.", "msg good"))
+        .catch(() => this.set("a_msg", "The panel did not answer.", "msg bad"));
+    };
+    this.$("a_month").onchange = () => this.loadMonth();
+    this.$("a_rollback").onclick = () => {
+      const p = this.slots && this.slots.previous;
+      if (!p || !p.valid) return;
+      if (!confirm(`Restart this controller on the previous firmware (built ${p.built})?`)) return;
+      fetch("/firmware/rollback", { method: "POST" }).then(async (r) => {
+        this.set("a_fmsg", await r.text(), "msg " + (r.ok ? "good" : "bad"));
+      });
+    };
+    fetch("/peer.json").then((r) => r.json()).then((d) => { this.peerIp = d.panel_ip; this.loadArchive(); })
+      .catch(() => this.loadArchive());
+    fetch("/firmware/slots.json").then((r) => r.json()).then((d) => { this.slots = d; this.drawSlots(); });
+  }
+
+  drawSlots() {
+    const d = this.slots;
+    if (!d || !this.$("a_slots")) return;
+    const row = (l, o) => `<dt>${l}</dt><dd>${o && o.valid !== false && o.firmware
+      ? esc(o.built + " · " + o.firmware.slice(0, 8)) : "none"}</dd>`;
+    this.$("a_slots").innerHTML = row("Running", d.running) + row("Previous", d.previous);
+    this.$("a_rollback").disabled = !(d.previous && d.previous.valid && d.previous.firmware);
+  }
+
+  loadArchive() {
+    const base = this.panelBase();
+    if (!base) {
+      this.$("a_status").innerHTML = `<dt>Panel</dt><dd class="bad">not found on the network yet &mdash; type its address</dd>`;
+      return;
+    }
+    const get = (path) => fetch(base + path).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+    get("/sd/status.json").then((st) => {
+      this.$("a_now").disabled = !st.mounted;
+      const kv = (l, v, cls = "") => `<dt>${l}</dt><dd class="${cls}">${esc(v)}</dd>`;
+      this.$("a_status").innerHTML = kv("Panel", base.replace("http://", ""))
+        + (st.mounted ? kv("Card", `${st.card || "SD"} · ${(st.free_mb / 1024).toFixed(1)} of ${(st.total_mb / 1024).toFixed(1)} GB free`)
+          : kv("Card", "not working: " + st.error, "bad"))
+        + kv("History rows written", st.rows_written + (st.last_row ? " · last " + fmtTime(st.last_row, true) : ""))
+        + kv("Last nightly backup", st.last_backup || "not yet", /failed/.test(st.last_backup) ? "bad" : "");
+      if (!st.mounted) return;
+      get("/sd/list.json?dir=history").then((d) => {
+        const sel = this.$("a_month");
+        sel.innerHTML = d.files.filter((f) => f.name.endsWith(".csv"))
+          .map((f) => `<option value="${esc(f.name)}">${esc(f.name.replace(".csv", ""))}</option>`).join("");
+        this.loadMonth();
+      });
+      get("/sd/list.json?dir=backups").then((d) => this.drawBackups(d.files));
+      get("/sd/list.json?dir=firmware").then((d) => this.drawFirmware(d.files));
+    }).catch(() => {
+      this.$("a_status").innerHTML = `<dt>Panel</dt><dd class="bad">${esc(base)} did not answer</dd>`;
+    });
+  }
+
+  loadMonth() {
+    const name = this.$("a_month").value, base = this.panelBase();
+    if (!name || !base) { this.set("a_hmsg", "No history on the card yet."); return; }
+    const url = base + "/sd/file?path=history/" + encodeURIComponent(name);
+    this.$("a_csv").href = url + "&dl=1";
+    this.set("a_hmsg", "Loading…");
+    fetch(url).then((r) => r.text()).then((text) => {
+      const lines = text.trim().split("\n");
+      const cols = lines.shift().split(",");
+      const rows = lines.map((l) => l.split(","));
+      if (!rows.length) { this.set("a_hmsg", "Empty month."); return; }
+      const ci = (n) => cols.indexOf(n);
+      const t0 = +rows[0][0], t1 = +rows[rows.length - 1][0];
+      // Bucket a month of 5-minute rows down to ~1000 points per line.
+      const n0 = Math.floor((t1 - t0) / 300) + 1, k = Math.max(1, Math.ceil(n0 / 1000)), n = Math.ceil(n0 / k);
+      const series = {};
+      for (const key of ["temp", "target", "tds"]) {
+        const sum = new Array(n).fill(0), cnt = new Array(n).fill(0), c = ci(key);
+        if (c < 0) continue;
+        for (const r of rows) {
+          const v = parseFloat(r[c]);
+          if (isNaN(v)) continue;
+          const i = Math.floor((+r[0] - t0) / 300 / k);
+          sum[i] += v; cnt[i]++;
+        }
+        series[key] = sum.map((x, i) => (cnt[i] ? x / cnt[i] : null));
+      }
+      const d = { slots: n, step: 300 * k, end: t0 + (n - 1) * 300 * k, series };
+      this.set("a_hmsg", rows.length + " readings");
+      this.chart("ac_temp", d, [{ v: series.target, c: C.muted, w: 1.5, dash: "4 4" }, { v: series.temp, c: "#fff", w: 1.5 }], 1);
+      this.chart("ac_tds", d, [{ v: series.tds, c: C.blue, w: 1.5 }], 0);
+    }).catch(() => this.set("a_hmsg", "Could not read that month."));
+  }
+
+  drawBackups(files) {
+    const base = this.panelBase();
+    const rows = files.filter((f) => f.name.endsWith(".json")).map((f) => {
+      const p = "backups/" + encodeURIComponent(f.name);
+      return `<tr><td>${esc(f.name.replace(".json", ""))}</td><td class="v sub">${(f.size / 1024).toFixed(1)} KB</td>
+        <td class="v"><a class="btn" style="padding:3px 10px" href="${base}/sd/file?path=${p}&dl=1">Download</a>
+        <button class="btn" style="padding:3px 10px" data-restore="${esc(f.name)}">Restore&hellip;</button></td></tr>`;
+    }).join("");
+    this.$("a_backups").innerHTML = `<tr><th>Night</th><th class="v">Size</th><th></th></tr>`
+      + (rows || `<tr><td colspan="3" class="sub">None yet &mdash; the first is made at 03:00, or press Back up now.</td></tr>`);
+    this.querySelectorAll("[data-restore]").forEach((b) => { b.onclick = () => this.restore(b.dataset.restore); });
+  }
+
+  restore(name) {
+    const want = [];
+    if (confirm(`Restore SETTINGS from ${name}? (targets, tank details, calibration, CO2 times)`)) want.push("settings=1");
+    if (confirm(`Restore the learned HEAT MODEL from ${name}?`)) want.push("model=1");
+    if (confirm(`Merge the WATER TESTS from ${name}? Nothing logged since is removed.`)) want.push("tests=1");
+    if (!want.length) return;
+    fetch(this.panelBase() + "/sd/file?path=backups/" + encodeURIComponent(name)).then((r) => r.text())
+      .then((body) => fetch("/restore?" + want.join("&"), { method: "POST", headers: { "Content-Type": "application/json" }, body }))
+      .then(async (r) => alert((await r.text()) + (r.ok ? " Settings update over the next few seconds." : "")))
+      .catch(() => alert("Could not restore: the panel or the controller did not answer."));
+  }
+
+  drawFirmware(files) {
+    const base = this.panelBase();
+    const bins = files.filter((f) => f.name.endsWith(".bin"));
+    const rows = bins.map((f) => {
+      const who = f.name.startsWith("panel-") ? "panel" : "controller";
+      const p = "firmware/" + encodeURIComponent(f.name);
+      const running = this.slots && this.slots.running && f.name.includes(this.slots.running.firmware || "--");
+      return `<tr><td>${who}${running ? ' <span class="pill" style="padding:1px 8px">running</span>' : ""}</td>
+        <td class="sub" data-side="${esc(f.name)}">${esc(f.name.replace(/^\w+-|\.bin$/g, "").slice(0, 8))}</td>
+        <td class="v sub">${(f.size / 1048576).toFixed(2)} MB</td>
+        <td class="v"><a class="btn" style="padding:3px 10px" href="${base}/sd/file?path=${p}&dl=1">Download</a>
+        ${who === "controller" && !running ? `<button class="btn" style="padding:3px 10px" data-install="${esc(f.name)}">Install</button>` : ""}
+        ${running ? "" : `<button class="btn warn" style="padding:3px 10px" data-del="${esc(f.name)}">Delete</button>`}</td></tr>`;
+    }).join("");
+    this.$("a_fw").innerHTML = `<tr><th>For</th><th>Build</th><th class="v">Size</th><th></th></tr>`
+      + (rows || `<tr><td colspan="4" class="sub">None yet &mdash; each build is copied on the first night it runs.</td></tr>`);
+    // The build date lives in each .bin's sidecar .json.
+    bins.forEach((f) => {
+      fetch(base + "/sd/file?path=firmware/" + encodeURIComponent(f.name.replace(/\.bin$/, ".json")))
+        .then((r) => r.json()).then((j) => {
+          const cell = this.querySelector(`[data-side="${CSS.escape(f.name)}"]`);
+          if (cell && j.running) cell.textContent = j.running.built + " · " + String(j.running.firmware).slice(0, 8);
+        }).catch(() => {});
+    });
+    this.querySelectorAll("[data-install]").forEach((b) => { b.onclick = () => this.installFromSd(b.dataset.install); });
+    this.querySelectorAll("[data-del]").forEach((b) => {
+      b.onclick = () => confirm("Delete " + b.dataset.del + " from the SD card?")
+        && fetch(base + "/sd/delete?path=firmware/" + encodeURIComponent(b.dataset.del), { method: "POST" }).then(() => this.loadArchive());
+    });
+  }
+
+  installFromSd(name) {
+    if (!confirm(`Install ${name} on this controller and restart it?`)) return;
+    this.set("a_fmsg", "Fetching from the SD card…", "msg");
+    fetch(this.panelBase() + "/sd/file?path=firmware/" + encodeURIComponent(name)).then((r) => r.blob()).then((blob) => {
+      const fd = new FormData();
+      fd.append("update", blob, name);
+      const x = new XMLHttpRequest();
+      x.upload.onprogress = (e) => { if (e.lengthComputable) this.set("a_fmsg", "Installing " + Math.round(100 * e.loaded / e.total) + "%", "msg"); };
+      x.onload = () => this.set("a_fmsg", x.status === 200 ? "Done -- restarting." : "Failed: " + x.responseText, "msg " + (x.status === 200 ? "good" : "bad"));
+      x.onerror = () => this.set("a_fmsg", "Install failed.", "msg bad");
+      x.open("POST", "/update");
+      x.send(fd);
+    }).catch(() => this.set("a_fmsg", "Could not read it from the SD card.", "msg bad"));
   }
 
   // ------------------------------------------------------------- page: diag

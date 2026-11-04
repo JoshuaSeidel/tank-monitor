@@ -84,7 +84,7 @@ input, select { background: var(--track); color: var(--ink); border: 1px solid v
   border-radius: 9px; padding: 8px 10px; width: 100%; }
 input:disabled, select:disabled { opacity: .5; }
 .btn { background: var(--track); color: var(--ink); border: 1px solid var(--hair); border-radius: 10px;
-  padding: 8px 16px; cursor: pointer; font-weight: 600; }
+  padding: 8px 16px; cursor: pointer; font-weight: 600; text-decoration: none; display: inline-block; }
 .btn.primary { background: var(--blue); border-color: var(--blue); }
 .btn.warn { color: var(--bad); }
 .btn:disabled { opacity: .4; cursor: default; }

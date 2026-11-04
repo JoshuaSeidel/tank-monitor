@@ -38,6 +38,14 @@ class TankHistory : public PollingComponent, public AsyncWebHandler {
   /// "C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh>,<kh>", -999 for not tested.
   std::string chem_frame() const;
 
+  /// The water-test log as a JSON array, newest first (for /tests.json and
+  /// the settings backup).
+  std::string tests_json_array() const;
+  /// Merge one test from a backup: added unless a test at that exact time
+  /// is already kept. NAN = not tested. Call save_tests() after a batch.
+  bool import_test(uint32_t t, float ph, float nh3, float no2, float no3, float gh, float kh);
+  void save_tests() { this->save_tests_(); }
+
   static const int16_t MISSING = INT16_MIN;
 
  protected:

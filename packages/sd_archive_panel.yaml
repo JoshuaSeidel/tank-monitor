@@ -1,0 +1,125 @@
+# The panel's SD card: the tank's long-term memory. Needs a FAT32 card in
+# the 4.3" Waveshare's TF slot (any size; a few GB is decades of this).
+#
+#   history/YYYY-MM.csv      a row every 5 minutes, forever -- from the BLE
+#                            telemetry this panel already receives
+#   backups/YYYY-MM-DD.json  the controller's settings, heat model and water
+#                            tests, pulled at 03:00 nightly (and on boot if
+#                            today's is missing)
+#   firmware/*.bin           every controller and panel build that has run,
+#                            so any of them can be reinstalled
+#
+# The controller's web page reads and restores all of it (Archive tab).
+# Without a card everything else on the panel works exactly as before; the
+# component retries the card every minute and says why in "SD Card".
+#
+# Needs: packages/ble_link_panel_v3.yaml (the readings), ble_chem_panel.yaml
+# (r_co2/r_air are the board file's), the layout package (controller_host),
+# and web OTA from packages/standalone.yaml.
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [sd_archive]
+    refresh: 0s
+
+sd_archive:
+  id: archive
+  time_id: sntp_time
+  # TF slot: SPI on GPIO11/13/12; chip-select is the CH422G's EXIO4,
+  # active low (Waveshare's pin table), held low for good.
+  mosi_pin: 11
+  miso_pin: 13
+  clk_pin: 12
+  cs_pin:
+    ch422g: io_ex
+    number: 4
+  controller_host: ${controller_host}
+  # CSV columns, in this order. The same names as the controller's
+  # /history.json series, so the web page charts both the same way.
+  series:
+    - name: temp
+      sensor: arch_temp
+      decimals: 2
+    - name: target
+      sensor: arch_target
+      decimals: 2
+    - name: tds
+      sensor: tds_mean
+      decimals: 0
+    - name: tdsraw
+      sensor: tds
+      decimals: 0
+    - name: lux
+      sensor: tank_lux
+      decimals: 0
+    - name: heat
+      sensor: arch_heat
+      decimals: 1
+    - name: fan
+      sensor: arch_fan
+      decimals: 1
+    - name: co2
+      sensor: arch_co2
+      decimals: 1
+    - name: air
+      sensor: arch_air
+      decimals: 1
+
+# The panel holds these as Celsius or as globals; the archive wants the
+# same units the web page shows. NaN until the controller has been heard.
+sensor:
+  - platform: template
+    id: arch_temp
+    internal: true
+    update_interval: 30s
+    lambda: |-
+      const float c = id(water_temp).state;
+      return std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f;
+  - platform: template
+    id: arch_target
+    internal: true
+    update_interval: 30s
+    lambda: |-
+      const float c = id(r_setpoint_c);
+      return std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f;
+  # Duty and outlets only count while the link is live: a stale value
+  # averaged into history would invent hours of heating that never happened.
+  - platform: template
+    id: arch_heat
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(controller_link).state ? id(r_heat) : NAN;'
+  - platform: template
+    id: arch_fan
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(controller_link).state ? id(r_fan) : NAN;'
+  - platform: template
+    id: arch_co2
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(controller_link).state && id(r_co2) >= 0 ? id(r_co2) * 100.0f : NAN;'
+  - platform: template
+    id: arch_air
+    internal: true
+    update_interval: 30s
+    lambda: 'return id(controller_link).state && id(r_air) >= 0 ? id(r_air) * 100.0f : NAN;'
+
+text_sensor:
+  - platform: template
+    name: "SD Card"
+    icon: "mdi:sd"
+    entity_category: diagnostic
+    update_interval: 60s
+    lambda: 'return {id(archive).status_text()};'
+
+button:
+  - platform: template
+    name: "Back Up Now"
+    icon: "mdi:content-save"
+    entity_category: config
+    on_press:
+      - lambda: id(archive).backup_now();

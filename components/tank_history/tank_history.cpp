@@ -250,11 +250,20 @@ void TankHistory::history_json_(AsyncWebServerRequest *request, Ring &r) {
 }
 
 void TankHistory::tests_json_(AsyncWebServerRequest *request) {
-  std::string out;
-  out.reserve(64 + this->log_.count * 90);
   char b[48];
-  snprintf(b, sizeof(b), "{\"now\":%u,\"tests\":[", (unsigned) this->now_());
-  out += b;
+  snprintf(b, sizeof(b), "{\"now\":%u,\"tests\":", (unsigned) this->now_());
+  std::string out = b;
+  out += this->tests_json_array();
+  out += '}';
+  auto *resp = request->beginResponse(200, "application/json", out);
+  resp->addHeader("Cache-Control", "no-store");
+  request->send(resp);
+}
+
+std::string TankHistory::tests_json_array() const {
+  std::string out = "[";
+  out.reserve(8 + this->log_.count * 90);
+  char b[48];
   for (uint8_t i = 0; i < this->log_.count; i++) {
     const Test &t = this->log_.tests[i];
     if (i > 0)
@@ -274,10 +283,34 @@ void TankHistory::tests_json_(AsyncWebServerRequest *request) {
     append_fixed(out, t.kh, 1.0f);
     out += '}';
   }
-  out += "]}";
-  auto *resp = request->beginResponse(200, "application/json", out);
-  resp->addHeader("Cache-Control", "no-store");
-  request->send(resp);
+  out += ']';
+  return out;
+}
+
+bool TankHistory::import_test(uint32_t when, float ph, float nh3, float no2, float no3, float gh, float kh) {
+  if (when == 0)
+    return false;
+  uint8_t pos = 0;
+  while (pos < this->log_.count && this->log_.tests[pos].t > when)
+    pos++;
+  if (pos < this->log_.count && this->log_.tests[pos].t == when)
+    return false;  // Already kept.
+  if (pos >= MAX_TESTS)
+    return false;  // Older than everything kept.
+  Test t{};
+  t.t = when;
+  t.ph = this->pack_(ph, 100.0f);
+  t.nh3 = this->pack_(nh3, 100.0f);
+  t.no2 = this->pack_(no2, 100.0f);
+  t.no3 = this->pack_(no3, 10.0f);
+  t.gh = this->pack_(gh, 1.0f);
+  t.kh = this->pack_(kh, 1.0f);
+  const uint8_t keep = std::min<uint8_t>(this->log_.count, MAX_TESTS - 1);
+  for (int i = keep; i > pos; i--)
+    this->log_.tests[i] = this->log_.tests[i - 1];
+  this->log_.tests[pos] = t;
+  this->log_.count = keep + 1;
+  return true;
 }
 
 // Blank or absent = not tested. Out of range is refused outright rather than

@@ -13,7 +13,7 @@ external_components:
       type: git
       url: https://github.com/JoshuaSeidel/tank-monitor
       ref: main
-    components: [tank_history, crash_report]
+    components: [tank_history, tank_backup, crash_report]
     refresh: 0s
 
 # The whole-tank site in place of the standard page. The layout is the same
@@ -73,6 +73,15 @@ sensor:
     internal: true
     update_interval: 30s
     lambda: 'return id(controller).get_fan_duty();'
+
+# Settings backup/restore (/backup.json, /restore), the firmware slots and
+# rollback, and the running firmware for the panel to archive. The panel's
+# SD card pulls the backup and any new firmware every night at 03:00
+# (packages/sd_archive_panel.yaml); the web page's Archive tab restores.
+tank_backup:
+  controller: controller
+  history: history
+  panel_host: ${panel_host}
 
 # WHY IT LAST CRASHED, kept across reboots and power cuts. With no Home
 # Assistant history, this is the only record a crash leaves.

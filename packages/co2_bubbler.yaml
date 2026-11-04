@@ -162,6 +162,10 @@ sensor:
     update_interval: 30s
     lambda: 'return id(bubbler_relay).state ? 100.0f : 0.0f;'
 
+# The schedule switch is a setting: it goes in the backup.
+tank_backup:
+  switches: [co2_schedule]
+
 tank_history:
   series:
     - name: co2

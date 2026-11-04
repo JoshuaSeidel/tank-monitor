@@ -9,6 +9,11 @@
 # What it draws comes from packages/layout_15g.yaml, the same file the
 # controller's web page draws from.
 #
+# Put a FAT32 micro-SD card in the TF slot: it keeps history for good,
+# backs up the controller's settings every night and keeps a copy of every
+# firmware build (packages/sd_archive_panel.yaml). Everything else works
+# without one.
+#
 # ---------------------------------------------------------------------
 # s3_ble_mac -- the 15 gal controller's BLE address
 # ---------------------------------------------------------------------
@@ -39,6 +44,8 @@ packages:
       - packages/ble_chem_panel.yaml
       - packages/layout_15g.yaml
       - boards/waveshare-esp32s3-lcd-43.yaml
+      # The SD card: forever-history, nightly backups, firmware copies.
+      - packages/sd_archive_panel.yaml
       # LAST: removes MQTT and sets Kaiden's Wi-Fi.
       - packages/standalone.yaml
     refresh: 0s
