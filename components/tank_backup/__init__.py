@@ -8,7 +8,12 @@ backups and firmware copies are kept (components/sd_archive).
   GET  /firmware/slots.json    the running build and the one before it
   POST /firmware/rollback      boot the previous build
   GET  /firmware/current.bin   the running firmware image, for archiving
-  GET  /peer.json              the panel's address, found by mDNS
+  GET  /peer.json              the panel's Wi-Fi address, as the panel
+                               reported it over BLE
+
+The panel pulls the backup, the slot info and the firmware over BLE -- the
+two devices never talk over Wi-Fi. ble_request() is the server side of that
+transfer; packages/standalone_controller.yaml wires it to a characteristic.
 """
 
 import esphome.codegen as cg
@@ -31,7 +36,6 @@ CONF_WEB_SERVER_BASE_ID = "web_server_base_id"
 CONF_CONTROLLER = "controller"
 CONF_HISTORY = "history"
 CONF_SWITCHES = "switches"
-CONF_PANEL_HOST = "panel_host"
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -46,8 +50,6 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_SWITCHES, default=[]): cv.ensure_list(
             cv.use_id(switch.Switch)
         ),
-        # The panel's mDNS host name, without ".local".
-        cv.Optional(CONF_PANEL_HOST, default=""): cv.string,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -61,4 +63,3 @@ async def to_code(config):
     cg.add(var.set_history(await cg.get_variable(config[CONF_HISTORY])))
     for sw in config[CONF_SWITCHES]:
         cg.add(var.add_switch(await cg.get_variable(sw)))
-    cg.add(var.set_panel_host(config[CONF_PANEL_HOST]))

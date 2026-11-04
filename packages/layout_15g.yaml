@@ -1,18 +1,13 @@
-# Kaiden's 15 gal: what the tank looks like, in inches from the LEFT end,
-# and what its two devices are called.
+# Kaiden's 15 gal: what the tank looks like, in inches from the LEFT end.
 #
 # ONE copy for both devices: the panel's Vessel page and the controller's
-# web page draw the same tank from these, and each finds the other on the
-# network by these names (mDNS, so they must match the wrappers'
-# device_name). A wrapper's own substitutions win over these, so nothing
-# here needs repeating there.
+# web page draw the same tank from these. A wrapper's own substitutions win
+# over these, so nothing here needs repeating there.
 #
 # A 15 long is 24 x 12 x 12. Measured values beat these; change them here.
 # Keep the fan ~5 in or more from the probe, or the probe's temperature
 # readout overlaps it on the panel.
 substitutions:
-  controller_host: tank-monitor-15-gallon
-  panel_host: tank-monitor-15g
   tank_title: "15 Gallon"
   dual_system: "false"
   tank_width_in: "24"

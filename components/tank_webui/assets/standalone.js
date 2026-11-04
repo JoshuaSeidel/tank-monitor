@@ -690,8 +690,8 @@ class TankSite extends HTMLElement {
 
   // ---------------------------------------------------------- page: archive
   // Everything on the panel's SD card, reached directly from this page: the
-  // controller finds the panel by mDNS (/peer.json) and the panel answers
-  // with CORS. A remembered address is the fallback.
+  // panel reports its Wi-Fi address to the controller over BLE (/peer.json)
+  // and answers with CORS. A typed-in address is the fallback.
   page_archive() {
     return `<div class="grid">
       <div class="card span4"><div class="lbl">SD card on the panel</div>
@@ -700,7 +700,9 @@ class TankSite extends HTMLElement {
           <span class="msg" id="a_msg"></span>
           <span style="margin-left:auto" class="sub">Panel address <input id="a_ip" style="width:150px;display:inline-block" placeholder="auto"></span></div>
         <div class="note">The panel writes a history row every 5 minutes and, every night at 03:00, saves this
-          controller's settings, learned heat model and water tests, plus a copy of any firmware it has not seen.</div></div>
+          controller's settings, learned heat model and water tests, plus a copy of any firmware it has not seen.
+          The two talk over Bluetooth, so all of that carries on through a Wi-Fi outage; only this page needs Wi-Fi
+          to reach the panel. The panel reports its address over Bluetooth too.</div></div>
       <div class="card span4"><div class="lbl">History beyond 30 days</div>
         <div class="actions" style="margin-top:6px"><select id="a_month" style="max-width:200px"></select>
           <a class="btn" id="a_csv">Download CSV</a><span class="sub" id="a_hmsg"></span></div>

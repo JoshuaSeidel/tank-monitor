@@ -4,8 +4,8 @@
 #   history/YYYY-MM.csv      a row every 5 minutes, forever -- from the BLE
 #                            telemetry this panel already receives
 #   backups/YYYY-MM-DD.json  the controller's settings, heat model and water
-#                            tests, pulled at 03:00 nightly (and on boot if
-#                            today's is missing)
+#                            tests, pulled over BLE at 03:00 nightly (and on
+#                            boot if today's is missing)
 #   firmware/*.bin           every controller and panel build that has run,
 #                            so any of them can be reinstalled
 #
@@ -14,8 +14,9 @@
 # component retries the card every minute and says why in "SD Card".
 #
 # Needs: packages/ble_link_panel_v3.yaml (the readings), ble_chem_panel.yaml
-# (r_co2/r_air are the board file's), the layout package (controller_host),
-# and web OTA from packages/standalone.yaml.
+# (r_co2/r_air are the board file's) and web OTA from
+# packages/standalone.yaml. The controller needs packages/standalone_
+# controller.yaml for the transfer service.
 
 external_components:
   - source:
@@ -36,7 +37,8 @@ sd_archive:
   cs_pin:
     ch422g: io_ex
     number: 4
-  controller_host: ${controller_host}
+  # Everything from the controller comes over this link, never Wi-Fi.
+  ble_client_id: ctrl_ble
   # CSV columns, in this order. The same names as the controller's
   # /history.json series, so the web page charts both the same way.
   series:

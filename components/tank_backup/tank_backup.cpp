@@ -10,10 +10,9 @@
 #include <esp_ota_ops.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#ifdef USE_MDNS
-#include <mdns.h>
-#endif
+#include <esp_rom_crc.h>
 
+#include <sys/time.h>
 #include <cmath>
 #include <memory>
 
@@ -24,34 +23,9 @@ static const char *const TAG = "tank_backup";
 // A backup is a few KB: every setting plus 40 tests. Anything far larger is
 // not one of ours.
 static const size_t MAX_BODY = 32 * 1024;
+static void describe(JsonObject o, const esp_partition_t *p, bool running);
 
-void TankBackup::setup() {
-  this->base_->add_handler(this);
-  if (!this->panel_host_.empty())
-    xTaskCreate(TankBackup::peer_task_, "tank_peer", 4096, this, 1, nullptr);
-}
-
-// The panel's address, so the web page can reach its SD archive. Looked up
-// by mDNS on a task of its own: a query blocks for up to its timeout.
-void TankBackup::peer_task_(void *arg) {
-  auto *self = static_cast<TankBackup *>(arg);
-  for (;;) {
-    bool found = false;
-#ifdef USE_MDNS
-    esp_ip4_addr_t addr{};
-    if (mdns_query_a(self->panel_host_.c_str(), 3000, &addr) == ESP_OK && addr.addr != 0) {
-      char ip[16];
-      snprintf(ip, sizeof(ip), IPSTR, IP2STR(&addr));
-      std::lock_guard<std::mutex> lock(self->peer_lock_);
-      if (self->panel_ip_ != ip)
-        ESP_LOGI(TAG, "Panel %s is at %s", self->panel_host_.c_str(), ip);
-      self->panel_ip_ = ip;
-      found = true;
-    }
-#endif
-    vTaskDelay(pdMS_TO_TICKS(found ? 300000 : 30000));
-  }
-}
+void TankBackup::setup() { this->base_->add_handler(this); }
 
 bool TankBackup::canHandle(AsyncWebServerRequest *request) const {
   char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
@@ -85,11 +59,15 @@ void TankBackup::handleRequest(AsyncWebServerRequest *request) {
     request->send(resp);
   } else if (url == "/peer.json") {
     std::string ip;
+    uint32_t age = 0;
     {
       std::lock_guard<std::mutex> lock(this->peer_lock_);
       ip = this->panel_ip_;
+      age = ip.empty() ? 0 : (millis() - this->panel_ip_ms_) / 1000;
     }
-    std::string out = "{\"panel_host\":\"" + this->panel_host_ + "\",\"panel_ip\":\"" + ip + "\"}";
+    char tail[40];
+    snprintf(tail, sizeof(tail), "\",\"age_s\":%u}", (unsigned) age);
+    std::string out = "{\"panel_ip\":\"" + ip + tail;
     auto *resp = request->beginResponse(200, "application/json", out);
     resp->addHeader("Cache-Control", "no-store");
     request->send(resp);
@@ -366,10 +344,131 @@ void TankBackup::send_firmware_(AsyncWebServerRequest *request) {
   httpd_resp_send_chunk(r, nullptr, 0);
 }
 
+// ------------------------------------------------------------ BLE transfer
+
+void TankBackup::reply_(esp32_ble_server::BLECharacteristic *out, char kind, const std::string &text) {
+  std::vector<uint8_t> p;
+  p.reserve(1 + text.size());
+  p.push_back((uint8_t) kind);
+  p.insert(p.end(), text.begin(), text.end());
+  out->set_value(std::move(p));
+  out->notify();
+}
+
+void TankBackup::ble_request(const uint8_t *data, size_t len, esp32_ble_server::BLECharacteristic *out) {
+  const std::string req(reinterpret_cast<const char *>(data), len);
+  if (req.rfind("I,", 0) == 0) {
+    // The panel's Wi-Fi address, so this page can link to its SD archive.
+    const std::string ip = req.substr(2);
+    if (ip.size() < 7 || ip.size() > 15 || ip.find_first_not_of("0123456789.") != std::string::npos)
+      return;
+    std::lock_guard<std::mutex> lock(this->peer_lock_);
+    if (this->panel_ip_ != ip)
+      ESP_LOGI(TAG, "Panel reports its address as %s", ip.c_str());
+    this->panel_ip_ = ip;
+    this->panel_ip_ms_ = millis();
+    return;
+  }
+  if (req.rfind("T,", 0) == 0) {
+    // The panel's clock. Taken only when this controller has none -- it
+    // restarted while Wi-Fi (and so internet time) was down -- so the CO2
+    // schedule and the history keep running. SNTP corrects it once Wi-Fi is
+    // back.
+    const uint32_t epoch = (uint32_t) strtoul(req.c_str() + 2, nullptr, 10);
+    if (::time(nullptr) < 1700000000 && epoch > 1700000000) {
+      struct timeval tv = {(time_t) epoch, 0};
+      settimeofday(&tv, nullptr);
+      ESP_LOGW(TAG, "No clock of its own: took the panel's over BLE");
+    }
+    return;
+  }
+  if (req == "C") {
+    this->xfer_kind_ = 0;
+    this->xfer_buf_.clear();
+    this->xfer_buf_.shrink_to_fit();
+    return;
+  }
+  if (req.size() == 3 && req[0] == 'O' && req[1] == ',') {
+    const char k = req[2];
+    std::string name;
+    uint32_t crc = 0;
+    if (k == 'B' || k == 'S') {
+      if (k == 'B') {
+        this->xfer_buf_ = this->backup_json_();
+        name = "backup.json";
+      } else {
+        const esp_partition_t *run = esp_ota_get_running_partition();
+        const esp_partition_t *other = esp_ota_get_next_update_partition(run);
+        this->xfer_buf_ = json::build_json([&](JsonObject root) {
+          describe(root["running"].to<JsonObject>(), run, true);
+          if (other != nullptr)
+            describe(root["previous"].to<JsonObject>(), other, false);
+        });
+        name = "slots.json";
+      }
+      this->xfer_size_ = this->xfer_buf_.size();
+      crc = esp_rom_crc32_le(0, reinterpret_cast<const uint8_t *>(this->xfer_buf_.data()), this->xfer_size_);
+    } else if (k == 'F') {
+      const esp_partition_t *run = esp_ota_get_running_partition();
+      esp_partition_pos_t pos{run->address, run->size};
+      esp_image_metadata_t meta{};
+      if (esp_image_verify(ESP_IMAGE_VERIFY_SILENT, &pos, &meta) != ESP_OK || meta.image_len == 0) {
+        this->reply_(out, 'E', "cannot read the running firmware");
+        return;
+      }
+      std::unique_ptr<uint8_t[]> buf(new uint8_t[4096]);
+      for (uint32_t off = 0; off < meta.image_len;) {
+        const size_t n = std::min<uint32_t>(4096, meta.image_len - off);
+        esp_partition_read(run, off, buf.get(), n);
+        crc = esp_rom_crc32_le(crc, buf.get(), n);
+        off += n;
+      }
+      char sha[17];
+      esp_app_get_elf_sha256(sha, sizeof(sha));
+      this->xfer_part_ = run;
+      this->xfer_size_ = meta.image_len;
+      name = std::string("controller-") + sha + ".bin";
+    } else {
+      this->reply_(out, 'E', "unknown transfer");
+      return;
+    }
+    this->xfer_kind_ = k;
+    char head[32];
+    snprintf(head, sizeof(head), "%u,%08x,", (unsigned) this->xfer_size_, (unsigned) crc);
+    this->reply_(out, 'S', head + name);
+    return;
+  }
+  unsigned off = 0, n = 0;
+  if (sscanf(req.c_str(), "R,%u,%u", &off, &n) == 2) {
+    if (this->xfer_kind_ == 0) {
+      this->reply_(out, 'E', "nothing open");
+      return;
+    }
+    n = std::min<unsigned>(n, 16);
+    for (unsigned i = 0; i < n && off < this->xfer_size_; i++) {
+      const size_t len = std::min<size_t>(CHUNK, this->xfer_size_ - off);
+      std::vector<uint8_t> p(5 + len);
+      p[0] = 'D';
+      p[1] = off & 0xff;
+      p[2] = (off >> 8) & 0xff;
+      p[3] = (off >> 16) & 0xff;
+      p[4] = (off >> 24) & 0xff;
+      if (this->xfer_kind_ == 'F')
+        esp_partition_read(static_cast<const esp_partition_t *>(this->xfer_part_), off, p.data() + 5, len);
+      else
+        memcpy(p.data() + 5, this->xfer_buf_.data() + off, len);
+      out->set_value(std::move(p));
+      out->notify();
+      off += len;
+    }
+    return;
+  }
+  this->reply_(out, 'E', "bad request");
+}
+
 void TankBackup::dump_config() {
   ESP_LOGCONFIG(TAG, "Tank Backup:");
-  ESP_LOGCONFIG(TAG, "  %u setting switches; panel host '%s'", (unsigned) this->switches_.size(),
-                this->panel_host_.c_str());
+  ESP_LOGCONFIG(TAG, "  %u setting switches; panel transfers over BLE", (unsigned) this->switches_.size());
 }
 
 }  // namespace tank_backup

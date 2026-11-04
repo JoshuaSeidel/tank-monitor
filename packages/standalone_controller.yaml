@@ -76,12 +76,13 @@ sensor:
 
 # Settings backup/restore (/backup.json, /restore), the firmware slots and
 # rollback, and the running firmware for the panel to archive. The panel's
-# SD card pulls the backup and any new firmware every night at 03:00
-# (packages/sd_archive_panel.yaml); the web page's Archive tab restores.
+# SD card pulls the backup and any new firmware every night at 03:00 OVER
+# BLE (the transfer service below; packages/sd_archive_panel.yaml); the web
+# page's Archive tab restores.
 tank_backup:
+  id: backup
   controller: controller
   history: history
-  panel_host: ${panel_host}
 
 # WHY IT LAST CRASHED, kept across reboots and power cuts. With no Home
 # Assistant history, this is the only record a crash leaves.
@@ -125,10 +126,11 @@ button:
 # ---------------------------------------------------------------------
 # A second service beside the v3 telemetry one, so the 20-field frame and
 # its strict parser stay exactly as they are. The panel subscribes to this
-# characteristic as well; one line, the newest test and the two extra
-# outlets:
-#   C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh ppm>,<kh ppm>,<co2>,<air>
-# -999 = not tested; co2/air -1 = not fitted, 0 off, 1 on.
+# characteristic as well; one line, the newest test, the two extra outlets
+# and this controller's clock:
+#   C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh ppm>,<kh ppm>,<co2>,<air>,<now>
+# -999 = not tested; co2/air -1 = not fitted, 0 off, 1 on; now 0 = no clock.
+# A panel that restarted during a Wi-Fi outage takes its time from <now>.
 esp32_ble_server:
   services:
     - uuid: "6e400101-b5a3-f393-e0a9-e50e24dcca9e"
@@ -138,7 +140,30 @@ esp32_ble_server:
           uuid: "6e400102-b5a3-f393-e0a9-e50e24dcca9e"
           read: true
           notify: true
-          value: "C,0,-999,-999,-999,-999,-999,-999,-1,-1"
+          value: "C,0,-999,-999,-999,-999,-999,-999,-1,-1,0"
+
+    # Panel <-> controller transfers, so the two never need Wi-Fi to talk:
+    # the panel writes a request, the answer comes back as notifications.
+    # The nightly backup, the firmware copies, and the panel's clock and
+    # address all go this way. Protocol: components/tank_backup ble_request.
+    - uuid: "6e400201-b5a3-f393-e0a9-e50e24dcca9e"
+      advertise: false
+      characteristics:
+        # Declared before xfer_req: its on_write refers to this one, and
+        # ESPHome builds characteristics in order.
+        - id: xfer_data
+          uuid: "6e400203-b5a3-f393-e0a9-e50e24dcca9e"
+          read: true
+          notify: true
+          value: ""
+        - id: xfer_req
+          uuid: "6e400202-b5a3-f393-e0a9-e50e24dcca9e"
+          write: true
+          write_no_response: true
+          value: ""
+          on_write:
+            - lambda: |-
+                id(backup).ble_request(x.data(), x.size(), id(xfer_data));
 
 # Every 30 s, and at once whenever an outlet changes (packages/co2_bubbler
 # runs push_aux), so a panel that connects late is current within 30 s.
@@ -167,8 +192,10 @@ script:
       - ble_server.characteristic.set_value:
           id: chem_char
           value: !lambda |-
-            char tail[16];
-            snprintf(tail, sizeof(tail), ",%d,%d", id(aux_co2), id(aux_air));
+            char tail[32];
+            const auto now = id(sntp_time).now();
+            snprintf(tail, sizeof(tail), ",%d,%d,%u", id(aux_co2), id(aux_air),
+                     now.is_valid() ? (unsigned) now.timestamp : 0u);
             const std::string f = id(history).chem_frame() + tail;
             return std::vector<uint8_t>(f.begin(), f.end());
       - ble_server.characteristic.notify:

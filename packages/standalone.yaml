@@ -21,9 +21,16 @@
 # captive portal there sets new credentials -- no reflash needed.
 mqtt: !remove
 
+# Wi-Fi going down must not take the tank down with it. ESPHome's default
+# reboots a device after 15 minutes without Wi-Fi; here that would restart
+# both devices every quarter hour of an outage, dropping their BLE link and,
+# with no internet time to come back to, their clocks. The two devices talk
+# over BLE and keep each other's clock (packages/standalone_controller.yaml,
+# ble_chem_panel.yaml, components/sd_archive), so they simply carry on.
 wifi:
   ssid: !secret standalone_wifi_ssid
   password: !secret standalone_wifi_password
+  reboot_timeout: 0s
 
 # Firmware updates without ESPHome on the same network: build the .bin
 # anywhere, then upload it on the device's web page (Diagnostics -> Update

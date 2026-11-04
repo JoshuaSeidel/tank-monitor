@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/components/esp32_ble_server/ble_characteristic.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/components/tank_controller/tank_controller.h"
@@ -27,7 +28,6 @@ class TankBackup : public Component, public AsyncWebHandler {
   void set_controller(tank_controller::TankController *c) { this->controller_ = c; }
   void set_history(tank_history::TankHistory *h) { this->history_ = h; }
   void add_switch(switch_::Switch *s) { this->switches_.push_back(s); }
-  void set_panel_host(const std::string &host) { this->panel_host_ = host; }
 
   void setup() override;
   void dump_config() override;
@@ -37,24 +37,42 @@ class TankBackup : public Component, public AsyncWebHandler {
   void handleRequest(AsyncWebServerRequest *request) override;
   void handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) override;
 
+  /// One request from the panel over BLE, answered with notifications on
+  /// `out`. Requests are ASCII:
+  ///   O,B | O,S | O,F   open the backup, the slot info or the firmware
+  ///   R,<offset>,<n>    send up to n chunks from offset
+  ///   C                 close
+  ///   I,<ip>            the panel's Wi-Fi address (no reply)
+  /// Replies are 'S' + "<size>,<crc32 hex>,<name>", 'D' + uint32 LE offset +
+  /// up to CHUNK bytes, or 'E' + a reason.
+  void ble_request(const uint8_t *data, size_t len, esp32_ble_server::BLECharacteristic *out);
+  static const size_t CHUNK = 120;
+
  protected:
   std::string backup_json_();
   void restore_(AsyncWebServerRequest *request);
   void slots_json_(AsyncWebServerRequest *request);
   void rollback_(AsyncWebServerRequest *request);
   void send_firmware_(AsyncWebServerRequest *request);
-  static void peer_task_(void *self);
+  void reply_(esp32_ble_server::BLECharacteristic *out, char kind, const std::string &text);
 
   web_server_base::WebServerBase *base_{nullptr};
   tank_controller::TankController *controller_{nullptr};
   tank_history::TankHistory *history_{nullptr};
   std::vector<switch_::Switch *> switches_;
-  std::string panel_host_;
 
   std::string body_;        // the restore document as it arrives
   bool body_too_big_{false};
   std::mutex peer_lock_;
-  std::string panel_ip_;    // found by mDNS; empty until found
+  std::string panel_ip_;    // reported by the panel over BLE; empty until then
+  uint32_t panel_ip_ms_{0};
+
+  // The one transfer open at a time: a snapshot (backup, slots) or the
+  // running firmware partition.
+  char xfer_kind_{0};
+  std::string xfer_buf_;
+  uint32_t xfer_size_{0};
+  const void *xfer_part_{nullptr};
 };
 
 }  // namespace tank_backup

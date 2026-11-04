@@ -5,8 +5,9 @@
 #
 # Rides the existing BLE connection (ctrl_ble in ble_link_panel_v3.yaml)
 # on its own characteristic -- see packages/standalone_controller.yaml.
-# The line is "C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh>,<kh>,<co2>,<air>",
-# -999 = not tested; co2/air are the extra outlets, -1 not fitted. The
+# The line is "C,<epoch>,<ph>,<nh3>,<no2>,<no3>,<gh>,<kh>,<co2>,<air>,<now>",
+# -999 = not tested; co2/air are the extra outlets, -1 not fitted; <now> is
+# the controller's clock (0 = none), adopted if this panel has none. The
 # stamp is the TEST's time, so the panel's age is how old the water test
 # is, not when this panel last heard about it.
 
@@ -50,13 +51,14 @@ text_sensor:
     notify: true
     on_value:
       - lambda: |-
-          // Exactly ten fields or nothing, the same rule as telemetry: a
+          // Exactly eleven fields or nothing, the same rule as telemetry: a
           // truncated read must not become a plausible wrong value.
           unsigned stamp = 0;
           float v[6];
           int co2 = -1, air = -1, used = 0;
-          if (sscanf(x.c_str(), "C,%u,%f,%f,%f,%f,%f,%f,%d,%d%n", &stamp, &v[0], &v[1], &v[2], &v[3],
-                     &v[4], &v[5], &co2, &air, &used) != 9 || used != (int) x.size()) {
+          unsigned now = 0;
+          if (sscanf(x.c_str(), "C,%u,%f,%f,%f,%f,%f,%f,%d,%d,%u%n", &stamp, &v[0], &v[1], &v[2], &v[3],
+                     &v[4], &v[5], &co2, &air, &now, &used) != 10 || used != (int) x.size()) {
             ESP_LOGW("chem", "bad water-test frame: %s", x.c_str());
             return;
           }
@@ -72,3 +74,10 @@ text_sensor:
           // the controller has none, and the panel draws no pill for it.
           id(r_co2) = co2;
           id(r_air) = air;
+          // The controller's clock, taken only when this panel has none (it
+          // restarted while Wi-Fi was down). SNTP corrects it later.
+          if (!id(sntp_time).now().is_valid() && now > 1700000000u) {
+            struct timeval tv = {(time_t) now, 0};
+            settimeofday(&tv, nullptr);
+            ESP_LOGW("chem", "No clock of its own: took the controller's over BLE");
+          }

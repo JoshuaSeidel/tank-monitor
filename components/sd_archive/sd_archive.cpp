@@ -7,7 +7,9 @@
 #include <driver/sdspi_host.h>
 #include <driver/spi_common.h>
 #include <esp_app_desc.h>
-#include <esp_http_client.h>
+#include <esp_gattc_api.h>
+#include <esp_netif.h>
+#include <esp_rom_crc.h>
 #include <esp_http_server.h>
 #include <esp_image_format.h>
 #include <esp_ota_ops.h>
@@ -15,11 +17,9 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <sdmmc_cmd.h>
-#ifdef USE_MDNS
-#include <mdns.h>
-#endif
 
 #include <dirent.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
@@ -36,6 +36,14 @@ static const char *const DIRS[] = {"history", "backups", "firmware"};
 // One backup a night; a year of them is a few MB.
 static const size_t KEEP_BACKUPS = 366;
 static const uint32_t SLOT_S = 300;
+static const char *const XFER_SERVICE = "6e400201-b5a3-f393-e0a9-e50e24dcca9e";
+static const char *const XFER_REQ = "6e400202-b5a3-f393-e0a9-e50e24dcca9e";
+static const char *const XFER_DATA = "6e400203-b5a3-f393-e0a9-e50e24dcca9e";
+// One notification as it arrived. 'S'/'E' + text, or 'D' + offset + bytes.
+struct Packet {
+  uint16_t len;
+  uint8_t data[250];
+};
 
 void SdArchive::add_series(const char *name, sensor::Sensor *sens, int decimals) {
   Series s;
@@ -51,6 +59,7 @@ void SdArchive::setup() {
   this->cs_pin_->setup();
   this->cs_pin_->digital_write(false);
   this->base_->add_handler(this);
+  this->rx_ = xQueueCreate(24, sizeof(Packet));
   xTaskCreate(SdArchive::worker_, "sd_archive", 8192, this, 1, nullptr);
 }
 
@@ -199,10 +208,18 @@ bool SdArchive::mount_() {
 
 void SdArchive::worker_(void *arg) {
   auto *self = static_cast<SdArchive *>(arg);
-  uint32_t last_try = 0;
+  uint32_t last_try = 0, last_tell = 0;
   bool own_done = false, boot_checked = false;
   for (;;) {
     const uint32_t up = millis() / 1000;
+    // Clock and Wi-Fi address to the controller, every 5 minutes and soon
+    // after each reconnect. Independent of the card.
+    if (self->link_ready_ && (last_tell == 0 || up - last_tell >= 300)) {
+      last_tell = up;
+      self->tell_controller_();
+    } else if (!self->link_ready_) {
+      last_tell = 0;
+    }
     if (!self->mounted_ && (last_try == 0 || up - last_try >= 60)) {
       last_try = up;
       if (!self->mount_())
@@ -237,158 +254,267 @@ void SdArchive::worker_(void *arg) {
   }
 }
 
-bool SdArchive::resolve_controller_(std::string &ip) {
-#ifdef USE_MDNS
-  esp_ip4_addr_t addr{};
-  if (mdns_query_a(this->controller_host_.c_str(), 3000, &addr) == ESP_OK && addr.addr != 0) {
-    char b[16];
-    snprintf(b, sizeof(b), IPSTR, IP2STR(&addr));
-    ip = b;
-    std::lock_guard<std::recursive_mutex> g(this->lock_);
-    this->controller_ip_ = ip;
+// ------------------------------------------------------------ BLE link
+
+void SdArchive::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+                                    esp_ble_gattc_cb_param_t *param) {
+  switch (event) {
+    case ESP_GATTC_SEARCH_CMPL_EVT: {
+      this->req_handle_ = this->data_handle_ = 0;
+      auto svc = esp32_ble_tracker::ESPBTUUID::from_raw(XFER_SERVICE);
+      auto *req = this->parent()->get_characteristic(svc, esp32_ble_tracker::ESPBTUUID::from_raw(XFER_REQ));
+      auto *data = this->parent()->get_characteristic(svc, esp32_ble_tracker::ESPBTUUID::from_raw(XFER_DATA));
+      if (req == nullptr || data == nullptr) {
+        ESP_LOGW(TAG, "Controller has no transfer service: backups and firmware copies are off");
+        this->node_state = esp32_ble_tracker::ClientState::ESTABLISHED;
+        break;
+      }
+      this->req_handle_ = req->handle;
+      this->data_handle_ = data->handle;
+      if (this->parent()->register_for_notify(data->handle) != ESP_OK)
+        this->node_state = esp32_ble_tracker::ClientState::ESTABLISHED;
+      break;
+    }
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT:
+      if (param->reg_for_notify.handle == this->data_handle_ && this->data_handle_ != 0) {
+        this->node_state = esp32_ble_tracker::ClientState::ESTABLISHED;
+        this->link_ready_ = param->reg_for_notify.status == ESP_GATT_OK;
+      }
+      break;
+    case ESP_GATTC_NOTIFY_EVT:
+      if (param->notify.handle == this->data_handle_ && param->notify.value_len > 0 && this->rx_ != nullptr) {
+        Packet p;
+        p.len = std::min<uint16_t>(param->notify.value_len, sizeof(p.data));
+        memcpy(p.data, param->notify.value, p.len);
+        xQueueSend(this->rx_, &p, 0);
+      }
+      break;
+    case ESP_GATTC_DISCONNECT_EVT:
+    case ESP_GATTC_CLOSE_EVT:
+      this->link_ready_ = false;
+      this->req_handle_ = this->data_handle_ = 0;
+      break;
+    default:
+      break;
+  }
+}
+
+bool SdArchive::send_(const std::string &req) {
+  if (!this->link_ready_ || this->req_handle_ == 0)
+    return false;
+  return esp_ble_gattc_write_char(this->parent()->get_gattc_if(), this->parent()->get_conn_id(), this->req_handle_,
+                                  req.size(), (uint8_t *) req.data(), ESP_GATT_WRITE_TYPE_NO_RSP,
+                                  ESP_GATT_AUTH_REQ_NONE) == ESP_OK;
+}
+
+// The panel's clock and Wi-Fi address. The clock lets a controller that
+// restarted during a Wi-Fi outage keep its schedule and history; it only
+// takes it if it has no time of its own.
+void SdArchive::tell_controller_() {
+  const auto t = this->time_->now();
+  if (t.is_valid())
+    this->send_("T," + std::to_string((uint32_t) t.timestamp));
+  esp_netif_ip_info_t info{};
+  esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  if (sta != nullptr && esp_netif_get_ip_info(sta, &info) == ESP_OK && info.ip.addr != 0) {
+    char ip[16];
+    snprintf(ip, sizeof(ip), IPSTR, IP2STR(&info.ip));
+    this->send_(std::string("I,") + ip);
+  }
+}
+
+static bool next_packet(QueueHandle_t q, Packet &p, uint32_t ms) {
+  return xQueueReceive(q, &p, pdMS_TO_TICKS(ms)) == pdTRUE;
+}
+
+bool SdArchive::open_(char kind, uint32_t &size, uint32_t &crc, std::string &name, std::string &err) {
+  Packet p;
+  while (next_packet(this->rx_, p, 0)) {
+  }  // stale notifications from an abandoned transfer
+  if (!this->send_(std::string("O,") + kind)) {
+    err = "controller not connected over BLE";
+    return false;
+  }
+  // The firmware open checksums the whole image first; allow for it.
+  const uint32_t deadline = millis() + 10000;
+  while ((int32_t) (deadline - millis()) > 0) {
+    if (!next_packet(this->rx_, p, 500))
+      continue;
+    if (p.data[0] == 'E') {
+      err = std::string((const char *) p.data + 1, p.len - 1);
+      return false;
+    }
+    if (p.data[0] != 'S')
+      continue;
+    const std::string head((const char *) p.data + 1, p.len - 1);
+    unsigned sz = 0, c = 0;
+    int used = 0;
+    if (sscanf(head.c_str(), "%u,%x,%n", &sz, &c, &used) < 2 || used == 0) {
+      err = "bad transfer header";
+      return false;
+    }
+    size = sz;
+    crc = c;
+    name = head.substr(used);
     return true;
   }
-#endif
+  err = "controller did not answer over BLE";
   return false;
 }
 
-static esp_http_client_handle_t open_get(const std::string &url, int &status) {
-  esp_http_client_config_t cfg{};
-  cfg.url = url.c_str();
-  cfg.timeout_ms = 20000;
-  cfg.buffer_size = 2048;
-  esp_http_client_handle_t c = esp_http_client_init(&cfg);
-  if (c == nullptr)
-    return nullptr;
-  if (esp_http_client_open(c, 0) != ESP_OK) {
-    esp_http_client_cleanup(c);
-    return nullptr;
+// Pulls [0, size) in batches of 8 chunks, in order. A chunk that is lost
+// costs a re-request from where the data stopped, not a restart; the CRC at
+// the end is the only verdict that counts.
+bool SdArchive::read_all_(uint32_t size, uint32_t crc, const std::function<bool(const uint8_t *, size_t)> &sink,
+                          std::string &err) {
+  uint32_t off = 0, got_crc = 0;
+  int stalls = 0;
+  while (off < size) {
+    if (!this->send_("R," + std::to_string(off) + ",8")) {
+      err = "BLE link lost";
+      return false;
+    }
+    const uint32_t before = off;
+    Packet p;
+    int n = 0;
+    while (n < 8 && off < size && next_packet(this->rx_, p, 3000)) {
+      if (p.data[0] == 'E') {
+        err = std::string((const char *) p.data + 1, p.len - 1);
+        return false;
+      }
+      if (p.data[0] != 'D' || p.len < 6)
+        continue;
+      const uint32_t at = p.data[1] | (p.data[2] << 8) | (p.data[3] << 16) | ((uint32_t) p.data[4] << 24);
+      if (at != off)
+        continue;  // a duplicate or a chunk after a gap: ask again from off
+      const size_t len = p.len - 5;
+      if (!sink(p.data + 5, len)) {
+        err = "card write failed";
+        return false;
+      }
+      got_crc = esp_rom_crc32_le(got_crc, p.data + 5, len);
+      off += len;
+      n++;
+    }
+    if (off == before && ++stalls > 6) {
+      err = "transfer stalled";
+      return false;
+    }
+    if (off != before)
+      stalls = 0;
   }
-  esp_http_client_fetch_headers(c);
-  status = esp_http_client_get_status_code(c);
-  return c;
-}
-
-bool SdArchive::http_to_string_(const std::string &url, std::string &out, std::string &err) {
-  int status = 0;
-  auto c = open_get(url, status);
-  if (c == nullptr || status != 200) {
-    err = c == nullptr ? "no connection" : "HTTP " + std::to_string(status);
-    if (c)
-      esp_http_client_cleanup(c);
+  if (got_crc != crc) {
+    err = "checksum mismatch";
     return false;
   }
-  char buf[1024];
-  int n;
+  return true;
+}
+
+bool SdArchive::fetch_to_string_(char kind, std::string &out, std::string &err) {
+  uint32_t size, crc;
+  std::string name;
+  if (!this->open_(kind, size, crc, name, err))
+    return false;
   out.clear();
-  while ((n = esp_http_client_read(c, buf, sizeof(buf))) > 0 && out.size() < 64 * 1024)
-    out.append(buf, n);
-  esp_http_client_close(c);
-  esp_http_client_cleanup(c);
-  return n >= 0;
+  out.reserve(size);
+  const bool ok = this->read_all_(size, crc, [&](const uint8_t *d, size_t n) {
+    out.append((const char *) d, n);
+    return true;
+  }, err);
+  this->send_("C");
+  return ok;
 }
 
-// Downloads to <path>.part and renames only once complete, so a half
-// download never sits on the card looking like a good file.
-bool SdArchive::http_to_file_(const std::string &url, const std::string &path, std::string &err) {
-  int status = 0;
-  auto c = open_get(url, status);
-  if (c == nullptr || status != 200) {
-    err = c == nullptr ? "no connection" : "HTTP " + std::to_string(status);
-    if (c)
-      esp_http_client_cleanup(c);
+// Into <path>.part, renamed only once the checksum matches. An empty path
+// means "use the name the controller gives", inside firmware/; if that file
+// already exists the transfer is closed without reading anything.
+bool SdArchive::fetch_to_file_(char kind, const std::string &path, std::string &name, std::string &err) {
+  uint32_t size, crc;
+  if (!this->open_(kind, size, crc, name, err))
     return false;
+  std::string dest = path;
+  if (dest.empty()) {
+    std::string full;
+    if (!safe_path_("firmware/" + name, full)) {
+      this->send_("C");
+      err = "bad file name from the controller";
+      return false;
+    }
+    dest = full;
+    struct stat st;
+    if (stat(dest.c_str(), &st) == 0) {
+      this->send_("C");
+      err.clear();
+      return true;  // already archived
+    }
   }
-  const std::string part = path + ".part";
+  const std::string part = dest + ".part";
   FILE *f;
   {
     std::lock_guard<std::recursive_mutex> g(this->lock_);
     f = fopen(part.c_str(), "wb");
   }
   if (f == nullptr) {
+    this->send_("C");
     err = "cannot write to the card";
-    esp_http_client_cleanup(c);
     return false;
   }
-  std::unique_ptr<char[]> buf(new char[4096]);
-  int n;
-  size_t total = 0;
-  bool ok = true;
-  while ((n = esp_http_client_read(c, buf.get(), 4096)) > 0) {
+  const bool ok = this->read_all_(size, crc, [&](const uint8_t *d, size_t n) {
     std::lock_guard<std::recursive_mutex> g(this->lock_);
-    if (fwrite(buf.get(), 1, n, f) != (size_t) n) {
-      ok = false;
-      err = "card write failed";
-      break;
-    }
-    total += n;
-  }
-  if (n < 0) {
-    ok = false;
-    err = "download interrupted";
-  }
-  if (ok && !esp_http_client_is_complete_data_received(c)) {
-    ok = false;
-    err = "download incomplete";
-  }
-  esp_http_client_close(c);
-  esp_http_client_cleanup(c);
+    return fwrite(d, 1, n, f) == n;
+  }, err);
+  this->send_("C");
   std::lock_guard<std::recursive_mutex> g(this->lock_);
   fclose(f);
-  if (!ok || total == 0) {
+  if (!ok) {
     unlink(part.c_str());
-    if (ok)
-      err = "empty download";
     return false;
   }
-  unlink(path.c_str());
-  return rename(part.c_str(), path.c_str()) == 0;
+  unlink(dest.c_str());
+  if (rename(part.c_str(), dest.c_str()) != 0) {
+    err = "rename failed";
+    return false;
+  }
+  name = "new";
+  return true;
 }
 
 // The controller's settings backup, and a copy of its firmware if this
-// build has not been seen before.
+// build has not been seen before. All over BLE.
 void SdArchive::nightly_() {
   auto t = this->time_->now();
   char day[16];
   t.strftime(day, sizeof(day), "%Y-%m-%d");
-  std::string ip, err;
-  if (!this->resolve_controller_(ip)) {
-    std::lock_guard<std::recursive_mutex> g(this->lock_);
-    this->last_backup_ = std::string(day) + " failed: controller not found on the network";
-    ESP_LOGW(TAG, "%s", this->last_backup_.c_str());
-    return;
-  }
-  const std::string base = "http://" + ip;
-  const bool ok = this->http_to_file_(base + "/backup.json", std::string(ROOT) + "/backups/" + day + ".json", err);
+  std::string err, name;
+  const bool ok = this->fetch_to_file_('B', std::string(ROOT) + "/backups/" + day + ".json", name, err);
+  const std::string berr = err;
 
-  std::string slots, ferr, fw_note;
-  if (this->http_to_string_(base + "/firmware/slots.json", slots, ferr)) {
-    std::string sha;
-    json::parse_json(slots, [&](JsonObject root) -> bool {
-      sha = root["running"]["firmware"].as<std::string>();
-      return true;
-    });
-    if (!sha.empty() && sha != "null") {
-      const std::string bin = std::string(ROOT) + "/firmware/controller-" + sha + ".bin";
-      struct stat st;
-      if (stat(bin.c_str(), &st) != 0) {
-        if (this->http_to_file_(base + "/firmware/current.bin", bin, ferr)) {
-          std::lock_guard<std::recursive_mutex> g(this->lock_);
-          FILE *f = fopen((std::string(ROOT) + "/firmware/controller-" + sha + ".json").c_str(), "w");
-          if (f != nullptr) {
-            fputs(slots.c_str(), f);
-            fclose(f);
-          }
-          fw_note = ", firmware " + sha.substr(0, 8) + " archived";
-        } else {
-          fw_note = ", firmware copy failed: " + ferr;
+  std::string fw_note;
+  std::string slots;
+  if (this->fetch_to_string_('S', slots, err)) {
+    std::string fname;
+    if (this->fetch_to_file_('F', "", fname, err)) {
+      if (fname == "new") {
+        std::string sha;
+        json::parse_json(slots, [&](JsonObject root) -> bool {
+          sha = root["running"]["firmware"].as<std::string>();
+          return true;
+        });
+        std::lock_guard<std::recursive_mutex> g(this->lock_);
+        FILE *f = fopen((std::string(ROOT) + "/firmware/controller-" + sha + ".json").c_str(), "w");
+        if (f != nullptr) {
+          fputs(slots.c_str(), f);
+          fclose(f);
         }
+        fw_note = ", firmware " + sha.substr(0, 8) + " archived";
       }
+    } else {
+      fw_note = ", firmware copy failed: " + err;
     }
   }
   this->prune_("backups", KEEP_BACKUPS);
   std::lock_guard<std::recursive_mutex> g(this->lock_);
-  this->last_backup_ = std::string(day) + (ok ? " ok" : " failed: " + err) + fw_note;
+  this->last_backup_ = std::string(day) + (ok ? " ok" : " failed: " + berr) + fw_note;
   ESP_LOGI(TAG, "Nightly: %s", this->last_backup_.c_str());
 }
 
@@ -545,7 +671,7 @@ void SdArchive::handleRequest(AsyncWebServerRequest *request) {
       root["rows_written"] = this->rows_written_;
       root["last_row"] = this->last_row_;
       root["last_backup"] = this->last_backup_;
-      root["controller_ip"] = this->controller_ip_;
+      root["controller_link"] = this->link_ready_.load();
       JsonArray cols = root["columns"].to<JsonArray>();
       for (auto &s : this->series_)
         cols.add(s.name);
@@ -695,8 +821,7 @@ void SdArchive::dump_config() {
   ESP_LOGCONFIG(TAG, "SD Archive:");
   ESP_LOGCONFIG(TAG, "  SPI MOSI %d, MISO %d, CLK %d; CS held low", this->mosi_, this->miso_, this->clk_);
   LOG_PIN("  CS Pin: ", this->cs_pin_);
-  ESP_LOGCONFIG(TAG, "  Controller host: %s.local; %u history columns", this->controller_host_.c_str(),
-                (unsigned) this->series_.size());
+  ESP_LOGCONFIG(TAG, "  %u history columns; controller transfers over BLE", (unsigned) this->series_.size());
 }
 
 }  // namespace sd_archive
