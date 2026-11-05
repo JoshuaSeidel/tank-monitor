@@ -18,3 +18,4 @@ packages:
   link: !include packages/ble_link_panel_v3.yaml
   chem: !include packages/chemistry.yaml
   board: !include boards/waveshare-esp32s3-lcd-43.yaml
+  layout: !include packages/layout_75g.yaml

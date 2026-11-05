@@ -54,33 +54,17 @@
 # Physical layout of the tank, in inches, so page 2 draws the hardware where
 # it actually is. Override in the wrapper. Everything on the back wall is
 # placed from these -- change the width and every position rescales.
-substitutions:
-  tank_width_in:     "48"    # interior width -- standard 75 gal is 48 x 18 x 21
-  heater_inset_in:   "4"     # each heater this far in from its end
-  spray_bar_len_in:  "12"    # centred on the back wall
-  intake_from_left_in: "1"   # intake pipe, measured from the LEFT end
-  # "true": two heaters, two probes, the L-R gradient -- the 75's layout.
-  # "false": one heater, one probe; the half/gradient cards show heater and
-  # fan duty and the light level instead. Pasted into the lambdas as a C++
-  # bool, so it must be exactly true or false.
-  dual_system: "true"
-  # The header on every page. f_small's glyph set: letters, digits, space
-  # and .,:-+/%° only -- an apostrophe would silently not draw.
-  tank_title: "Display Tank"
-  # Single-system only (dual_system "false"). The heater sits at
-  # heater_inset_in from the LEFT; the probe and the rim-clipped cooling
-  # fan are placed from the left as well.
-  probe_from_left_in: "10"
-  fan_from_left_in:   "16"
-  # Interior height, inches. Single-system only: the drawing takes its
-  # proportions from width:height. The 75 keeps its fixed frame.
-  tank_height_in: "21"
-  # "true": a dual sponge filter -- two sponges on one lift tube -- standing
-  # on the substrate instead of the intake and spray bar. Centred at
-  # sponge_from_left_in, sponge_spacing_in centre to centre.
-  sponge_filters: "false"
-  sponge_from_left_in: "12"
-  sponge_spacing_in: "4.5"
+# NO SUBSTITUTION DEFAULTS HERE, deliberately. The tank this panel draws
+# -- tank_width_in, heater_inset_in, spray_bar_len_in, intake_from_left_in,
+# dual_system, tank_title, tank_height_in, probe_from_left_in,
+# fan_from_left_in, sponge_filters, sponge_from_left_in, sponge_spacing_in
+# -- comes from a layout package: packages/layout_75g.yaml or
+# packages/layout_15g.yaml. Defaults used to live here, and because a later
+# package's substitutions win over an earlier one's, a wrapper that listed
+# its layout before this file got the 75 drawn on the 15 gal's panel
+# (2026-11-05). With no defaults here there is nothing to override, in any
+# order; a wrapper with no layout fails to build instead of drawing the
+# wrong tank.
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -375,7 +359,7 @@ display:
             it.print(x + 26, 457, id(f_micro), on ? c : MUTED, TextAlign::CENTER_LEFT, txt);
           };
           pill(SLOT_HEAT, 18,  "HEATER", id(r_heat_on), HEAT);
-          pill(SLOT_FAN,  134, "FANS",   id(r_fan_on),  BLUE);
+          pill(SLOT_FAN,  134, ${dual_system} ? "FANS" : "FAN", id(r_fan_on), BLUE);
           // A controller with CO2 and bubbler outlets reports them (r_co2 /
           // r_air >= 0); one without draws no pill for them.
           if (id(r_co2) >= 0) pill(SLOT_CO2, 250, "CO2", id(r_co2) == 1, AQUA);

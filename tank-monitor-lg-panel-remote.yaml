@@ -78,6 +78,8 @@ packages:
       # beside them so a stale value can never pass for a live one.
       - packages/chemistry.yaml
       - boards/waveshare-esp32s3-lcd-43.yaml
+      # What the tank looks like. The board file has no defaults of its own.
+      - packages/layout_75g.yaml
     refresh: 0s
 
 # ---------------------------------------------------------------------

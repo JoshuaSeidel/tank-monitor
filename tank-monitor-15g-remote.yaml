@@ -42,9 +42,11 @@ packages:
       # v3, because the 4.3" panel this tank inherits speaks nothing else.
       # The board file supplies the second-probe and pH fields as not fitted.
       - packages/ble_link_v3.yaml
-      - packages/layout_15g.yaml
       - packages/standalone_controller.yaml
       - boards/xiao-esp32s3-15g.yaml
+      # After the board file, as on the panel: a later package's
+      # substitutions win, so nothing can override the tank's layout.
+      - packages/layout_15g.yaml
       # CO2 solenoid and bubbler schedule, on the device. Ships with the
       # CO2 schedule OFF -- turn it on from the web page.
       - packages/co2_bubbler.yaml
