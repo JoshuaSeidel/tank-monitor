@@ -260,10 +260,12 @@ class TankController : public PollingComponent {
   // Heater commanded near full for a long stretch with no temperature
   // response: unplugged, failed, or a dead relay channel.
   bool is_heater_stalled() const { return this->heater_stalled_; }
-  // Same check for the fan. Weaker evidence than the heater's -- the tank
-  // cools on its own, so this only catches a fan that is failing while the
-  // water is going the WRONG way. A merely feeble fan will not trip it;
-  // watch get_fan_gain() for that.
+  // The fan at >= 90 % for two 90 minute windows running with the water
+  // doing what the model says it would with no fan at all (less than
+  // 0.10 degF/h of cooling against that forecast). A fan that is merely
+  // weaker than it was -- a lid went on, the room is warmer than the water
+  // so it can only slow a rise -- does not trip it, and does not pause
+  // learning; get_fan_gain() follows it instead. See "Is the fan cooling?".
   bool is_fan_stalled() const { return this->fan_stalled_; }
   // Control and cross-check probes have disagreed for DISAGREE_MS; heater
   // is off until they agree again. Always false with no cross-check probe.
@@ -305,6 +307,9 @@ class TankController : public PollingComponent {
   void compute_band_();
   void apply_physics_(bool reset_ka, bool reset_kh, const char *why);
   void reset_param_(uint8_t i, float t_now, float u_now);
+  void reopen_fan_(float scale, const char *why);
+  float no_fan_rate_(float t, float lux_norm) const;
+  void judge_fan_(uint32_t now, float t, float lux_norm, float dt_min);
   void save_physics_();
   void update_centre_(float dev_avg, float window_min);
   uint64_t relay_on_ms_(bool heater, uint32_t now) const;
@@ -336,6 +341,11 @@ class TankController : public PollingComponent {
   ESPPreferenceObject fan_deadband_pref_;
   ESPPreferenceObject disagree_band_pref_;
   ESPPreferenceObject physics_pref_;
+  // The Tank Cover the fan gain was last re-opened for (tank_fan_cover_v1).
+  // A cover change scales the gain by the ratio of the two covers' factors;
+  // see FAN_COVER_FACTOR. Missing on the first boot of this firmware.
+  ESPPreferenceObject fan_cover_pref_;
+  uint8_t fan_cover_{COVER_UNKNOWN};
   std::string restore_status_{"not checked yet"};
 
   float setpoint_{25.0f};
@@ -492,10 +502,27 @@ class TankController : public PollingComponent {
   float heat_stall_temp_{NAN};
   bool heater_stalled_{false};
 
-  // Fan-stall detection, same shape.
+  // Fan Not Responding, against the no-fan forecast ("Is the fan
+  // cooling?"): the current window's start and anchor temperature, the
+  // forecast's change accumulated over it, and how many windows running
+  // have shown no cooling.
   uint32_t fan_stall_since_ms_{0};
   float fan_stall_temp_{NAN};
+  float fan_pred_acc_{0.0f};
+  uint8_t fan_dead_n_{0};
   bool fan_stalled_{false};
+  // The model as it stood the last time the fan had been off for
+  // FAN_BASE_IDLE_MS, frozen while it runs: the no-fan forecast. room is
+  // the filtered room reading then, NAN without one.
+  struct FanBaseline {
+    uint32_t ms;
+    float theta[N_PARAMS];
+    float t_ref;
+    float room;
+  };
+  FanBaseline fan_base_{};
+  bool fan_base_ok_{false};
+  uint32_t fan_off_since_ms_{0};
 
   // Cross-check disagreement, and when the current reading was last
   // accepted without a recent predecessor (boot or after a gap).

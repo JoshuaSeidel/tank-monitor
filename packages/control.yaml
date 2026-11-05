@@ -351,12 +351,15 @@ binary_sensor:
     entity_category: diagnostic
     lambda: "return id(controller).is_heater_stalled();"
 
-  # Fan commanded wide open for 45 minutes and the water did not fall at
-  # all. Weaker evidence than the heater's version, because passive loss
-  # alone should drop this tank over a degF in that time -- flat or rising
-  # water under full fan means the fan, the relay channel or the outlet is
-  # dead. A merely feeble fan will not trip this; Learned Fan Power is the
-  # sensitive measure.
+  # Fan commanded wide open for two 90 minute windows running, and the water
+  # did what the thermal model says it would with NO fan (less than
+  # 0.10 degF/h of cooling against that forecast): the fan, the relay
+  # channel or the outlet is dead. Judged against the forecast, not a fixed
+  # fall, because with lids on or the room warmer than the water a working
+  # fan can only slow a rise -- the old "no fall in 45 minutes" rule called
+  # that dead on 2026-11-05 and paused learning. A weaker fan does not trip
+  # this or pause learning; Learned Fan Power follows it. See "Is the fan
+  # cooling?" in components/tank_controller/tank_controller.cpp.
   - platform: template
     trigger_on_initial_state: true
     name: "Fan Not Responding"

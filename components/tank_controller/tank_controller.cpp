@@ -54,13 +54,88 @@ static const uint32_t DISAGREE_MS = 300000;         // 5 minutes
 static const float DISAGREE_BAND_MAX_F = 15.0f;
 static const float DISAGREE_BAND_MAX = DISAGREE_BAND_MAX_F * 5.0f / 9.0f;
 
-// Fan equivalent. The bar is deliberately low -- merely "did not fall at
-// all" -- because passive loss alone should drop this tank well over a
-// degF in 45 minutes. If the water is flat or rising while the fan is
-// commanded wide open, something is wrong with the fan, the relay
-// channel, or the outlet. It cannot detect a weak fan, only an absent
-// one; the learned fan gain is the sensitive measure.
-static const uint32_t FAN_STALL_MS = 2700000;      // 45 minutes
+// ---------------------------------------------------------------------
+// Is the fan cooling?
+// ---------------------------------------------------------------------
+// The fan's check used to be the heater's turned over: at >= 90 % for
+// 45 minutes the water had to FALL by 0.05 degC, on the argument that
+// passive loss alone drops the tank over a degF in that time. Both halves
+// of that went stale on 2026-11-03, when the 75 got lids and evaporation
+// covers: the fan now blows across a lid, not the water, so it removes a
+// fraction of the heat it did; and on 11-05 the office reached 79.2 degF
+// against water at 75.3-75.5, so passive "loss" was a GAIN. A fan can only
+// slow a rise then. It held the water flat -- the most it could do -- and
+// "Fan Not Responding" latched at 16:05, which paused learning, which is
+// why Learned Fan Power sat on its open-top 2.09 degF/h. A weak fan is not
+// a fault; it is exactly what the learner is there to measure.
+//
+// So the fan is judged against what the water would have done WITHOUT it:
+//   * The no-fan forecast is the model as it stood the last time the fan
+//     had been off for FAN_BASE_IDLE_MS -- heater, loss, light and drift
+//     terms, frozen as a baseline. Not the live model: with the fan pinned
+//     at 100 % its regressor is a copy of the constant column, and c
+//     (re-learned every couple of hours, see Q) soaks up whatever the fan
+//     is not doing -- a dead fan would be explained away as a warmer room
+//     inside an afternoon. The baseline is taken only from a model with
+//     FAN_BASE_MIN_CONF confidence and FAN_BASE_MIN_HEALTH health, not
+//     while learning is paused, and is not used once FAN_BASE_MAX_MS old.
+//   * With a room reading at both ends the forecast follows the room: the
+//     baseline's loss term is re-centred by how far the (filtered) room has
+//     moved since, which is how ambient > water shows up as a forecast
+//     RISE that the fan only has to slow. In an enclosed cabinet the room
+//     sensor is not the air the tank sheds to and reaches it damped, so
+//     there only a WARMER room is credited (it raises the no-fan forecast,
+//     the side that cannot make a working fan look dead) and a cooler one
+//     is ignored.
+//   * Over each FAN_STALL_MS window at >= 90 %, the fan's effect is
+//     (forecast change - measured change) / window. Fan Not Responding is
+//     FAN_DEAD_WINDOWS windows running under FAN_DEAD_EFFECT -- the water
+//     doing what it would have done with no fan at all, for three hours. A
+//     window with no usable baseline gives no verdict and leaves the flag
+//     where it was.
+// Sized with tools/thermal_model_sim.py --fan-cover (the real office +6
+// degF, the 75 and the nano, four noise seeds): per window the measured
+// effect scatters about +/-0.1 degF/h (one DS18B20 LSB at each end, plus
+// the model). A dead fan read -0.10..+0.06 and was flagged 2.8-5.1 h after
+// it died, idle or mid-run, every time; a fan at 0.6 degF/h (the 75 with
+// lid + evaporation cover, 70 % down on open top) was never flagged, with
+// or without a room sensor. At 0.3 degF/h (85 % down) never with a room
+// sensor, and once or twice in a week on 3 of 4 seeds without one -- as
+// fine as a probe that steps 0.11 degF can split a fan from no fan without
+// seeing the room. (60 minute windows at 0.15 degF/h flagged that fan up to
+// four times a week even with a room sensor in some runs.)
+static const uint32_t FAN_STALL_MS = 5400000;      // 90 minutes per window
+static const float FAN_DEAD_EFFECT_F = 0.10f;      // degF/h of cooling
+static const float FAN_DEAD_EFFECT = FAN_DEAD_EFFECT_F * 5.0f / 9.0f / 60.0f;
+static const uint8_t FAN_DEAD_WINDOWS = 2;
+static const uint32_t FAN_BASE_IDLE_MS = 900000;   // 15 minutes fan off
+static const uint32_t FAN_BASE_MAX_MS = 12UL * 3600UL * 1000UL;
+static const float FAN_BASE_MIN_CONF = 50.0f;      // percent
+static const float FAN_BASE_MIN_HEALTH = 0.5f;
+
+// What a cover does to the fan. Its effect is almost all evaporation: air
+// moved across the water carries vapour off it (the heat that leaves is
+// ~2.4 kJ per gram evaporated), and the sensible part is small next to it.
+// Evaporation scales with the water the moving air actually reaches. A lid
+// puts glass or mesh between the fan and the water and leaves only its
+// cut-outs and edges for the air to get under; an evaporation cover closes
+// most of what is left. So a cover change scales the LEARNED fan gain by
+// FAN_COVER_FACTOR[new] / FAN_COVER_FACTOR[old] and re-opens its variance
+// (reopen_fan_()), and RLS takes it from there. The factors are a starting
+// point, not a measurement, and deliberately middling:
+//   open top 1.0   the reference; whatever was learned open is the fan.
+//   lid      0.6   a lid with the usual feed and equipment cut-outs: about
+//                  half the surface still sees moving air.
+//   lid + evaporation cover 0.3   the 75 on 2026-11-05: room 4 degF above
+//                  the water, light on, and the fan at 100 % held it flat
+//                  -- ~0.6 degF/h of cooling against the 2.09 learned
+//                  open, which is 0.3.
+//   unknown  0.6   the lid's: between the two, so neither direction of a
+//                  change into or out of it is the larger error.
+// There is no physics prior for the fan itself -- its gain is the fan, its
+// distance and the room's humidity, none of which this controller knows --
+// so a fresh model still starts from THETA_PRIOR[1].
+static const float FAN_COVER_FACTOR[N_COVERS] = {1.0f, 0.6f, 0.3f, 0.6f};
 
 // Learning pauses on a fault.
 //
@@ -72,6 +147,10 @@ static const uint32_t FAN_STALL_MS = 2700000;      // 45 minutes
 // until Tank Time Constant sat on its 2042 min ceiling, where it stayed for
 // five days. A fan that does not cool, a probe pair that disagrees, a probe
 // that is gone and a hold (fill / water change) are the same kind of lie.
+// A fan that cools LESS than it used to is not: that is the tank changing
+// (a lid going on), and pausing for it is what froze the 75's fan gain on
+// 2026-11-05. Only a fan judged dead against its no-fan forecast pauses
+// learning; see "Is the fan cooling?".
 //
 // So while any of them is on, nothing learns -- no RLS step, no centre step,
 // no stale/bias/health update -- and for LEARN_FAULT_SETTLE_MS after it
@@ -92,7 +171,6 @@ static const uint32_t FAULT_ROLLBACK_MS = 10800000;     // 3 hours
 // One-shot on this firmware: ka this close to its band edge (in time
 // constant) is the dead-heater night's residue, not a measurement.
 static const float KA_EDGE_FRAC = 0.05f;
-static const float FAN_STALL_FALL = 0.05f;         // degC
 
 // Residual EMA weight. Feeds the Model Bias diagnostic only -- see the
 // comment on integral authority below for why this is reported and not
@@ -378,9 +456,10 @@ static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0
 // (P_KA_AMBIENT), ka converged to within ~30% of the plant's time
 // constant and the forecast matched setpoint mode.
 //
-// Q on the other parameters: zero for kh, kf and kl -- a heater's wattage
+// Q on the other parameters: zero for kh and kl -- a heater's wattage
 // does not drift, and when one fails the stale-model re-inflation below is
-// the mechanism for that step change. And zero for ka (2026-10-14): ka is a
+// the mechanism for that step change. kf has a floor instead; see "The fan
+// gain keeps learning" below. And zero for ka (2026-10-14): ka is a
 // property of the glass, the lid and the room around it, which do not drift
 // either -- they change in steps (lids go on), and a step is announced by
 // the Tank Cover / Tank Placement entities, which reset ka on purpose (see
@@ -399,12 +478,51 @@ static const float THETA_PRIOR[N_PARAMS] = {0.030f, -0.020f, -0.015f, 0.003f, -0
 static const float C_TRACK_STEPS = 24.0f;  // 2 h
 static const float Q_C = 1.0f / (C_TRACK_STEPS * (C_TRACK_STEPS - 1.0f));
 
+// ---------------------------------------------------------------------
+// The fan gain keeps learning
+// ---------------------------------------------------------------------
+// kf's prior variance was P_PRIOR's 1e-3, and nothing ever raised it: Q is
+// zero for it, and the stale re-inflation only runs while health is below
+// 1, which a fan that changes never causes -- with the fan pinned at 100 %
+// its regressor is the constant column, and c (P ~ 0.04, a hundred times
+// kf's 1e-3 at the prior and more once it shrank) takes ~98 % of every
+// such correction. kf moved 1e-3 of each residual on the steps that could
+// tell it apart. The 75's Learned Fan Power read 2.09 degF/h after six
+// weeks against the 2.16 prior: it had not learned the fan at all, and
+// would not have learned the lids either.
+//
+// So kf's variance is re-opened to P_PRIOR[1] = 0.1 on a cover or placement
+// change (reopen_fan_()) and a fresh model, and never allowed below
+// P_KF_FLOOR. With unit noise a step with the fan fully on then moves kf by
+// ~P/(1+P) of the residual it cannot hand to c: 1/50 at the floor, a
+// tracking time of ~50 informative fan steps, about a day of a fan that
+// modulates for a few hours of it. kf is learned where it is separable from
+// c -- the fan's on/off edges and part-duty windows -- and a floored
+// variance means it keeps doing so for good, which is what lets it follow a
+// fan that slowly fouls, a lid that goes on without anyone saying so, or a
+// room that dries out for the winter. The floor costs ~0.05 degF/h of
+// jitter in Learned Fan Power, and lets a third of a warm room's residual
+// on a pinned fan reach kf until the next edge corrects it.
+// tools/thermal_model_sim.py --fan-cover, cover -> lid + evaporation cover
+// in a 77-81 degF office: a fan 70 % weaker is matched by the 0.3 factor and
+// stays within 10 % of it; one 50 % weaker (factor too pessimistic) is
+// learned to within 6 % in 12 h; one 85 % weaker (too optimistic) to within
+// 30 % in 12 h and 17 % in 48 h -- the fan is pinned at 100 % all day
+// there, and only its edges teach it. The old firmware's gain moved 2.15
+// -> 2.08 in two days against a true 0.60. Elsewhere in the tool's table
+// the heater gain and the dead-heater results are unchanged; the costs are
+// the nano's 15 minute forecast (RMS 0.07 -> 0.09 degF: its fan gain now
+// moves) and the open -> lid case's Tank Time Constant ending at 1566 min
+// rather than 1423 (true 1100, band 618-3077).
+static const float P_KF_FLOOR = 0.02f;
+
 // Prior covariance -- how wrong we think the prior is, per parameter.
 // c starts at its steady state, so a fresh (or migrated) model tracks at
 // full speed from the first step. ka's 1e-4 is for setpoint mode, where it
 // is barely observable and a looser value only lets it wander onto a bound
 // (simulated on the nano: pinned at 1000 min half the time at 1e-2).
-static const float P_PRIOR[N_PARAMS] = {1e-3f, 1e-3f, 1e-4f, 1e-5f, 1.0f / (C_TRACK_STEPS - 1.0f)};
+// kf's 0.1: see "The fan gain keeps learning".
+static const float P_PRIOR[N_PARAMS] = {1e-3f, 0.1f, 1e-4f, 1e-5f, 1.0f / (C_TRACK_STEPS - 1.0f)};
 // ka's variance in ambient mode on a board with no tank physics, where the
 // room's swing is the only thing that can tell it anything. Raised to this
 // on entry and returned to P_PRIOR[2] on exit, by scaling its row and column
@@ -731,6 +849,10 @@ void TankController::setup() {
     }
   };
 
+  // The YAML default cover, before what Home Assistant set replaces it: the
+  // one-off below takes it as the cover an unrecorded fan gain was learned
+  // under.
+  const uint8_t yaml_cover = this->physics_.cover;
   TankPhysics ph{};
   bool physics_first = true;
   if (this->physics_pref_.load(&ph) && !std::isnan(ph.tank_gal)) {
@@ -874,6 +996,51 @@ void TankController::setup() {
     }
   }
 
+  // Which cover the fan gain was learned under. Recorded by reopen_fan_()
+  // since this firmware; a model from before it has no record, and on the
+  // 75 that matters: its cover went to "Lid + evaporation cover" on
+  // 2026-11-03, the fan lost most of its effect, and the old firmware called
+  // that a dead fan and stopped learning, so the gain is still the open-top
+  // one. One-off, when there is no record:
+  //   * cover Lid or Lid + evaporation cover: the gain was learned under the
+  //     YAML default cover (what the board ran until Home Assistant changed
+  //     it) -- if that is a known, different cover, scale by the ratio of
+  //     their FAN_COVER_FACTORs; either way re-open the variance.
+  //   * otherwise (open top / unknown): nothing to correct; record it.
+  // With a record that differs from the stored cover (physics restored to a
+  // different value than the model was last fitted under), the same scaling.
+  {
+    this->fan_cover_pref_ = global_preferences->make_preference<uint8_t>(fnv1_hash("tank_fan_cover_v1"));
+    uint8_t fc = 0xFF;
+    const bool have = this->fan_cover_pref_.load(&fc) && fc < N_COVERS;
+    const uint8_t cur = this->physics_.cover;
+    if (this->model_.updates == 0) {
+      this->fan_cover_ = cur;
+      this->fan_cover_pref_.save(&this->fan_cover_);
+    } else if (have) {
+      this->fan_cover_ = fc;
+      if (fc != cur) {
+        ESP_LOGW(TAG, "Fan gain was learned under \"%s\", the cover is \"%s\"", cover_text(fc), cover_text(cur));
+        this->reopen_fan_(FAN_COVER_FACTOR[cur] / FAN_COVER_FACTOR[fc], "Tank cover differs from the fan gain's");
+      }
+    } else if (cur == COVER_LID || cur == COVER_EVAPORATION) {
+      const bool known = yaml_cover < COVER_UNKNOWN && yaml_cover != cur;
+      ESP_LOGW(TAG, "No record of the cover the fan gain was learned under (firmware before this one). Cover is "
+                    "\"%s\"; %s",
+               cover_text(cur),
+               known ? "taking the YAML default as what it was learned under" : "re-opening it as it stands");
+      if (known)
+        ESP_LOGW(TAG, "  learned under \"%s\" (YAML default) -> scaling by %.2f / %.2f", cover_text(yaml_cover),
+                 FAN_COVER_FACTOR[cur], FAN_COVER_FACTOR[yaml_cover]);
+      this->reopen_fan_(known ? FAN_COVER_FACTOR[cur] / FAN_COVER_FACTOR[yaml_cover] : 1.0f,
+                        "One-off: fan gain re-opened for the cover");
+    } else {
+      this->fan_cover_ = cur;
+      this->fan_cover_pref_.save(&this->fan_cover_);
+      ESP_LOGI(TAG, "Fan gain recorded as learned under \"%s\"", cover_text(cur));
+    }
+  }
+
   // The ambient probe's own update interval is unknown here, so freshness
   // is judged by when it last published, not by polling its state.
   if (this->ambient_sensor_ != nullptr)
@@ -969,6 +1136,7 @@ void TankController::set_hold(bool v) {
     this->heater_stalled_ = false;
     this->fan_stall_since_ms_ = 0;
     this->fan_stalled_ = false;
+    this->fan_dead_n_ = 0;
     this->disagree_since_ms_ = 0;
     this->probe_disagreement_ = false;
     // Whatever the learn window was measuring, the hold cuts across it.
@@ -1029,6 +1197,8 @@ void TankController::reset_learning() {
   this->heater_stalled_ = false;
   this->fan_stall_since_ms_ = 0;
   this->fan_stalled_ = false;
+  this->fan_dead_n_ = 0;
+  this->fan_base_ok_ = false;
   this->save_state_();
 }
 
@@ -1067,6 +1237,7 @@ void TankController::import_model(float heater_f_per_h, float fan_f_per_h, float
   this->clamp_model_();
   this->integral_ = 0.0f;
   this->reset_learn_window_();
+  this->fan_base_ok_ = false;
   this->save_state_();
 
   ESP_LOGI(TAG, "Imported model: kh=%.4f kf=%.4f ka=%.5f kl=%.4f c=%.4f, confidence %.0f%%",
@@ -1210,12 +1381,38 @@ void TankController::reset_param_(uint8_t i, float t_now, float u_now) {
   this->model_.p[i][i] = this->p_prior_(i);
 }
 
+void TankController::reopen_fan_(float scale, const char *why) {
+  // The fan gain to `scale` times what it is, with reset_param_()'s
+  // re-expression -- c takes the difference at the recent delivered fan duty,
+  // so today's forecast does not step -- then decoupled from the rest and
+  // its variance re-opened to the prior, so it re-learns from the next fan
+  // edge rather than defending the old cover's value. Records the cover it
+  // now stands for.
+  float(&th)[N_PARAMS] = this->model_.theta;
+  const float was = th[1];
+  const float now = clampf(was * scale, THETA_MIN[1], THETA_MAX[1]);
+  th[4] = clampf(th[4] + (was - now) * this->recent_fraction_(false), THETA_MIN[4], THETA_MAX[4]);
+  th[1] = now;
+  for (uint8_t j = 0; j < N_PARAMS; j++)
+    if (j != 1)
+      this->model_.p[1][j] = this->model_.p[j][1] = 0.0f;
+  this->model_.p[1][1] = this->p_prior_(1);
+  this->clamp_model_();
+  this->save_state_();
+  this->fan_cover_ = this->physics_.cover;
+  this->fan_cover_pref_.save(&this->fan_cover_);
+  ESP_LOGW(TAG, "%s: Learned Fan Power %.2f -> %.2f degF/h (x%.2f, %s); re-learning from the next fan run", why,
+           -was * 108.0f, -this->model_.theta[1] * 108.0f, scale, cover_text(this->physics_.cover));
+}
+
 void TankController::apply_physics_(bool reset_ka, bool reset_kh, const char *why) {
   // A physics input changed (or this is the first boot that has one): new
   // band, and the parameters it determines back to their new prior. Needs a
   // water temperature to re-express c; at boot it waits for the first valid
   // reading (physics_pending_).
   this->compute_band_();
+  // The no-fan forecast was the old physics' model.
+  this->fan_base_ok_ = false;
   const float t = this->last_temp_;
   const float u = this->recent_fraction_(true);
   const float tau_was = this->get_time_constant();
@@ -1288,9 +1485,13 @@ void TankController::set_heater_power(float watts) {
 void TankController::set_tank_cover(uint8_t cover) {
   if (cover >= N_COVERS || cover == this->physics_.cover)
     return;
+  const uint8_t was = this->physics_.cover;
   this->physics_.cover = cover;
   this->save_physics_();
   this->apply_physics_(true, false, "Tank cover changed");
+  // The cover changes what the fan can do, not just the passive loss: see
+  // FAN_COVER_FACTOR.
+  this->reopen_fan_(FAN_COVER_FACTOR[cover] / FAN_COVER_FACTOR[was], "Tank cover changed");
 }
 
 void TankController::set_tank_placement(uint8_t placement) {
@@ -1299,6 +1500,9 @@ void TankController::set_tank_placement(uint8_t placement) {
   this->physics_.placement = placement;
   this->save_physics_();
   this->apply_physics_(true, false, "Tank placement changed");
+  // A stand around the tank changes the air the fan moves, by an amount
+  // nothing here can estimate: same value, re-opened.
+  this->reopen_fan_(1.0f, "Tank placement changed");
 }
 
 const char *TankController::cover_text(uint8_t c) {
@@ -1851,6 +2055,10 @@ void TankController::learn_(float dt_min, float measured_rate) {
   // step, informative or not -- the room moves whether or not the heater
   // happens to be running. Nothing on ka; see Q.
   this->model_.p[4][4] += Q_C;
+  // ...and the fan gain never stops being learnable ("The fan gain keeps
+  // learning"). Raising a diagonal entry keeps P positive definite.
+  if (this->model_.p[1][1] < P_KF_FLOOR)
+    this->model_.p[1][1] = P_KF_FLOOR;
 
   this->clamp_model_();
   this->model_.updates++;
@@ -1893,6 +2101,92 @@ void TankController::learn_(float dt_min, float measured_rate) {
            -this->model_.theta[2], ka_excited ? "" : " (held)", this->model_.theta[3], this->model_.theta[4],
            this->model_.t_ref * 9.0f / 5.0f + 32.0f);
   (void) dt_min;
+}
+
+float TankController::no_fan_rate_(float t, float lux_norm) const {
+  // The baseline's forecast at this water temperature, this light and this
+  // heater duty, with the room's move since then -- see "Is the fan
+  // cooling?". theta[2] is -ka, so shifting the reference by the room's move
+  // adds ka * (room now - room then).
+  const FanBaseline &b = this->fan_base_;
+  float shift = 0.0f;
+  if (!std::isnan(b.room) && !std::isnan(this->ambient_filt_)) {
+    shift = this->ambient_filt_ - b.room;
+    if (this->physics_.placement == PLACEMENT_CABINET && shift < 0.0f)
+      shift = 0.0f;
+  }
+  return b.theta[0] * this->heater_duty_ + b.theta[2] * (t - b.t_ref - shift) + b.theta[3] * lux_norm + b.theta[4];
+}
+
+void TankController::judge_fan_(uint32_t now, float t, float lux_norm, float dt_min) {
+  // "Is the fan cooling?". Judged on the duty already commanded, like the
+  // heater's check, so it covers every path out of update().
+  //
+  // The baseline: the model the moment the fan has been off for
+  // FAN_BASE_IDLE_MS -- commanded zero that long and, with the relay wired,
+  // no contact time in the last 15 minutes -- refreshed every tick it stays
+  // off, frozen from the first tick it runs.
+  if (this->fan_duty_ > 0.0f) {
+    this->fan_off_since_ms_ = 0;
+  } else if (this->fan_off_since_ms_ == 0) {
+    this->fan_off_since_ms_ = now == 0 ? 1 : now;
+  }
+  if (this->fan_duty_ == 0.0f && this->fan_off_since_ms_ != 0 && now - this->fan_off_since_ms_ >= FAN_BASE_IDLE_MS &&
+      this->recent_fraction_(false) == 0.0f && !this->learn_paused_ && !std::isnan(this->model_.t_ref) &&
+      this->get_confidence() >= FAN_BASE_MIN_CONF && this->get_model_health() >= FAN_BASE_MIN_HEALTH) {
+    this->fan_base_.ms = now;
+    for (uint8_t i = 0; i < N_PARAMS; i++)
+      this->fan_base_.theta[i] = this->model_.theta[i];
+    this->fan_base_.t_ref = this->model_.t_ref;
+    this->fan_base_.room = this->ambient_filt_;
+    this->fan_base_ok_ = true;
+  }
+
+  if (this->fan_duty_ < 0.9f) {
+    this->fan_stall_since_ms_ = 0;
+    this->fan_stalled_ = false;
+    this->fan_dead_n_ = 0;
+    return;
+  }
+  if (this->fan_stall_since_ms_ == 0) {
+    this->fan_stall_since_ms_ = now;
+    this->fan_stall_temp_ = t;
+    this->fan_pred_acc_ = 0.0f;
+    return;
+  }
+  if (this->fan_base_ok_)
+    this->fan_pred_acc_ += this->no_fan_rate_(t, lux_norm) * dt_min;
+  if (now - this->fan_stall_since_ms_ < FAN_STALL_MS)
+    return;
+  const float window_min = (now - this->fan_stall_since_ms_) / 60000.0f;
+  const float measured = t - this->fan_stall_temp_;
+  if (!this->fan_base_ok_ || now - this->fan_base_.ms > FAN_BASE_MAX_MS) {
+    // No verdict: the flag stays where it was.
+    ESP_LOGI(TAG, "Fan at full for %.0f min (water %+.2f degF): no fan-off baseline in the last %" PRIu32
+                  " h to judge it against",
+             window_min, measured * 9.0f / 5.0f, FAN_BASE_MAX_MS / 3600000UL);
+  } else {
+    const float effect = (this->fan_pred_acc_ - measured) / window_min;
+    this->fan_dead_n_ = effect < FAN_DEAD_EFFECT ? (uint8_t) (this->fan_dead_n_ + 1) : (uint8_t) 0;
+    const bool dead = this->fan_dead_n_ >= FAN_DEAD_WINDOWS;
+    if (dead && !this->fan_stalled_) {
+      ESP_LOGE(TAG,
+               "Fan at full for %" PRIu32 " windows of %.0f min and the water did what it would with no fan "
+               "(%+.2f degF against %+.2f forecast without it: %.2f degF/h of cooling) - fan may be dead",
+               (uint32_t) this->fan_dead_n_, window_min, measured * 9.0f / 5.0f, this->fan_pred_acc_ * 9.0f / 5.0f,
+               effect * 108.0f);
+    } else {
+      ESP_LOGI(TAG, "Fan at full for %.0f min: water %+.2f degF, %+.2f forecast without it -> %.2f degF/h of cooling%s",
+               window_min, measured * 9.0f / 5.0f, this->fan_pred_acc_ * 9.0f / 5.0f, effect * 108.0f,
+               effect < FAN_DEAD_EFFECT ? " (none - checking the next window)" : "");
+    }
+    if (!dead && this->fan_stalled_)
+      ESP_LOGI(TAG, "Fan is cooling again");
+    this->fan_stalled_ = dead;
+  }
+  this->fan_stall_since_ms_ = now;
+  this->fan_stall_temp_ = t;
+  this->fan_pred_acc_ = 0.0f;
 }
 
 uint64_t TankController::relay_on_ms_(bool heater, uint32_t now) const {
@@ -2104,23 +2398,12 @@ void TankController::update() {
     this->heater_stalled_ = false;
   }
 
-  if (this->fan_duty_ >= 0.9f) {
-    if (this->fan_stall_since_ms_ == 0) {
-      this->fan_stall_since_ms_ = now;
-      this->fan_stall_temp_ = t;
-    } else if (now - this->fan_stall_since_ms_ > FAN_STALL_MS) {
-      const bool fell = (this->fan_stall_temp_ - t) >= FAN_STALL_FALL;
-      if (!fell && !this->fan_stalled_)
-        ESP_LOGE(TAG, "Fan at full for %" PRIu32 " min with no fall (%.2f degF) - fan may be dead",
-                 FAN_STALL_MS / 60000, (t - this->fan_stall_temp_) * 9.0f / 5.0f);
-      this->fan_stalled_ = !fell;
-      this->fan_stall_since_ms_ = now;
-      this->fan_stall_temp_ = t;
-    }
-  } else {
-    this->fan_stall_since_ms_ = 0;
-    this->fan_stalled_ = false;
-  }
+  // Read here, before the fan check uses it; the profile is updated below.
+  float lux_norm = 0.0f;
+  if (this->lux_sensor_ != nullptr && !std::isnan(this->lux_sensor_->state))
+    lux_norm = clampf(this->lux_sensor_->state / this->full_scale_lux_, 0.0f, 1.5f);
+
+  this->judge_fan_(now, t, lux_norm, dt_min);
 
   // --- learning pause (see "Learning pauses on a fault") ------------------
   if (this->heater_stalled_)
@@ -2141,9 +2424,6 @@ void TankController::update() {
     this->integral_ = 0.0f;
   }
 
-  float lux_norm = 0.0f;
-  if (this->lux_sensor_ != nullptr && !std::isnan(this->lux_sensor_->state))
-    lux_norm = clampf(this->lux_sensor_->state / this->full_scale_lux_, 0.0f, 1.5f);
   this->update_light_profile_(lux_norm);
 
   // --- accumulate averages for the next learning step -------------------

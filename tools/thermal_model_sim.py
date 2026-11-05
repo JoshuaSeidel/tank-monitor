@@ -42,6 +42,8 @@ Three firmwares:
     python3 tools/thermal_model_sim.py --replay     # real history through NEW
     python3 tools/thermal_model_sim.py --relay      # relay drive before/after: delivered vs commanded
     python3 tools/thermal_model_sim.py --dead-heater  # 22 h with the heater's power off: learning paused?
+    python3 tools/thermal_model_sim.py --fan-cover  # lids on, fan 70% weaker, hot room: re-learns, no false
+                                                    # Fan Not Responding; a dead fan still raises it
 
 Needs numpy. Nothing here is imported by the firmware.
 """
@@ -125,8 +127,21 @@ CMIN_TO_FH = 108.0
 # update()'s stall detectors and the learning pause on an actuator fault
 HEAT_STALL_MS = 1200000      # 20 min at >= 90 % duty ...
 HEAT_STALL_RISE = 0.05       # ... without this rise, degC: "Heater Not Responding"
-FAN_STALL_MS = 2700000
-FAN_STALL_FALL = 0.05
+FAN_STALL_MS_OLD = 2700000       # before: 45 min at >= 90 % ...
+FAN_STALL_FALL = 0.05            # ... without this fall, degC (judged a weak fan dead; 2026-11-05)
+# NEW "Fan Not Responding": judged against the no-fan baseline (update())
+FAN_STALL_MS = 5400000           # 90 min windows at >= 90 % ...
+FAN_DEAD_EFFECT = f32(0.10 * 5 / 9 / 60)   # ... with less cooling than this vs the no-fan forecast
+FAN_DEAD_WINDOWS = 2             # ... in this many windows running
+FAN_BASE_IDLE_N = 30             # the 15 min delivered ring all zero
+FAN_BASE_MAX_MS = 12 * 3600000   # a baseline older than this is not used
+FAN_BASE_MIN_CONF = 50.0
+FAN_BASE_MIN_HEALTH = 0.5
+# a cover change scales the learned fan gain by FAN_COVER_FACTOR[new]/[old]
+FAN_COVER_FACTOR = {COVER_OPEN: 1.0, COVER_LID: 0.6, COVER_EVAP: 0.3, COVER_UNKNOWN: 0.6}
+# NEW: the fan gain's variance -- re-opened to P_KF, never below P_KF_FLOOR
+P_KF = f32(0.1)
+P_KF_FLOOR = f32(0.02)
 LEARN_FAULT_SETTLE_MS = 3600000   # learning stays paused this long after a fault clears
 # A fault is only flagged once the actuator has sat at >= 90 % for the stall
 # time, and the loop takes ~2 h to wind up to that: the windows before the
@@ -179,8 +194,15 @@ class Controller:
     def __init__(self, variant, setpoint_f, max_tau=None, phys=None, fan_available=True, cross=True,
                  ambient=False, ambient_timeout_min=180, full_scale_lux=3000.0, response_time=20.0,
                  fan_deadband_f=0.25, disagree_band_f=8.0, relay=True, centre=True, debounce=True,
-                 fault_pause=True):
+                 fault_pause=True, fan_adapt=True):
         self.v = variant
+        # fan_adapt: this firmware's fan handling -- Fan Not Responding judged
+        # against the no-fan baseline, the fan gain's variance re-opened on a
+        # cover change and floored at P_KF_FLOOR. False = f0aba08 and before:
+        # "no 0.05 degC fall in 45 min", P_PRIOR[1] = 1e-3 and nothing else.
+        self.fan_adapt = fan_adapt and variant == 'new'
+        self.fan_base = None; self.fan_pred_acc = 0.0; self.fan_flags = 0; self.fan_unjudged = 0; self.fan_dead_n = 0
+        self.fan_effects = []
         # fault_pause: learning stops while Heater/Fan Not Responding is on and
         # for LEARN_FAULT_SETTLE_MS after (this firmware). False = 88ef4b0 and
         # before: RLS kept learning as if the dead heater's relay time was heat.
@@ -293,6 +315,8 @@ class Controller:
             return self.p_kh
         if i == 3 and self.ph is not None:
             return P_KL_PHYS
+        if i == 1 and self.fan_adapt:
+            return P_KF
         return P_PRIOR[i]
 
     def load_prior(self):
@@ -318,8 +342,27 @@ class Controller:
         self.P[i][i] = self.prior(i)
         self.theta[4] = f32(clampf(self.theta[4], THETA_MIN[4], THETA_MAX[4]))
 
+    def reopen_fan(self, scale):
+        """reopen_fan_(): the fan gain to scale x what it is, c re-expressed at
+        the recent fan duty so the forecast does not step, then decoupled and
+        its variance re-opened to P_KF."""
+        old = self.theta[1]
+        new = f32(clampf(float(old * f32(scale)), float(THETA_MIN[1]), float(THETA_MAX[1])))
+        self.theta[4] = f32(clampf(float(self.theta[4] + (old - new) * f32(self.recent_fan())),
+                                   float(THETA_MIN[4]), float(THETA_MAX[4])))
+        self.theta[1] = new
+        for j in range(N):
+            if j != 1:
+                self.P[1][j] = self.P[j][1] = f32(0)
+        self.P[1][1] = self.prior(1)
+
     def set_physics(self, phys, t_now=float('nan'), reset_ka=True, reset_kh=False):
-        """apply_physics_(): new band; reset what it determines."""
+        """apply_physics_(): new band; reset what it determines. NEW also
+        re-opens the fan gain on a cover or placement change, scaled by
+        FAN_COVER_FACTOR for the cover."""
+        if self.fan_adapt and self.phys_in is not None and phys is not None and \
+                (phys[3] != self.phys_in[3] or phys[4] != self.phys_in[4]):
+            self.reopen_fan(FAN_COVER_FACTOR[phys[3]] / FAN_COVER_FACTOR[self.phys_in[3]])
         self.phys_in = phys
         self.compute_band()
         u = self.recent_heat()
@@ -621,6 +664,8 @@ class Controller:
                 if THETA_MIN[4] <= c <= THETA_MAX[4]:
                     th[4] = c
             P[4][4] = f32(P[4][4] + Q_C)
+            if self.fan_adapt and P[1][1] < P_KF_FLOOR:
+                P[1][1] = P_KF_FLOOR
             if self.v == 'prev':
                 P[2][2] = f32(P[2][2] + (PREV_Q_KA_AMBIENT if self.ref_mode == REF_AMBIENT else PREV_Q_KA_SETPOINT))
         else:
@@ -637,6 +682,45 @@ class Controller:
                 lim = self.prior(i)
                 if P[i][i] < lim:
                     P[i][i] = f32(min(P[i][i] * P_REINFLATE, lim))
+
+    # -- Fan Not Responding, against physics (update(), "Is the fan cooling") --
+    def no_fan_rate(self, t, lux_norm):
+        b = self.fan_base
+        shift = 0.0
+        if not math.isnan(b['room']) and not math.isnan(self.amb_filt):
+            shift = float(self.amb_filt - b['room'])
+            if self.phys_in is not None and self.phys_in[4] == PLACE_CABINET and shift < 0:
+                shift = 0.0
+        th = b['theta']
+        return float(th[0] * self.heater + th[2] * f32(t - b['ref'] - shift) + th[3] * lux_norm + th[4])
+
+    def fan_detector(self, now, t, lux_norm):
+        # the baseline: the model as it stood after 15 min with the fan off
+        if (self.fan == 0 and self.ring_n == FAN_BASE_IDLE_N and sum(self.ring_f) == 0 and not self.learn_paused
+                and self.confidence() >= FAN_BASE_MIN_CONF and self.health() >= FAN_BASE_MIN_HEALTH
+                and not math.isnan(self.t_ref)):
+            self.fan_base = dict(ms=now, theta=[f32(v) for v in self.theta], ref=self.t_ref,
+                                 room=float(self.amb_filt))
+        if self.fan >= 0.9:
+            if self.fan_stall_since == 0:
+                self.fan_stall_since = now; self.fan_stall_t = t; self.fan_pred_acc = 0.0
+                return
+            self.fan_pred_acc += (self.no_fan_rate(t, lux_norm) if self.fan_base else 0.0) * 0.5
+            if now - self.fan_stall_since >= FAN_STALL_MS:
+                wmin = (now - self.fan_stall_since) / 60000.0
+                if self.fan_base is None or now - self.fan_base['ms'] > FAN_BASE_MAX_MS:
+                    self.fan_unjudged += 1          # no verdict: the flag stays as it was
+                else:
+                    effect = (self.fan_pred_acc - (t - self.fan_stall_t)) / wmin
+                    self.fan_effects.append((now / 86400000.0, effect))
+                    self.fan_dead_n = self.fan_dead_n + 1 if effect < FAN_DEAD_EFFECT else 0
+                    was = self.fan_stalled
+                    self.fan_stalled = self.fan_dead_n >= FAN_DEAD_WINDOWS
+                    if self.fan_stalled and not was:
+                        self.fan_flags += 1
+                self.fan_stall_since = now; self.fan_stall_t = t; self.fan_pred_acc = 0.0
+        else:
+            self.fan_stall_since = 0; self.fan_stalled = False; self.fan_dead_n = 0
 
     # -- one 30 s tick of update() ---------------------------------------
     def update(self, now, minute_of_day, t, cross, lux, amb, amb_reported=False, h_on_s=0.0, f_on_s=0.0):
@@ -676,11 +760,15 @@ class Controller:
                 self.heat_stall_since = now; self.heat_stall_t = t
         else:
             self.heat_stall_since = 0; self.heater_stalled = False
-        if self.fan >= 0.9:
+        if self.fan_adapt:
+            self.fan_detector(now, t, lux_norm)
+        elif self.fan >= 0.9:
             if self.fan_stall_since == 0:
                 self.fan_stall_since = now; self.fan_stall_t = t
-            elif now - self.fan_stall_since > FAN_STALL_MS:
+            elif now - self.fan_stall_since > FAN_STALL_MS_OLD:
                 self.fan_stalled = (self.fan_stall_t - t) < FAN_STALL_FALL
+                if self.fan_stalled:
+                    self.fan_flags += 1
                 self.fan_stall_since = now; self.fan_stall_t = t
         else:
             self.fan_stall_since = 0; self.fan_stalled = False
@@ -899,10 +987,12 @@ def real_room_f(tmin):
 
 def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_probe=False,
              sp_changes=(), room='real', room_step_day=None, start_day_metrics=2.0, events=(), window=None,
-             dead_heater=None):
+             dead_heater=None, room_offset_f=0.0):
     """dead_heater=(start_day, hours): the relays keep switching but no heat
     reaches the water -- the 75's relay power strip, off 2026-10-22 08:59 to
-    10-23 ~07:00."""
+    10-23 ~07:00. room_offset_f: added to the room (a hot office). The plant
+    dict is read every step, so an event may change plant['kf'] (a fan that
+    weakens or dies)."""
     rng = random.Random(seed)
     T = C(plant['setpoint_f'])
     cab = None
@@ -911,7 +1001,7 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
     tick_ms = 30000
     pred_hist = {}
     rec = dict(t=[], health=[], stale=[], db=[], tau=[], bias=[], T=[], heater=[], pred_err=[], at_bound=[], c=[],
-               kh=[])
+               kh=[], kf=[], fan_flag=[], paused=[], fan=[], room=[])
     sp = C(plant['setpoint_f'])
     nticks = int(days * 2880)
     last_zb = None
@@ -944,6 +1034,7 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
             room_f = office_room_f(mod)
         if room_step_day is not None and day >= room_step_day:
             room_f += 3
+        room_f += room_offset_f
         room_c = C(room_f)
         if cab is None:
             cab = room_c + (C(32 + 2.0) - C(32) if plant['cabinet'] else 0.0)
@@ -1012,6 +1103,8 @@ def simulate(ctrl, plant, days, seed=1, swap_day=None, make_new=None, ambient_pr
             rec['T'].append((day, F(T) - F(sp))); rec['heater'].append(h_on_s / 30.0)
             rec['at_bound'].append(ctrl.at_bound()[2])
             rec['c'].append(float(ctrl.theta[4])); rec['kh'].append(float(ctrl.theta[0]))
+            rec['kf'].append(-float(ctrl.theta[1])); rec['fan_flag'].append(ctrl.fan_stalled)
+            rec['paused'].append(ctrl.learn_paused); rec['fan'].append(f_on_s / 30.0); rec['room'].append(room_f)
         if day >= start_day_metrics:
             act['over'].append(F(T) - F(sp))
     rec['act'] = act
@@ -1278,6 +1371,147 @@ def dead_heater(days=7.0):
                       f"{c.rollbacks:6d} {c.paused_windows:10d}")
 
 
+PHYS_75_EVAP = (75.0, 62.0, 300.0, COVER_EVAP, PLACE_ROOM)
+HOT_OFFICE_F = 6.0      # the real office +6: 77-81 degF against a 75 setpoint, like 2026-11-05 (79.2)
+
+
+def fan_cover(quick=False):
+    """2026-11-03: lids + evaporation covers on the 75; 11-05: the office at
+    79.2 degF, the water 75.3-75.5 against 75.0, the fan at 100% from 14:05,
+    "Fan Not Responding" latched at 16:05 and learning paused -- so Learned
+    Fan Power sat on its open-top 2.09 degF/h. The fan was fine; it cannot
+    make the water FALL with the room 4 degF above it and the mesh covered.
+
+    The real office +6 degF, setpoint 75, the 75's plant open top with a
+    2.0 degF/h fan; on day 4 (00:00) the cover goes to lid + evaporation
+    cover: the fan loses `drop` of its effect, tau 800 -> 1100, evaporation
+    0.21 -> 0.03 degF/h. OLD is f0aba08 (fan_adapt=False)."""
+    days = 8.0 if quick else 10.0
+    d_cov = 4.0
+    print(f"Fan after a cover change: office +{HOT_OFFICE_F:.0f} degF (77-81), setpoint 75, cover -> lid + evap on day "
+          f"{d_cov:.0f}. kf in degF/h; flags = Fan Not Responding raised (NEW: 2 x 90 min under 0.10 degF/h of cooling; OLD: 45 min with no 0.05 degC fall)")
+    print("scenario                               true kf  kf@chg  +6h   +12h  +24h  +48h   end  "
+          "flags paused-win  ctrlRMS  max over  min effect")
+    print("                                        degF/h                                                       "
+          "         degF     degF    degF/h")
+
+    def run(label, drop, amb=True, fan_adapt=True, kill=None, migrate=None, phys0=PHYS_75, extra_days=0.0):
+        p = plant_for('75', 800)
+        p['setpoint_f'] = 75.0
+        kf0 = p['kf']
+        kf_new = kf0 * (1.0 - drop)
+        evs = []
+
+        def cover_on(ctrl, T, tau, c0):
+            p['kf'] = kf_new
+            ctrl.set_physics(PHYS_75_EVAP, ctrl.last_t, reset_ka=True)
+            return ctrl, 1100, (EVAP_FH[COVER_EVAP] + PUMP_FH) / CMIN_TO_FH
+        if phys0 == PHYS_75:
+            evs.append((d_cov, cover_on))
+        if migrate is not None:
+            d_flash, scale = migrate
+
+            def flash(ctrl, T, tau, c0):
+                # this firmware's first boot: flags and the pause are not
+                # persisted; the one-off re-opens the fan gain
+                ctrl.fan_adapt = True
+                ctrl.fan_stalled = False; ctrl.fan_stall_since = 0
+                ctrl.learn_paused = False; ctrl.fault_ms = None; ctrl.snaps = []
+                ctrl.anchor_t = float('nan')
+                ctrl.reopen_fan(scale)
+                return ctrl, tau, c0
+            evs.append((d_flash, flash))
+        if kill is not None:
+            def dead(ctrl, T, tau, c0):
+                p['kf'] = 0.0
+                return ctrl, tau, c0
+            evs.append((kill, dead))
+        ctrl = Controller('new', 75.0, phys=phys0, ambient=amb, fan_adapt=fan_adapt)
+        ctrl, rec = simulate(ctrl, p, days + extra_days, ambient_probe=amb, events=tuple(evs),
+                             room_offset_f=HOT_OFFICE_F)
+        return ctrl, rec, kf_new
+
+    def at(rec, key, d):
+        return next(rec[key][i] for i, t in enumerate(rec['t']) if t >= d)
+
+    def show(label, ctrl, rec, kf_new, d0=d_cov, flags_from=None):
+        flags_from = d0 if flags_from is None else flags_from
+        fl = sum(1 for i, t in enumerate(rec['t']) if t >= flags_from and rec['fan_flag'][i] and
+                 (i == 0 or not rec['fan_flag'][i - 1]))
+        pw = sum(1 for i, t in enumerate(rec['t']) if t >= flags_from and rec['paused'][i])   # 5 min records
+        te = [e for (d, e) in rec['T'] if d >= d0]
+        eff = [e for (d, e) in ctrl.fan_effects if d >= flags_from]
+        kf = lambda d: at(rec, 'kf', d) * CMIN_TO_FH
+        print(f"{label:38s} {kf_new * CMIN_TO_FH:6.2f} {kf(d0 - 0.001):6.2f} {kf(d0 + 0.25):5.2f} {kf(d0 + 0.5):5.2f}"
+              f" {kf(d0 + 1):5.2f} {kf(d0 + 2):5.2f} {rec['kf'][-1] * CMIN_TO_FH:5.2f} {fl:5d} {pw:10d}"
+              f" {math.sqrt(sum(e * e for e in te) / len(te)):8.3f} {max(te):+8.3f}"
+              f"  {min(eff) * CMIN_TO_FH if eff else float('nan'):+6.2f}")
+        return fl
+
+    out = {}
+    c, r, k = run('old', 0.7, fan_adapt=False)
+    out['old'] = show("OLD f0aba08, fan -70% +zigbee", c, r, k)
+    for drop in (0.7, 0.5, 0.85):
+        c, r, k = run('new', drop)
+        out[('new', drop)] = show(f"NEW, fan -{drop * 100:.0f}% +zigbee", c, r, k)
+        out[('new_kf', drop)] = (at(r, 'kf', d_cov + 1), k)
+    c, r, k = run('new', 0.7, amb=False)
+    out[('new_noamb', 0.7)] = show("NEW, fan -70% no room sensor", c, r, k)
+    out[('new_noamb_kf', 0.7)] = (at(r, 'kf', d_cov + 1), k)
+    # the 75 as it is: OLD firmware through the change, flashed 2 days later
+    for scale, lab in ((0.3, "scaled open->evap"), (1.0, "variance only")):
+        c, r, k = run('mig', 0.7, fan_adapt=False, migrate=(6.0, scale), extra_days=2.0)
+        out[('mig', scale)] = show(f"OLD->flash d6, one-off ({lab})", c, r, k, d0=6.0)
+        out[('mig_kf', scale)] = (at(r, 'kf', 7.0), k)
+    # a dead fan must still be caught: dies at midnight (idle), or mid-afternoon at 100%
+    for kill, lab in ((6.0, "00:00, idle"), (6.0 + 15.0 / 24, "15:00, at full")):
+        c, r, k = run('dead', 0.7, kill=kill)
+        first = next((t for i, t in enumerate(r['t']) if t >= kill and r['fan_flag'][i]), None)
+        fl = show(f"NEW, evap cover, fan DIES d6 {lab}", c, r, 0.0, flags_from=kill)
+        eff = [e * CMIN_TO_FH for (d, e) in c.fan_effects if d >= kill + FAN_STALL_MS / 86400000.0]
+        print(f"{'':38s} -> first Fan Not Responding "
+              f"{'never' if first is None else f'{(first - kill) * 24:.1f} h after it died'}; "
+              f"{sum(1 for e in eff if e < FAN_DEAD_EFFECT * CMIN_TO_FH)}/{len(eff)} windows judged dead, "
+              f"effect {min(eff) if eff else float('nan'):+.2f}..{max(eff) if eff else float('nan'):+.2f} degF/h")
+        out[('dead', kill)] = first
+    # no false alarms on the existing scenarios: open top all the way, hot office and the normal one, and the nano
+    print("False alarms with a working fan (no cover change), days 2-end: flags / paused windows")
+    # kfs < 1: a fan that is already weak (lids) from day 0, so it sits at 100% for hours -- the case that
+    # tests the detector. The physics given to the controller says lid + evap for those.
+    for lab, kind, amb, off, sp, kfs in (
+            ("75 open, office +6, sp 75, +zigbee", '75', True, HOT_OFFICE_F, 75.0, 1.0),
+            ("75 open, office +6, sp 75", '75', False, HOT_OFFICE_F, 75.0, 1.0),
+            ("75 open, real office, sp 77, +zigbee", '75', True, 0.0, 77.0, 1.0),
+            ("75 open, office +10, sp 75, +zigbee", '75', True, 10.0, 75.0, 1.0),
+            ("75 evap, fan 0.3x, office +6, +zigbee", '75', True, HOT_OFFICE_F, 75.0, 0.3),
+            ("75 evap, fan 0.3x, office +6", '75', False, HOT_OFFICE_F, 75.0, 0.3),
+            ("75 evap, fan 0.15x, office +6, +zigbee", '75', True, HOT_OFFICE_F, 75.0, 0.15),
+            ("75 evap, fan 0.15x, office +6", '75', False, HOT_OFFICE_F, 75.0, 0.15),
+            ("nano cab, office +6, +room sensor", 'nano', True, HOT_OFFICE_F, 74.5, 1.0),
+            ("nano cab, office +6", 'nano', False, HOT_OFFICE_F, 74.5, 1.0),
+            ("nano cab, fan 0.2x, office +6, +room", 'nano', True, HOT_OFFICE_F, 74.5, 0.2),
+            ("nano cab, fan 0.2x, office +6", 'nano', False, HOT_OFFICE_F, 74.5, 0.2)):
+        cab = dict(ua_ratio=1.5, cap_ratio=0.05) if kind == 'nano' else None
+        p = plant_for(kind, 800 if kind == '75' else 900, cabinet=cab,
+                      cover=COVER_EVAP if (kind == '75' and kfs < 1) else None)
+        p['setpoint_f'] = sp
+        p['kf'] *= kfs
+        phys = PHYS_75_EVAP if (kind == '75' and kfs < 1) else (PHYS_75 if kind == '75' else PHYS_NANO)
+        ctrl = Controller('new', sp, phys=phys, ambient=amb, cross=kind == '75')
+        if kfs < 1:
+            ctrl.theta[1] = f32(-p['kf'])      # as if already learned
+        ctrl, rec = simulate(ctrl, p, days, ambient_probe=amb, room_offset_f=off)
+        fl = sum(1 for i, t in enumerate(rec['t']) if t >= 2 and rec['fan_flag'][i] and not rec['fan_flag'][i - 1])
+        pw = sum(1 for i, t in enumerate(rec['t']) if t >= 2 and rec['paused'][i])
+        eff = [e for (d, e) in ctrl.fan_effects if d >= 2]
+        print(f"  {lab:40s} flags {fl:3d}  paused {pw:4d}  judged {len(eff):3d} (unjudged {ctrl.fan_unjudged:3d})"
+              f"  effect min {min(eff) * CMIN_TO_FH if eff else float('nan'):+.2f}"
+              f" med {sorted(eff)[len(eff) // 2] * CMIN_TO_FH if eff else float('nan'):+.2f} degF/h"
+              f"  kf end {-float(ctrl.theta[1]) * CMIN_TO_FH:.2f} (true {p['kf'] * CMIN_TO_FH:.2f})")
+        out[('fa', lab)] = fl
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--quick', action='store_true')
@@ -1286,7 +1520,12 @@ def main():
     ap.add_argument('--replay', action='store_true')
     ap.add_argument('--relay', action='store_true', help='only the relay-drive before/after table')
     ap.add_argument('--dead-heater', action='store_true', help='only the 22 h dead-heater before/after table')
+    ap.add_argument('--fan-cover', action='store_true',
+                    help='only the cover-change / weak-fan / dead-fan table (Fan Not Responding, fan gain re-learning)')
     a = ap.parse_args()
+    if a.fan_cover:
+        fan_cover(a.quick)
+        return
     if a.dead_heater:
         dead_heater()
         return
@@ -1367,6 +1606,7 @@ def main():
     row("75 tau=800 NEW sp 77/79/77", summarize(rec, days, true_tau=800))
     actuators(days)
     dead_heater()
+    fan_cover(a.quick)
     replay()
 
 
