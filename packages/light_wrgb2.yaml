@@ -17,6 +17,7 @@
 #   ${light_mac}      the lamp's BLE MAC (the board file sets it)
 #   sensor tank_lux   LAMP-ONLY lux -- daylight already unmixed out by NIR
 #   global cal_nir_ref  the learned daylight reference (ble_link_v3.yaml)
+#   sensor sp_nir     the AS7341's NIR channel (packages/spectral.yaml)
 #   time sntp_time    packages/base.yaml
 #   esp32_ble         packages/ble_link_v3.yaml (the panel server)
 #   ble_guard         packages/ble_link_v3.yaml (disconnect reasons)
@@ -64,7 +65,64 @@
 #     pushed instead, which darkens / corrects the lamp at once.
 #   * No more than one fix per 15 minutes; after 3 fixes that did not take,
 #     stop pushing and raise "Light Not Responding" rather than hammering the
-#     radio. It clears the moment the lamp matches again.
+#     radio. It clears once the lamp has matched for 20 minutes running.
+#
+# ---------------------------------------------------------------------
+# WHEN THE SENSOR, NOT THE LAMP, IS WRONG
+# ---------------------------------------------------------------------
+# Every push blanks the lamp for 20-90 s while it reloads (auto mode, slot
+# clear, curve, clock). So a push is only worth it when the lamp is really
+# wrong, and A BLOCKED OR DIRTY SENSOR MUST NEVER MAKE THE LIGHTS GO OFF.
+# 2026-11-05 11:34: a fish feeder parked in front of the sensor pod cut
+# every channel ~80% in one sample (raw lux 682 -> 168, visible 376 -> 32,
+# clear 142 -> 24, NIR 14 -> 3), lamp lux 585 -> 135. The lamp was on its
+# curve the whole time, link up, read-back matching. The board called it
+# dark and re-pushed at 11:39, ~11:54, ~12:09, ~12:25 -- a blackout each
+# time -- and the 3-push limit never latched, because the reading sat on
+# the dark line and one in-band minute reset the count.
+#
+# Three guards, in this order, before a "darker than the schedule" push:
+#
+#   1. VIEW CHECK. The lamp has no NIR; daylight is full of it. A lamp that
+#      really goes dark takes only its own light away: NIR stays where it
+#      was. Something in front of the sensor (or the pod knocked askew)
+#      cuts everything at once, NIR included, by about the same factor.
+#      Against the view averaged over lit minutes that matched (frozen the
+#      moment a mismatch starts):
+#        NIR was >= 6 counts, is >= 1 and fell to half or less, AND the
+#        lamp lux (at full, so the curve's own slope does not count) fell
+#        by the same factor within 2x either way
+#      -> "Light Sensor Blocked", no push, logged with both factors. NIR
+#      under 6 before (night, blinds down) or ~0 now cannot tell the two
+#      apart: guard 2 decides. A cloud dims NIR but not the lamp lux, and
+#      a lamp going dark under a cloud drops the lamp lux far more than
+#      NIR -- neither matches "the same factor".
+#   2. ASK THE LAMP. A status query (one AUTH frame -- the app's
+#      getDeviceInfo; the same frame a curve push already ends with, a
+#      query, not a write) brings back the lamp's stored-schedule snapshot.
+#      Curve: every time it lists was sent, and it lists at least one
+#      (the snapshot is size-limited -- "lists 8 of 18" -- so only the
+#      times it shows are compared). Scene: its stored bytes equal the ones
+#      it answered right after the scene was pushed. If the lamp is linked
+#      and holds what the board sent, a push can only reload the same thing
+#      and blank the tank: "Light Sensor Blocked", no push, asked again in
+#      15 min. Differs, or no answer in 20 s: push, as before.
+#      No clock-only resync either: nothing in the fork's protocol notes
+#      shows that a bare RTC frame leaves the lamp lit (the WRGB II notes
+#      say the clock "triggers immediate schedule evaluation"), so nothing
+#      is sent at all. The 03:00 resync is a full push, while dark.
+#   3. 20 MINUTES TO FORGIVE. Fix attempts, Not Responding and Brighter
+#      Than Schedule clear only after the lamp has matched for 20 minutes
+#      running, so a reading straddling the line cannot reset the 3-push
+#      limit. Light Sensor Blocked clears after 5 matching minutes.
+#
+# The opposite trap: "Relearn Light Level" pressed while the sensor is
+# blocked learns the blocked level; uncovering it then reads ~4x the curve
+# and would suspend the curve for the day. The same view check, upward --
+# NIR doubled or more (to >= 6) with the lamp lux up by the same factor --
+# is "the sensor's view changed": relearn, never "brighter than schedule".
+# A relearn (any path that zeroes the learned level) also resets the view,
+# so the first matching minute after it is the new reference.
 #
 # Ramps are excluded (5 min margin each side on top of the ramp itself) --
 # mid-ramp the lux is legitimately anywhere. Assumes the photoperiod does
@@ -277,6 +335,47 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Consecutive minutes the lamp has matched the schedule. Fix attempts,
+  # Not Responding and Brighter Than Schedule clear only after 20 of them
+  # (see WHEN THE SENSOR, NOT THE LAMP, IS WRONG).
+  - id: light_match_min
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # The sensor's view, averaged over lit minutes that matched: NIR counts
+  # (daylight only -- the lamp has none) and lamp lux at the phase's full
+  # values (tank_lux / level). Frozen while the lamp does not match, so a
+  # mismatch is compared against what the view was BEFORE it. NAN = none yet.
+  - id: light_view_nir
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: light_view_full
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  # "Light Sensor Blocked": the board judged the sensor, not the lamp, to be
+  # wrong, and is not pushing.
+  - id: light_sensor_blocked
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Ask-the-lamp-first: 0 idle, 1 status query sent (light_verify_ms),
+  # 2 the lamp holds what the board sent, 3 it does not / no answer.
+  - id: light_verify
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: light_verify_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # A single-scene push has no sent times to compare a snapshot with, so the
+  # stored part of the lamp's answer to the push (bytes 25 on) is kept as its
+  # fingerprint. Empty = none (the lamp did not answer, or a curve is on).
+  - id: light_scene_snap
+    type: std::vector<uint8_t>
+    restore_value: false
   # 0 unknown, 1 off phase, 2 dark (outside the photoperiod), 3 ramping,
   # 4 lit (plateau). Drives detection and "Light Expected".
   - id: light_expected
@@ -1031,6 +1130,7 @@ script:
                 id(light_push_ms) = millis();
                 id(light_readback_ms) = 0;
                 id(light_sent_min).clear();
+                id(light_scene_snap).clear();
                 if (id(lp_auto) && id(lp_curve)) {
                   // The daylight curve as points (chihiros::daylight::points):
                   // civil dawn / sunrise / sunset / civil dusk exactly, the
@@ -1074,6 +1174,21 @@ script:
                       characteristic_uuid: ${light_ble_tx}
                       value: !lambda return id(light_device).next();
                   - delay: 200ms
+            # A scene push has no closing status query of its own; send one
+            # so its answer becomes the scene's fingerprint for the
+            # ask-the-lamp check (WHEN THE SENSOR, NOT THE LAMP, IS WRONG).
+            # A query, not a write: the same frame a curve push ends with.
+            - if:
+                condition:
+                  lambda: return id(light_linked) && id(light_sent_min).empty() && !id(light_device).has_next();
+                then:
+                  - delay: 300ms
+                  - lambda: id(light_readback_ms) = millis();
+                  - ble_client.ble_write:
+                      id: light_ble
+                      service_uuid: ${light_ble_service}
+                      characteristic_uuid: ${light_ble_tx}
+                      value: !lambda return chihiros::auth(id(light_device).seq());
             - logger.log:
                 level: INFO
                 format: "light: phase pushed"
@@ -1081,6 +1196,23 @@ script:
             - logger.log:
                 level: INFO
                 format: "light: not linked; the phase goes out on connect"
+
+  # Ask the lamp what it stores (guard 2 in WHEN THE SENSOR, NOT THE LAMP,
+  # IS WRONG): one status query, the AUTH frame that is the app's
+  # getDeviceInfo. The answer is judged in light_notification; the minute
+  # tick acts on light_verify.
+  - id: light_query
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: return id(light_linked);
+          then:
+            - ble_client.ble_write:
+                id: light_ble
+                service_uuid: ${light_ble_service}
+                characteristic_uuid: ${light_ble_tx}
+                value: !lambda return chihiros::auth(id(light_device).seq());
 
   # The link is down, however that was found out. One place, so the
   # disconnect event and the watchdog cannot disagree about what "down"
@@ -1298,6 +1430,8 @@ interval:
           const float lux = id(tank_lux).state;
           if (id(light_released) || !id(light_linked) || std::isnan(lux)) {
             id(light_mismatch_min) = 0;
+            id(light_match_min) = 0;
+            id(light_verify) = 0;
             return;
           }
 
@@ -1316,6 +1450,30 @@ interval:
           //         of the day and the scene pushed instead, which darkens
           //         the lamp at once (it did at 18:58 on 2026-10-19).
           float &learned = id(light_learned_lux);
+
+          // VIEW CHECK (see WHEN THE SENSOR, NOT THE LAMP, IS WRONG). Pasted
+          // verbatim into tools/light_view_test.cpp, which checks it is still
+          // here word for word -- change both together.
+          //   nir_ref, full_ref  the view averaged over lit minutes that matched
+          //   nir, full          now (NIR counts; lamp lux / level)
+          //   -1 the view was cut (obstruction), +1 it opened (uncovered),
+          //    0 the lamp itself changed, or there is no way to tell
+          auto view_change = [](float nir_ref, float nir, float full_ref, float full) -> int {
+            if (std::isnan(nir_ref) || std::isnan(nir) || std::isnan(full_ref) || std::isnan(full) ||
+                nir_ref <= 0.0f || full_ref <= 0.0f || full < 0.0f) return 0;
+            const float rn = nir / nir_ref, rl = full / full_ref;
+            const bool together = rl >= 0.5f * rn && rl <= 2.0f * rn;   // same factor, within 2x
+            if (nir_ref >= 6.0f && nir >= 1.0f && rn <= 0.5f && together) return -1;
+            if (nir >= 6.0f && rn >= 2.0f && together) return 1;
+            return 0;
+          };
+          // Any relearn (button, phase, shape, a control) zeroes learned: the
+          // view is relearned with it, from the next matching minute.
+          if (learned <= 0.0f) { id(light_view_nir) = NAN; id(light_view_full) = NAN; }
+          const float nir_now = id(sp_nir).state;
+          const float full_now = frac >= 0.05f ? lux / frac : NAN;
+          const int view = view_change(id(light_view_nir), nir_now, id(light_view_full), full_now);
+
           bool dark = false, over = false;
           if (expect == 4) {
             const float dark_below = std::max(20.0f, 0.25f * learned * frac);
@@ -1345,22 +1503,56 @@ interval:
             // On the curve the level is known all day: well above it is a
             // point the lamp holds that the board did not write.
             if (lux > 1.5f * learned * frac + std::max(15.0f, 0.05f * learned)) over = true;
+            // ...unless NIR jumped with it: the sensor was uncovered after a
+            // level learned while it was blocked. That is a new view, not a
+            // brighter lamp: relearn, and never suspend the curve for it.
+            if (over && view == 1) {
+              ESP_LOGW("light", "sensor view opened (NIR %.0f -> %.0f, lamp at full %.0f -> %.0f lx): "
+                       "relearning the light level, not 'brighter than schedule'",
+                       id(light_view_nir), nir_now, id(light_view_full), full_now);
+              learned = 0.0f;
+              id(light_view_nir) = NAN;
+              id(light_view_full) = NAN;
+              id(light_mismatch_min) = 0;
+              id(light_sensor_blocked) = false;
+              return;
+            }
           }
 
           if (!dark && !over) {
-            if (id(light_not_responding) || id(light_over))
-              ESP_LOGI("light", "lamp matches the schedule again");
             id(light_mismatch_min) = 0;
-            id(light_fix_attempts) = 0;
-            id(light_not_responding) = false;
-            id(light_over) = false;
+            id(light_verify) = 0;
+            id(light_match_min)++;
+            // The view reference: lit, matching, and either the first sample
+            // since a relearn or 5 matching minutes running (so the minutes
+            // of a reading straddling the dark line never become the norm).
+            if (expect == 4 && !std::isnan(nir_now) && !std::isnan(full_now)) {
+              float &vn = id(light_view_nir), &vf = id(light_view_full);
+              if (std::isnan(vn) || std::isnan(vf)) { vn = nir_now; vf = full_now; }
+              else if (id(light_match_min) >= 5) { vn += 0.2f * (nir_now - vn); vf += 0.2f * (full_now - vf); }
+            }
+            if (id(light_match_min) >= 5 && id(light_sensor_blocked)) {
+              ESP_LOGI("light", "light sensor reads the schedule again (5 min); Light Sensor Blocked cleared");
+              id(light_sensor_blocked) = false;
+            }
+            // One in-band minute is not a fix: on 2026-11-05 a reading on the
+            // dark line reset the 3-push limit every few minutes.
+            if (id(light_match_min) >= 20) {
+              if (id(light_not_responding) || id(light_over) || id(light_fix_attempts) > 0)
+                ESP_LOGI("light", "lamp has matched the schedule for 20 min; fix attempts cleared");
+              id(light_fix_attempts) = 0;
+              id(light_not_responding) = false;
+              id(light_over) = false;
+            }
             return;
           }
 
+          id(light_match_min) = 0;
           id(light_mismatch_min)++;
-          ESP_LOGW("light", "lamp does not match: %s (expected level %.0f%%), lamp lux %.0f, learned at full %.0f (%d min)",
+          ESP_LOGW("light", "lamp does not match: %s (expected level %.0f%%), lamp lux %.0f, learned at full %.0f, "
+                   "NIR %.0f (view %.0f) (%d min)",
                    dark ? "darker than the schedule" : "brighter than the schedule",
-                   frac * 100.0f, lux, learned, id(light_mismatch_min));
+                   frac * 100.0f, lux, learned, nir_now, id(light_view_nir), id(light_mismatch_min));
           if (id(light_mismatch_min) < 5) return;
 
           if (over) {
@@ -1380,8 +1572,52 @@ interval:
               return;
             }
           }
+
+          if (dark) {
+            // Guard 1: the view was cut, NIR and all. Checked every minute
+            // (no radio involved); no push, ever, for this.
+            if (view == -1) {
+              if (!id(light_sensor_blocked))
+                ESP_LOGE("light", "light sensor blocked: NIR %.0f -> %.0f (x%.2f) fell with the lamp lux at full "
+                         "%.0f -> %.0f (x%.2f) -- a dark lamp leaves daylight NIR alone. NOT re-pushing "
+                         "(a push blanks the lamp); clear the sensor's view",
+                         id(light_view_nir), nir_now, nir_now / id(light_view_nir),
+                         id(light_view_full), full_now, full_now / id(light_view_full));
+              id(light_sensor_blocked) = true;
+              id(light_verify) = 0;
+              return;
+            }
+          }
           if (id(light_not_responding)) return;
           if (id(light_last_fix_ms) != 0 && millis() - id(light_last_fix_ms) < 15UL * 60UL * 1000UL) return;
+
+          if (dark) {
+            // Guard 2: ask the lamp first; act on its answer next minute.
+            if (id(light_verify) == 0) {
+              ESP_LOGI("light", "dark for 5 min; asking the lamp what it stores before any push");
+              id(light_verify) = 1;
+              id(light_verify_ms) = millis();
+              id(light_query).execute();
+              return;
+            }
+            if (id(light_verify) == 1) {
+              if (millis() - id(light_verify_ms) < 20000UL) return;
+              ESP_LOGW("light", "the lamp did not answer the status query in 20 s");
+              id(light_verify) = 3;
+            }
+            if (id(light_verify) == 2) {
+              if (!id(light_sensor_blocked))
+                ESP_LOGE("light", "the lamp is linked and holds what the board sent, but the sensor reads dark "
+                         "(NIR %.0f, view %.0f): NOT re-pushing -- it would only blank the lamp. Light Sensor "
+                         "Blocked; asking again in 15 min. Check the sensor's view (and the lamp)",
+                         nir_now, id(light_view_nir));
+              id(light_sensor_blocked) = true;
+              id(light_verify) = 0;
+              id(light_last_fix_ms) = millis();
+              return;
+            }
+            id(light_verify) = 0;                // 3: differs or no answer -- a push can help
+          }
 
           if (id(light_fix_attempts) >= 3) {
             id(light_not_responding) = true;
@@ -1773,6 +2009,19 @@ binary_sensor:
     device_class: problem
     lambda: return id(light_not_responding);
 
+  # The sensor reads dark but the board judged the SENSOR wrong, not the
+  # lamp, and is not pushing (a push blanks the lamp): NIR fell together
+  # with the lamp light (something in front of the pod), or the lamp is
+  # linked and confirms it holds what was sent. The log says which. Clears
+  # after 5 minutes of the reading matching the schedule.
+  - platform: template
+    trigger_on_initial_state: true
+    name: "Light Sensor Blocked"
+    icon: mdi:eye-off-outline
+    device_class: problem
+    entity_category: diagnostic
+    lambda: return id(light_sensor_blocked);
+
   # The lamp lit when it should be dark (5% of full for 5 min), or well
   # above the daylight curve. On the curve this also suspends it until midnight.
   - platform: template
@@ -1916,7 +2165,36 @@ sensor:
           // is a stored point that will shape the day (the 2026-10-19 bump
           // and relight). Fewer times than sent is only reported -- the
           // snapshot may be size-limited -- and the lux check covers it.
-          if (id(light_readback_ms) != 0 && millis() - id(light_readback_ms) < 15000UL) {
+          // Ask-the-lamp (the minute tick's guard 2): does it hold what the
+          // board last sent? Curve: at least one listed time and none foreign
+          // (size-limited, so only the listed times count). Scene: the same
+          // stored bytes it answered with right after the push.
+          if (id(light_verify) == 1 && millis() - id(light_verify_ms) < 20000UL) {
+            const auto &sent = id(light_sent_min);
+            bool match;
+            if (!sent.empty()) {
+              const auto got = chihiros::snapshot_minutes(f);
+              int foreign = 0;
+              for (int t : got) if (std::find(sent.begin(), sent.end(), t) == sent.end()) foreign++;
+              match = !got.empty() && foreign == 0;
+              ESP_LOGI("light", "verify: the lamp lists %d of the %d times sent, %d foreign -> %s",
+                       (int) got.size(), (int) sent.size(), foreign, match ? "holds the curve" : "DIFFERS");
+            } else {
+              const std::vector<uint8_t> tail(f.begin() + 25, f.end());
+              match = !id(light_scene_snap).empty() && tail == id(light_scene_snap);
+              ESP_LOGI("light", "verify: scene snapshot %s",
+                       id(light_scene_snap).empty() ? "has no fingerprint to compare (none after the push)"
+                                                    : (match ? "matches the one after the push" : "DIFFERS from the one after the push"));
+            }
+            id(light_verify) = match ? 2 : 3;
+            rep = std::string(match ? "verify match | " : "verify DIFFERS | ") + rep;
+          } else if (id(light_readback_ms) != 0 && millis() - id(light_readback_ms) < 15000UL && id(light_sent_min).empty()) {
+            // The answer to a scene push's closing query: keep its stored part.
+            id(light_readback_ms) = 0;
+            id(light_scene_snap).assign(f.begin() + 25, f.end());
+            ESP_LOGI("light", "read-back: scene snapshot kept as the fingerprint (%d bytes)", (int) id(light_scene_snap).size());
+            rep = "scene | " + rep;
+          } else if (id(light_readback_ms) != 0 && millis() - id(light_readback_ms) < 15000UL) {
             id(light_readback_ms) = 0;
             const auto got = chihiros::snapshot_minutes(f);
             const auto &sent = id(light_sent_min);
