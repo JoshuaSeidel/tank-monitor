@@ -3,7 +3,7 @@
 substitutions:
   device_name: tank-monitor-15g
   friendly_name: Tank Monitor 15G Panel
-  s3_ble_mac: "E0:72:A1:F7:D6:86"
+  s3_ble_mac: "E0:72:A1:F7:D6:4E"
 
 packages:
   base: !include packages/base.yaml

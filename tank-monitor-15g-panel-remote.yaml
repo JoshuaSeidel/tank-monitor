@@ -17,19 +17,19 @@
 # ---------------------------------------------------------------------
 # s3_ble_mac -- the 15 gal controller's BLE address
 # ---------------------------------------------------------------------
-# THE VALUE BELOW IS STALE. It is the first XIAO's address, and that board
-# was replaced on 2026-11-06 (it stopped showing up on USB). After flashing
-# the new controller, read "BLE MAC (for the panel)" on its web page's
-# Diagnostics tab -- or the boot log line "[esp32_ble:...] ESP-IDF BLE MAC
-# address: ..." -- put it here, and reflash the panel. A wrong MAC compiles
-# cleanly and then never connects.
+# The replacement XIAO (2026-11-06; the first stopped showing up on USB),
+# as its own boot log reported it:
+#   [I][ble]: Controller BLE MAC (the panel's s3_ble_mac): E0:72:A1:F7:D6:4E
+# The controller prints that line every 30 s for five minutes after boot,
+# and the web page's Diagnostics tab shows it. A new controller chip means
+# a new MAC; a wrong one compiles cleanly and then never connects.
 #
 # device_name must not collide with tank-monitor-15-gallon, -75g,
 # -75-gallon, -s3, -panel or any other tank-monitor-*.
 substitutions:
   device_name: tank-monitor-15g
   friendly_name: Tank Monitor 15G Panel
-  s3_ble_mac: "E0:72:A1:F7:D6:86"
+  s3_ble_mac: "E0:72:A1:F7:D6:4E"
 
 packages:
   tank_monitor:
