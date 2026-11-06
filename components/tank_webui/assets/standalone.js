@@ -44,6 +44,9 @@ const E = {
   calTds: "button-calibrate_tds", learn: "switch-adaptive_learning",
   restart: "button-restart", reset: "button-reset_learning", clearCrash: "button-clear_crash_report",
   factory: "button-factory_reset",
+  phProbe: "binary_sensor-ph_probe", phV: "sensor-ph_probe_voltage", calHi: "number-cal_ph_high_value",
+  calLo: "number-cal_ph_low_value", calSlope: "sensor-cal_ph_slope", capHi: "button-capture_high_point",
+  capLo: "button-capture_low_point",
   deadband: "number-fan_deadband", vol: "number-tank_volume", water: "number-water_volume",
   power: "number-heater_power", cover: "select-tank_cover", placement: "select-tank_placement",
   co2: "switch-co2", air: "switch-bubbler", co2Sched: "switch-co2_schedule",
@@ -227,6 +230,8 @@ class TankSite extends HTMLElement {
     this.$("t_lux").innerHTML = isNaN(lux) ? "--" : lux.toFixed(0) + "<small>lx</small>";
     const ph = this.n(E.ph);
     if (!isNaN(ph)) { this.set("t_ph", ph.toFixed(2)); this.set("t_phs", "probe"); }
+    else { this.set("t_ph", "--"); this.set("t_phs", this.on(E.phProbe) ? "probe fitted, not calibrated or out of range"
+      : "no probe fitted · log a test on Water tests"); }
     const tds = this.n(E.tds), raw = this.n(E.tdsRaw);
     this.$("t_tds").innerHTML = isNaN(tds) ? (isNaN(raw) ? "--" : raw.toFixed(0) + "<small>ppm</small>")
       : tds.toFixed(0) + "<small>ppm</small>";
@@ -401,6 +406,7 @@ class TankSite extends HTMLElement {
         <div class="card span2"><div class="lbl">Light lux</div><svg class="chart" id="c_lux"></svg></div>
         <div class="card span4"><div class="lbl">Heater and fan duty %</div><svg class="chart" id="c_duty"></svg>
           <div class="legend"><span><i style="background:${C.heat}"></i>heater</span><span><i style="background:${C.blue}"></i>fan</span></div></div>
+        <div class="card span4" id="h_ph" style="display:none"><div class="lbl">pH</div><svg class="chart" id="c_ph"></svg></div>
         <div class="card span4" id="h_aux" style="display:none"><div class="lbl">CO2 and bubbler, % of the time on</div><svg class="chart" id="c_aux"></svg>
           <div class="legend"><span><i style="background:#199e70"></i>CO2</span><span><i style="background:${C.blue}"></i>bubbler</span></div></div>
       </div>`;
@@ -434,6 +440,10 @@ class TankSite extends HTMLElement {
     this.chart("c_tds", d, [{ v: S.tdsraw, c: "#596574", w: 1 }, { v: S.tds, c: C.blue, w: 2 }], 0);
     this.chart("c_lux", d, [{ v: S.lux, c: "#e8c547", w: 1.5 }], 0);
     this.chart("c_duty", d, [{ v: S.heat, c: C.heat, w: 1.5 }, { v: S.fan, c: C.blue, w: 1.5 }], 0, [0, 100]);
+    if (S.ph && S.ph.some((v) => v !== null)) {
+      this.$("h_ph").style.display = "";
+      this.chart("c_ph", d, [{ v: S.ph, c: "#c18cf0", w: 2 }], 2);
+    }
     if (S.co2) {
       this.$("h_aux").style.display = "";
       this.chart("c_aux", d, [{ v: S.air, c: C.blue, w: 1.5 }, { v: S.co2, c: "#199e70", w: 2 }], 0, [0, 100]);
@@ -623,7 +633,23 @@ class TankSite extends HTMLElement {
           ${numF("s_off", "Temperature offset &deg;F", E.calOff, "0.1")}
           <div class="fld"><span class="sub">Probe reads now</span><div class="med" id="s_tnow">--</div></div>
         </div>
-        <div class="note">Against a trusted thermometer. This probe is the only one the heater listens to.</div></div>
+        <div class="note">Against a trusted thermometer. This probe is the only one the heater listens to.</div>
+        <div id="s_phcal" style="display:none;margin-top:18px">
+          <div class="lbl">pH &mdash; two point</div>
+          <div class="form">
+            <label class="fld"><span class="sub">High buffer (pH on the bottle)</span>
+              <input type="number" step="0.01" id="s_phhi" data-k="${E.calHi}" disabled></label>
+            <label class="fld"><span class="sub">Low buffer (pH on the bottle)</span>
+              <input type="number" step="0.01" id="s_phlo" data-k="${E.calLo}" disabled></label>
+            <div class="fld"><span class="sub">Probe now</span><div class="med" id="s_phv">--</div></div>
+            <div class="fld"><span class="sub">Slope</span><div class="med" id="s_phslope">--</div></div>
+          </div>
+          <div class="actions"><button class="btn" id="s_caphi" disabled>Capture high</button>
+            <button class="btn" id="s_caplo" disabled>Capture low</button></div>
+          <div class="note">Set both values to what the bottles say and pick buffers that bracket the tank &mdash;
+            9.18 and 6.86 for a tank at 7.x. Rinse and blot (never wipe) between buffers, two minutes in each before
+            capturing, then check in a third. A healthy electrode is near 0.177 V/pH.</div>
+        </div></div>
       <div class="card span4"><div class="lbl">Device</div>
         <div class="actions"><button class="btn" id="s_restart" disabled>Restart</button>
           <button class="btn warn" id="s_reset" disabled>Reset learning</button>
@@ -656,6 +682,14 @@ class TankSite extends HTMLElement {
       if (confirm(`Set the TDS calibration so the probe reads ${this.n(E.calStd).toFixed(0)} ppm right now?`)) this.act(E.calTds, "press");
     };
     this.$("s_restart").onclick = () => confirm("Restart the controller?") && this.act(E.restart, "press");
+    const cap = (btn, k, numK, what) => {
+      this.$(btn).onclick = () => {
+        if (this.pending[numK]) { alert("The new buffer value has not reached the device yet. Press again in a moment."); return; }
+        if (confirm(`Store the probe's voltage now as the ${what} point, pH ${this.n(numK).toFixed(2)}?`)) this.act(k, "press");
+      };
+    };
+    cap("s_caphi", E.capHi, E.calHi, "high");
+    cap("s_caplo", E.capLo, E.calLo, "low");
     this.$("s_reset").onclick = () => confirm("Discard everything the controller has learned about this tank?") && this.act(E.reset, "press");
     this.$("s_factory").onclick = () =>
       confirm("Factory reset: wipe ALL settings, calibrations, history and water tests on this controller?") &&
@@ -696,6 +730,17 @@ class TankSite extends HTMLElement {
     this.$("s_restart").disabled = !this.ids[E.restart];
     this.$("s_reset").disabled = !this.ids[E.reset];
     this.$("s_factory").disabled = !this.ids[E.factory];
+    // pH calibration only while a probe answers.
+    const probe = this.on(E.phProbe);
+    this.$("s_phcal").style.display = probe ? "" : "none";
+    if (probe) {
+      const v = this.n(E.phV), sl = this.n(E.calSlope);
+      this.set("s_phv", isNaN(v) ? "--" : v.toFixed(4) + " V");
+      this.set("s_phslope", isNaN(sl) ? "--" : Math.abs(sl).toFixed(3) + " V/pH");
+      this.$("s_phslope").style.color = !isNaN(sl) && Math.abs(sl) < 0.150 ? "var(--amber)" : "";
+      this.$("s_caphi").disabled = !(this.ids[E.capHi] && !isNaN(v));
+      this.$("s_caplo").disabled = !(this.ids[E.capLo] && !isNaN(v));
+    }
   }
 
   // ---------------------------------------------------------- page: archive

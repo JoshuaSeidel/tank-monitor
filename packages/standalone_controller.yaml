@@ -58,6 +58,10 @@ tank_history:
     - name: fan
       sensor: hist_fan
       scale: 10
+    # Unknown (gaps) until a pH probe is fitted.
+    - name: ph
+      sensor: water_ph
+      scale: 100
 
 sensor:
   # The setpoint is a number, not a sensor; this is it as one, so the chart

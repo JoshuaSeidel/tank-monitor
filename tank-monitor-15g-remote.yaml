@@ -2,8 +2,8 @@
 # Put THIS in the ESPHome dashboard.
 #
 # Heater, fan, CO2 solenoid, bubbler, one temperature probe, TDS, BH1750
-# lux. No pH yet: the wire is run to D3 but nothing is configured on it
-# (see the board file).
+# lux, and pH on D3 -- configured now, reading unknown until a probe is
+# fitted, so fitting one needs no reflash (see the board file).
 #
 # NO HOME ASSISTANT. Everything this tank keeps, it keeps itself: the
 # controller holds 24 h and 30 days of history and the water-test log in

@@ -24,7 +24,7 @@
 #   heater relay IN+    D8           7      purple
 #   fan relay IN+       D9           8      blue
 #   bubbler IN+         D10          9      (8th wire; 4th relay outlet)
-#   (pH, reserved)      D3           4      wired, NOT configured -- see below
+#   pH analog           D3           4      wired; reads only when a probe is fitted
 #
 # Spare: D1 (GPIO2, ADC1).
 #
@@ -35,13 +35,18 @@
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and nothing may hold it
 # at a level during boot.
 #
-# pH, LATER. A wire is already on D3 (GPIO4, ADC1) and stops there.
-# Nothing in this config touches GPIO4, so the pin stays an unconfigured,
-# high-impedance input and the wire is inert -- insulate its far end so it
-# cannot touch the relay box's supply. To fit a probe: land its analog out
-# on that wire, add packages/ph.yaml to the wrapper, delete the water_ph
-# placeholder at the bottom of this file, and add an adc sensor
-# `id: ph_voltage` on GPIO4 as boards/xiao-esp32s3.yaml has it.
+# pH IS ON, WITH OR WITHOUT A PROBE. The wire on D3 (GPIO4, ADC1) is read
+# all the time, so fitting a probe later needs no reflash: land the pH
+# board's analog out on that wire and it starts reading.
+#
+# Telling "no probe" from a reading: an open ADC pin floats and wanders
+# through voltages a real probe produces, so GPIO4's internal pull-down is
+# switched on (see on_boot below). With nothing attached the pin sits at
+# 0 V; a pH board's op-amp output overrides ~45k without noticing. Under
+# 0.15 V is taken as "no probe" -- ph_voltage goes NaN, Water pH goes
+# unknown, "pH Probe" reads disconnected, and the web page and panel show
+# the last water test where pH would be. Until a probe is fitted, insulate
+# the wire's far end so it cannot touch the relay box's supply.
 #
 # BH1750: ADDR floating or to GND = 0x23, which is what packages/sensors.yaml
 # expects. Never splice ADDR to VCC by hand -- that splice shorted the 3V3
@@ -54,7 +59,8 @@
 #   output id: heater_output     -> packages/control.yaml
 #   output id: fan_output        -> packages/control.yaml
 #   switch id: co2_relay, bubbler_relay -> packages/co2_bubbler.yaml
-#   water_temp_b, temp_gradient, water_ph,
+#   adc sensor id: ph_voltage    -> packages/ph.yaml (Water pH)
+#   water_temp_b, temp_gradient,
 #   grad_ema_heating, grad_ema_idle  -> packages/ble_link_v3.yaml
 
 esp32:
@@ -136,12 +142,23 @@ sensor:
     id: temp_gradient
     internal: true
     update_interval: never
-  # Delete this one when packages/ph.yaml is added -- ph.yaml defines
-  # water_ph itself and the two would collide.
-  - platform: template
-    id: water_ph
+  # pH board voltage. packages/ph.yaml turns it into Water pH.
+  - platform: adc
+    # Silkscreen D3.
+    pin: GPIO4
+    id: ph_voltage
+    update_interval: 1s
+    attenuation: 12db
+    raw: false
     internal: true
-    update_interval: never
+    filters:
+      - median:
+          window_size: 10
+          send_every: 5
+          send_first_at: 5
+      # The pull-down holds an empty pin at 0 V. No real pH board output
+      # gets this low (pH 14 is still ~0.4 V), so this is "no probe".
+      - lambda: 'return x < 0.15f ? NAN : x;'
 
 globals:
   - id: grad_ema_heating
@@ -218,3 +235,27 @@ switch:
     # Silkscreen D10.
     pin: GPIO9
     restore_mode: ALWAYS_ON
+
+binary_sensor:
+  # Whether a pH probe is answering on D3. The web page shows pH and its
+  # calibration only while this is on.
+  - platform: template
+    name: "pH Probe"
+    icon: "mdi:test-tube"
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: 'return !std::isnan(id(ph_voltage).state);'
+
+esphome:
+  on_boot:
+    # After every component's setup, so the ADC has configured the pin.
+    priority: -100
+    then:
+      - lambda: |-
+          gpio_pullup_dis(GPIO_NUM_4);
+          gpio_pulldown_en(GPIO_NUM_4);
+
+# pH comes with the board, not the wrapper: the wrapper is the one file not
+# pulled from git, and a probe fitted later must work without editing it.
+packages:
+  ph: !include ../packages/ph.yaml

@@ -69,6 +69,9 @@ sd_archive:
     - name: air
       sensor: arch_air
       decimals: 1
+    - name: ph
+      sensor: water_ph
+      decimals: 2
 
 # The panel holds these as Celsius or as globals; the archive wants the
 # same units the web page shows. NaN until the controller has been heard.

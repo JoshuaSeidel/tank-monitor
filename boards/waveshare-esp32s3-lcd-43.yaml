@@ -838,11 +838,12 @@ display:
           }
 
           // ---- pH card ----
-          // A single-system tank has no pH probe; the card shows the last
-          // manual water test instead (its age is under GH/KH below).
+          // A single-system tank without a pH probe shows the last manual
+          // water test here instead (its age is under GH/KH below). Once a
+          // probe reads, this is the pH card like the 75's.
           const float ph = id(water_ph).state;
-          if (!${dual_system}) {
-            if (changed(SLOTS, SLOT_PH, (float) (id(chem_stamp) % 1000003u))) {
+          if (!${dual_system} && std::isnan(ph)) {
+            if (changed(SLOTS, SLOT_PH, -1000.0f - (float) (id(chem_stamp) % 1000003u))) {
               rr(18, 46, 380, 250, 15, CARD);
               it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LAST WATER TEST");
               auto row = [&](int y, const char *label, float v, const char *fmt, const char *unit) {
