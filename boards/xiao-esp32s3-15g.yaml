@@ -259,3 +259,61 @@ esphome:
 # pulled from git, and a probe fitted later must work without editing it.
 packages:
   ph: !include ../packages/ph.yaml
+
+# ---------------------------------------------------------------
+# Relay identification test -- OFF unless the wrapper turns it on
+# ---------------------------------------------------------------
+# For finding which wire went to which outlet without Wi-Fi, a web page or
+# even a working USB log. Put this in the WRAPPER's substitutions, flash,
+# watch the relay box, then set it back to "false" and flash again:
+#   relay_test: "true"
+# From 20 s after boot, three rounds of: relay 1 clicks ONCE, pause; relay 2
+# TWICE, pause; relay 3 three times; relay 4 four times. The count is the
+# relay -- 1 heater (D8), 2 fan (D9), 3 CO2 (D4), 4 bubbler (D10) -- and
+# each step is also logged at WARN. UNPLUG THE HEATER AND CO2 from the
+# outlets first: the test switches them regardless of temperature or
+# schedule. It drives the pins directly, so neither the controller nor the
+# CO2 schedule fights it, and puts CO2 and the bubbler back as their
+# switches say when it ends.
+substitutions:
+  relay_test: "false"
+
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (!${relay_test}) return;
+          struct Relay { gpio_num_t pin; const char *what; };
+          static const Relay R[4] = {
+              {GPIO_NUM_7, "relay 1 HEATER  (D8, purple)"},
+              {GPIO_NUM_8, "relay 2 FAN     (D9, blue)"},
+              {GPIO_NUM_5, "relay 3 CO2     (D4, green)"},
+              {GPIO_NUM_9, "relay 4 BUBBLER (D10)"}};
+          static int t = -20;  // seconds since the test began; starts 20 s after boot
+          t++;
+          if (t < 0) return;
+          // One round: relay k gets 2k seconds of 1 s on / 1 s off (k clicks)
+          // and then a 4 s pause. 6 + 8 + 10 + 12 = 36 s a round, three rounds.
+          const int ROUND = 36, ROUNDS = 3;
+          if (t == 0) {
+            ESP_LOGW("relay_test", "RELAY TEST: count the clicks -- 1 heater, 2 fan, 3 CO2, 4 bubbler");
+            for (auto &r : R) gpio_set_level(r.pin, 0);
+          }
+          if (t >= ROUND * ROUNDS) {
+            if (t == ROUND * ROUNDS) {
+              for (auto &r : R) gpio_set_level(r.pin, 0);
+              gpio_set_level(GPIO_NUM_5, id(co2_relay).state);
+              gpio_set_level(GPIO_NUM_9, id(bubbler_relay).state);
+              ESP_LOGW("relay_test", "RELAY TEST done. Set relay_test back to \"false\" and reflash.");
+            }
+            return;
+          }
+          int s = t % ROUND;
+          for (int k = 0; k < 4; k++) {
+            const int seg = 2 * (k + 1) + 4;
+            if (s >= seg) { s -= seg; continue; }
+            const bool on = s < 2 * (k + 1) && s % 2 == 0;
+            gpio_set_level(R[k].pin, on);
+            if (on) ESP_LOGW("relay_test", "round %d: %s click %d of %d", t / ROUND + 1, R[k].what, s / 2 + 1, k + 1);
+            break;
+          }
