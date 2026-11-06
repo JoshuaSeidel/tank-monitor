@@ -21,6 +21,29 @@
 # captive portal there sets new credentials -- no reflash needed.
 mqtt: !remove
 
+# Wipe a board's stored settings FROM THE YAML (components/nvs_wipe). The
+# first boot of a chip that has not run this generation erases everything
+# it stored -- calibrations, learned model, history, tests, saved Wi-Fi --
+# and restarts on the defaults. That is how a reused board sheds another
+# tank's settings without Wi-Fi or a web page. To wipe again later, put a
+# higher number in the WRAPPER's substitutions and reflash:
+#   substitutions:
+#     wipe_generation: "2"
+# Same number = ordinary update, nothing lost.
+substitutions:
+  wipe_generation: "1"
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [nvs_wipe]
+    refresh: 0s
+
+nvs_wipe:
+  generation: ${wipe_generation}
+
 # Wi-Fi going down must not take the tank down with it. ESPHome's default
 # reboots a device after 15 minutes without Wi-Fi; here that would restart
 # both devices every quarter hour of an outage, dropping their BLE link and,
