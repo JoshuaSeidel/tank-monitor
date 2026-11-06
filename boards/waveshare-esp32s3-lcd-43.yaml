@@ -231,9 +231,12 @@ display:
             it.print(612, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "BLE");
             it.print(668, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LINK");
             frect(0, 432, 800, 1, HAIR);
-            frect(718, 454, 18, 6, BLUE);
-            it.filled_circle(750, 457, 3, TRACK);
-            it.filled_circle(768, 457, 3, TRACK);
+            // Page dots: one per page, this one a bar. The count is a global so
+            // a package that adds pages (packages/panel_controls.yaml) adds dots.
+            for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
+              if (k == 0) frect(x - 9, 454, 18, 6, BLUE);
+              else it.filled_circle(x, 457, 3, TRACK);
+            }
           }
           // Two status dots, each its own slot. Chips moved left so the
           // clock at 782 no longer lands on "LINK".
@@ -474,9 +477,12 @@ display:
               }
             }
             frect(0, 432, 800, 1, HAIR);
-            it.filled_circle(722, 457, 3, TRACK);
-            frect(740, 454, 18, 6, BLUE);
-            it.filled_circle(772, 457, 3, TRACK);
+            // Page dots: one per page, this one a bar. The count is a global so
+            // a package that adds pages (packages/panel_controls.yaml) adds dots.
+            for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
+              if (k == 1) frect(x - 9, 454, 18, 6, BLUE);
+              else it.filled_circle(x, 457, 3, TRACK);
+            }
           }
 
           const float ta_c = id(water_temp).state, tb_c = id(water_temp_b).state;
@@ -832,9 +838,12 @@ display:
           if (full) {
             it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             frect(0, 432, 800, 1, HAIR);
-            it.filled_circle(722, 457, 3, TRACK);
-            it.filled_circle(740, 457, 3, TRACK);
-            frect(758, 454, 18, 6, BLUE);
+            // Page dots: one per page, this one a bar. The count is a global so
+            // a package that adds pages (packages/panel_controls.yaml) adds dots.
+            for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
+              if (k == 2) frect(x - 9, 454, 18, 6, BLUE);
+              else it.filled_circle(x, 457, 3, TRACK);
+            }
           }
 
           // ---- pH card ----
@@ -942,6 +951,16 @@ globals:
     type: int
     restore_value: false
     initial_value: '-1'
+  # Pages with controls register here: given a tap, return true if the
+  # active page took it. Empty on a panel without them.
+  - id: touch_hook
+    type: std::function<bool(int, int)>
+    restore_value: false
+  # How many pages the dots show. packages/panel_controls.yaml raises it.
+  - id: panel_page_count
+    type: int
+    restore_value: false
+    initial_value: '3'
   - id: panel_dirty
     type: bool
     restore_value: false
@@ -980,6 +999,13 @@ touchscreen:
           static uint32_t last = 0;
           if (millis() - last < 400) return;
           last = millis();
+          // Above the bottom strip, a page with controls takes the tap
+          // (touch_hook, set by packages/panel_controls.yaml). The bottom
+          // strip, and every page without controls, still turns the page.
+          if (touch.y < 432 && id(touch_hook) && id(touch_hook)(touch.x, touch.y)) {
+            id(tank_display).update();
+            return;
+          }
           if (touch.x > 400) id(tank_display).show_next_page();
           else               id(tank_display).show_prev_page();
           // The page change raised panel_dirty; paint it NOW rather than
@@ -1035,11 +1061,11 @@ font:
   - file: "gfonts://Inter@600"
     id: f_micro
     size: 13
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°"
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°<>()'"
   - file: "gfonts://Inter@500"
     id: f_small
     size: 17
-    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°"
+    glyphs: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:-+/%°<>()'"
   - file: "gfonts://Inter@600"
     id: f_med
     size: 24

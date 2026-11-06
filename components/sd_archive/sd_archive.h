@@ -14,6 +14,7 @@
 
 #include <atomic>
 #include <functional>
+#include <map>
 #include <cstdio>
 #include <mutex>
 #include <string>
@@ -57,6 +58,24 @@ class SdArchive : public PollingComponent, public AsyncWebHandler, public ble_cl
   std::string status_text();
   /// Run the nightly backup on the worker's next pass.
   void backup_now() { this->backup_now_ = true; }
+
+  // ---- The controller's settings, for the panel's own controls ----
+  // Read over BLE from the same backup document the nightly copy uses, so
+  // the panel shows what the controller actually holds. Works with or
+  // without an SD card.
+  /// Ask for a fresh copy, no sooner than `delay_ms` from now.
+  void request_settings(uint32_t delay_ms = 0) { this->settings_due_ms_ = millis() + delay_ms; }
+  /// A number setting by entity name; NAN if unknown.
+  float setting(const std::string &name);
+  /// A time or select setting by entity name; "" if unknown.
+  std::string setting_text(const std::string &name);
+  /// A switch setting by entity name.
+  bool setting_on(const std::string &name);
+  /// Bumped on every fresh copy, so a page knows to repaint.
+  uint32_t settings_version() const { return this->settings_version_; }
+  /// Send one control request to the controller (components/tank_backup).
+  bool send_command(const std::string &req) { return this->send_(req); }
+  bool link_ready() const { return this->link_ready_; }
 
  protected:
   struct Series {
@@ -111,6 +130,13 @@ class SdArchive : public PollingComponent, public AsyncWebHandler, public ble_cl
   std::atomic<bool> link_ready_{false};
   QueueHandle_t rx_{nullptr};
   std::atomic<bool> backup_now_{false};
+  std::atomic<uint32_t> settings_due_ms_{0};
+  std::atomic<uint32_t> settings_version_{0};
+  std::mutex settings_lock_;
+  std::map<std::string, float> set_num_;
+  std::map<std::string, std::string> set_text_;
+  std::map<std::string, bool> set_on_;
+  void fetch_settings_();
   int last_backup_yday_{-1};
 
   // An upload in progress (POST /sd/upload streams its body to here).

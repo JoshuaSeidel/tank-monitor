@@ -1,0 +1,62 @@
+# The panel runs the tank on its own: three pages of controls after the
+# board's three -- Settings, Calibrate, Water test (components/panel_controls).
+# Every change goes to the controller over BLE (no Wi-Fi needed), and the
+# pages show the controller's own values read back the same way.
+#
+# Included BY packages/sd_archive_panel.yaml -- never list it in a wrapper
+# as well, or every id is declared twice. Needs that file's link (id
+# archive),
+# packages/ble_chem_panel.yaml (chem_stamp) and the 4.3" board file (fonts,
+# touch_hook, panel_page_count). Taps on these pages hit their buttons; the
+# bottom strip (< BACK / NEXT >) turns the page, as on every page.
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [panel_controls]
+    refresh: 0s
+
+panel_controls:
+  id: controls
+  archive: archive
+  time_id: sntp_time
+  font_micro: f_micro
+  font_small: f_small
+  font_med: f_med
+  font_big: f_big
+
+display:
+  - id: !extend tank_display
+    pages:
+      - id: page_settings
+        lambda: |-
+          const float c = id(water_temp).state;
+          id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
+                            id(chem_stamp), id(controller_link).state);
+          id(controls).draw(it, 0, 3, id(panel_page_count), id(panel_dirty));
+      - id: page_calibrate
+        lambda: |-
+          const float c = id(water_temp).state;
+          id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
+                            id(chem_stamp), id(controller_link).state);
+          id(controls).draw(it, 1, 4, id(panel_page_count), id(panel_dirty));
+      - id: page_test
+        lambda: |-
+          const float c = id(water_temp).state;
+          id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
+                            id(chem_stamp), id(controller_link).state);
+          id(controls).draw(it, 2, 5, id(panel_page_count), id(panel_dirty));
+
+esphome:
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          id(panel_page_count) = 6;
+          id(touch_hook) = [](int x, int y) -> bool {
+            const auto *p = id(tank_display).get_active_page();
+            const int page = p == id(page_settings) ? 0 : p == id(page_calibrate) ? 1 : p == id(page_test) ? 2 : -1;
+            return page >= 0 && id(controls).touch(x, y, page);
+          };

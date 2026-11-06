@@ -128,3 +128,8 @@ button:
     entity_category: config
     on_press:
       - lambda: id(archive).backup_now();
+
+# The panel's own controls ride the same BLE link, so they come with it:
+# a wrapper that already lists this file gets them with a rebuild.
+packages:
+  controls: !include panel_controls.yaml

@@ -382,6 +382,72 @@ void TankBackup::ble_request(const uint8_t *data, size_t len, esp32_ble_server::
     }
     return;
   }
+  // The panel's controls. Entities are found by name, exactly as /restore
+  // does, and changed through their own calls, so every limit, set_action
+  // and save the web page relies on applies here too. This runs on the main
+  // loop (the characteristic's on_write), so no defer is needed.
+  if (req.size() > 2 && req[1] == ',' && strchr("NPWMX", req[0]) != nullptr) {
+    const std::string rest = req.substr(2);
+    const size_t comma = rest.rfind(',');
+    const std::string name = (req[0] == 'P' || comma == std::string::npos) ? rest : rest.substr(0, comma);
+    const std::string val = (req[0] == 'P' || comma == std::string::npos) ? "" : rest.substr(comma + 1);
+    bool done = false;
+    switch (req[0]) {
+      case 'N':
+        for (auto *e : App.get_numbers())
+          if (!e->is_internal() && e->get_name().str() == name) {
+            e->make_call().set_value(strtof(val.c_str(), nullptr)).perform();
+            done = true;
+          }
+        break;
+      case 'P':
+        // Never from the panel: wiping the controller is a web-page act,
+        // behind two confirmations, not a mistap.
+        if (name == "Factory Reset")
+          break;
+        for (auto *e : App.get_buttons())
+          if (!e->is_internal() && e->get_name().str() == name) {
+            e->press();
+            done = true;
+          }
+        break;
+      case 'W':
+        for (auto *e : App.get_switches())
+          if (!e->is_internal() && e->get_name().str() == name) {
+            if (val == "1")
+              e->turn_on();
+            else
+              e->turn_off();
+            done = true;
+          }
+        break;
+#ifdef USE_DATETIME_TIME
+      case 'M':
+        for (auto *e : App.get_times())
+          if (!e->is_internal() && e->get_name().str() == name) {
+            e->make_call().set_time(val).perform();
+            done = true;
+          }
+        break;
+#endif
+      case 'X': {
+        float v[6];
+        if (sscanf(rest.c_str(), "%f,%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]) == 6) {
+          for (float &f : v)
+            if (f <= -998.0f)
+              f = NAN;
+          const uint32_t now = (uint32_t) ::time(nullptr);
+          if (now > 1700000000 && this->history_->import_test(now, v[0], v[1], v[2], v[3], v[4], v[5])) {
+            this->history_->save_tests();
+            done = true;
+          }
+        }
+        break;
+      }
+    }
+    ESP_LOGI(TAG, "Panel: %s %s", req.c_str(), done ? "applied" : "IGNORED (no such entity, or not allowed)");
+    return;
+  }
   if (req == "C") {
     this->xfer_kind_ = 0;
     this->xfer_buf_.clear();

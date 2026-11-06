@@ -43,6 +43,13 @@ class TankBackup : public Component, public AsyncWebHandler {
   ///   R,<offset>,<n>    send up to n chunks from offset
   ///   C                 close
   ///   I,<ip>            the panel's Wi-Fi address (no reply)
+  ///   T,<epoch>         the panel's clock, taken only if this has none
+  /// and the panel's controls (no reply; the panel re-reads the backup):
+  ///   N,<name>,<value>  set the number entity of that name
+  ///   P,<name>          press the button of that name
+  ///   W,<name>,<0|1>    turn the switch of that name off/on
+  ///   M,<name>,<HH:MM:SS> set the time entity of that name
+  ///   X,<ph>,<nh3>,<no2>,<no3>,<gh>,<kh>  log a water test now (-999 = not tested)
   /// Replies are 'S' + "<size>,<crc32 hex>,<name>", 'D' + uint32 LE offset +
   /// up to CHUNK bytes, or 'E' + a reason.
   void ble_request(const uint8_t *data, size_t len, esp32_ble_server::BLECharacteristic *out);

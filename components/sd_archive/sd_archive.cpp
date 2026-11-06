@@ -217,8 +217,20 @@ void SdArchive::worker_(void *arg) {
     if (self->link_ready_ && (last_tell == 0 || up - last_tell >= 300)) {
       last_tell = up;
       self->tell_controller_();
+      self->request_settings(1000);  // and a fresh copy of its settings
     } else if (!self->link_ready_) {
       last_tell = 0;
+    }
+    // The controller's settings for the panel's controls: on request (a page
+    // shown, a button pressed) and every two minutes regardless.
+    {
+      const uint32_t due = self->settings_due_ms_;
+      static uint32_t last_fetch = 0;
+      if (self->link_ready_ && ((due != 0 && (int32_t) (millis() - due) >= 0) || up - last_fetch >= 120)) {
+        self->settings_due_ms_ = 0;
+        last_fetch = up;
+        self->fetch_settings_();
+      }
     }
     if (!self->mounted_ && (last_try == 0 || up - last_try >= 60)) {
       last_try = up;
@@ -252,6 +264,61 @@ void SdArchive::worker_(void *arg) {
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
   }
+}
+
+// ---------------------------------------------------------------- settings
+
+void SdArchive::fetch_settings_() {
+  std::string doc, err;
+  if (!this->fetch_to_string_('B', doc, err)) {
+    ESP_LOGW(TAG, "Settings from the controller: %s", err.c_str());
+    return;
+  }
+  std::map<std::string, float> num;
+  std::map<std::string, std::string> text;
+  std::map<std::string, bool> on;
+  const bool ok = json::parse_json(doc, [&](JsonObject root) -> bool {
+    JsonObject n = root["numbers"];
+    for (JsonPair kv : n)
+      num[kv.key().c_str()] = kv.value().as<float>();
+    JsonObject t = root["times"];
+    for (JsonPair kv : t)
+      text[kv.key().c_str()] = kv.value().as<std::string>();
+    JsonObject s = root["selects"];
+    for (JsonPair kv : s)
+      text[kv.key().c_str()] = kv.value().as<std::string>();
+    JsonObject w = root["switches"];
+    for (JsonPair kv : w)
+      on[kv.key().c_str()] = kv.value().as<bool>();
+    return true;
+  });
+  if (!ok)
+    return;
+  {
+    std::lock_guard<std::mutex> g(this->settings_lock_);
+    this->set_num_.swap(num);
+    this->set_text_.swap(text);
+    this->set_on_.swap(on);
+  }
+  this->settings_version_++;
+}
+
+float SdArchive::setting(const std::string &name) {
+  std::lock_guard<std::mutex> g(this->settings_lock_);
+  auto it = this->set_num_.find(name);
+  return it == this->set_num_.end() ? NAN : it->second;
+}
+
+std::string SdArchive::setting_text(const std::string &name) {
+  std::lock_guard<std::mutex> g(this->settings_lock_);
+  auto it = this->set_text_.find(name);
+  return it == this->set_text_.end() ? std::string() : it->second;
+}
+
+bool SdArchive::setting_on(const std::string &name) {
+  std::lock_guard<std::mutex> g(this->settings_lock_);
+  auto it = this->set_on_.find(name);
+  return it != this->set_on_.end() && it->second;
 }
 
 // ------------------------------------------------------------ BLE link
