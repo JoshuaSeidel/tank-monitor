@@ -16,26 +16,28 @@
 #   D0=1  D1=2  D2=3  D3=4  D4=5  D5=6  D6=43  D7=44  D8=7  D9=8  D10=9
 #
 #   signal              SILKSCREEN   GPIO   wire
-#   TDS analog          D1           2      purple
-#   (pH, reserved)      D3           4      blue   -- NOT configured, see below
-#   DS18B20 data        D5           6      yellow
-#   I2C SDA (BH1750)    D6           43     orange
+#   TDS analog          D0           1      yellow
+#   CO2 solenoid IN+    D4           5      green  (3rd relay outlet)
+#   DS18B20 data        D5           6      orange
+#   I2C SDA (BH1750)    D6           43     white
 #   I2C SCL (BH1750)    D7           44     brown
-#   heater relay IN+    D8           7      white
-#   fan relay IN+       D9           8      gray
-#   CO2 solenoid IN+    D4           5      (3rd relay outlet)
-#   bubbler IN+         D10          9      (4th relay outlet)
+#   heater relay IN+    D8           7      purple
+#   fan relay IN+       D9           8      blue
+#   bubbler IN+         D10          9      (8th wire; 4th relay outlet)
 #
-# Spare: D0 (GPIO1).
+# Spare: D1 (GPIO2) and D3 (GPIO4), both ADC1 -- either takes the pH probe.
+#
+# This is the SECOND XIAO on this tank (2026-11-06): the first stopped
+# enumerating on USB. Same pads as before except TDS, which moved from D1
+# to D0 to match how this one was wired. A new chip is a new BLE MAC: read
+# "Controller BLE MAC" after flashing and update the panel wrapper.
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and nothing may hold it
 # at a level during boot.
 #
-# THE pH WIRE. Blue runs to D3 and stops there. Nothing in this config
-# touches GPIO4, so the pin is an unconfigured input and the wire is inert
-# -- insulate the far end so it cannot reach the relay's supply. To fit a
-# probe later: add packages/ph.yaml to the wrapper, delete the water_ph
-# placeholder at the bottom of this file, and add an adc sensor
-# `id: ph_voltage` on GPIO4 exactly as boards/xiao-esp32s3.yaml has it.
+# pH, LATER. No wire for it on this board yet. To fit a probe: wire its
+# analog out to D3 (or D1), add packages/ph.yaml to the wrapper, delete the
+# water_ph placeholder at the bottom of this file, and add an adc sensor
+# `id: ph_voltage` on GPIO4 (D3) as boards/xiao-esp32s3.yaml has it.
 #
 # BH1750: ADDR floating or to GND = 0x23, which is what packages/sensors.yaml
 # expects. Never splice ADDR to VCC by hand -- that splice shorted the 3V3
@@ -98,8 +100,8 @@ i2c:
 sensor:
   # Raw TDS probe voltage. Internal only; packages/sensors.yaml does the maths.
   - platform: adc
-    # Silkscreen D1.
-    pin: GPIO2
+    # Silkscreen D0. ADC1, like every pad but D6/D7 on this board.
+    pin: GPIO1
     id: tds_voltage
     update_interval: 500ms
     attenuation: 12db

@@ -17,11 +17,12 @@
 # ---------------------------------------------------------------------
 # s3_ble_mac -- the 15 gal controller's BLE address
 # ---------------------------------------------------------------------
-# The value below is what this XIAO reported as the nano controller on
-# 2026-10-06 (the AMOLED wrapper's s3_ble_mac then). It is the same chip,
-# so it should be the same address -- but confirm it against the 15 gal
-# controller's "Controller BLE MAC" (its web page, Diagnostics) after its
-# first flash. A wrong MAC compiles cleanly and then never connects.
+# THE VALUE BELOW IS STALE. It is the first XIAO's address, and that board
+# was replaced on 2026-11-06 (it stopped showing up on USB). After flashing
+# the new controller, read "BLE MAC (for the panel)" on its web page's
+# Diagnostics tab -- or the boot log line "[esp32_ble:...] ESP-IDF BLE MAC
+# address: ..." -- put it here, and reflash the panel. A wrong MAC compiles
+# cleanly and then never connects.
 #
 # device_name must not collide with tank-monitor-15-gallon, -75g,
 # -75-gallon, -s3, -panel or any other tank-monitor-*.
