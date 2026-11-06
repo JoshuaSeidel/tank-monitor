@@ -24,8 +24,9 @@
 #   heater relay IN+    D8           7      purple
 #   fan relay IN+       D9           8      blue
 #   bubbler IN+         D10          9      (8th wire; 4th relay outlet)
+#   (pH, reserved)      D3           4      wired, NOT configured -- see below
 #
-# Spare: D1 (GPIO2) and D3 (GPIO4), both ADC1 -- either takes the pH probe.
+# Spare: D1 (GPIO2, ADC1).
 #
 # This is the SECOND XIAO on this tank (2026-11-06): the first stopped
 # enumerating on USB. Same pads as before except TDS, which moved from D1
@@ -34,10 +35,13 @@
 # D2 = GPIO3 stays EMPTY: it is an S3 strapping pin and nothing may hold it
 # at a level during boot.
 #
-# pH, LATER. No wire for it on this board yet. To fit a probe: wire its
-# analog out to D3 (or D1), add packages/ph.yaml to the wrapper, delete the
-# water_ph placeholder at the bottom of this file, and add an adc sensor
-# `id: ph_voltage` on GPIO4 (D3) as boards/xiao-esp32s3.yaml has it.
+# pH, LATER. A wire is already on D3 (GPIO4, ADC1) and stops there.
+# Nothing in this config touches GPIO4, so the pin stays an unconfigured,
+# high-impedance input and the wire is inert -- insulate its far end so it
+# cannot touch the relay box's supply. To fit a probe: land its analog out
+# on that wire, add packages/ph.yaml to the wrapper, delete the water_ph
+# placeholder at the bottom of this file, and add an adc sensor
+# `id: ph_voltage` on GPIO4 as boards/xiao-esp32s3.yaml has it.
 #
 # BH1750: ADDR floating or to GND = 0x23, which is what packages/sensors.yaml
 # expects. Never splice ADDR to VCC by hand -- that splice shorted the 3V3
