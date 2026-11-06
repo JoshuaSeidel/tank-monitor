@@ -120,6 +120,15 @@ button:
     entity_category: config
     on_press:
       - lambda: id(crash).clear();
+  # Wipes every stored setting on this chip -- calibrations, the learned
+  # heat model, history, water tests, CO2 times, saved Wi-Fi -- and
+  # restarts on the YAML defaults. For a reused board whose flash still
+  # holds another tank's settings, and the last resort for a muddle. The
+  # web page asks twice; the panel's SD backups can restore afterwards.
+  - platform: factory_reset
+    name: "Factory Reset"
+    icon: "mdi:restore-alert"
+    entity_category: config
 
 # ---------------------------------------------------------------------
 # Water tests -> panel
@@ -171,6 +180,23 @@ interval:
   - interval: 30s
     then:
       - script.execute: push_aux
+  # The BLE address the panel must be given (its s3_ble_mac), in the log at
+  # INFO. ESPHome only prints it in the CONFIG-level dump, which this
+  # logger level hides -- and the web page that also shows it is no use
+  # when there is no Wi-Fi to reach it over. Every 30 s for the first five
+  # minutes after boot, then every 30 minutes.
+  - interval: 30s
+    then:
+      - lambda: |-
+          static uint32_t n = 0;
+          n++;
+          if (n > 10 && n % 60 != 0) return;
+          using esphome::esp32_ble::global_ble;
+          if (global_ble == nullptr) return;
+          uint8_t m[6];
+          global_ble->get_mac_msb_first(m);
+          ESP_LOGI("ble", "Controller BLE MAC (the panel's s3_ble_mac): %02X:%02X:%02X:%02X:%02X:%02X",
+                   m[0], m[1], m[2], m[3], m[4], m[5]);
 
 globals:
   # The CO2 and bubbler outlets for the panel: -1 not fitted, 0 off, 1 on.

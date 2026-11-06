@@ -43,6 +43,7 @@ const E = {
   calK: "number-cal_tds_k_factor", calStd: "number-cal_tds_standard", calOff: "number-cal_temperature_offset",
   calTds: "button-calibrate_tds", learn: "switch-adaptive_learning",
   restart: "button-restart", reset: "button-reset_learning", clearCrash: "button-clear_crash_report",
+  factory: "button-factory_reset",
   deadband: "number-fan_deadband", vol: "number-tank_volume", water: "number-water_volume",
   power: "number-heater_power", cover: "select-tank_cover", placement: "select-tank_placement",
   co2: "switch-co2", air: "switch-bubbler", co2Sched: "switch-co2_schedule",
@@ -625,7 +626,11 @@ class TankSite extends HTMLElement {
         <div class="note">Against a trusted thermometer. This probe is the only one the heater listens to.</div></div>
       <div class="card span4"><div class="lbl">Device</div>
         <div class="actions"><button class="btn" id="s_restart" disabled>Restart</button>
-          <button class="btn warn" id="s_reset" disabled>Reset learning</button></div></div>
+          <button class="btn warn" id="s_reset" disabled>Reset learning</button>
+          <button class="btn warn" id="s_factory" disabled>Factory reset</button></div>
+        <div class="note">Factory reset wipes everything stored on this controller &mdash; calibrations, the learned
+          heat model, history, water tests, CO2 times and saved Wi-Fi &mdash; and starts over on the defaults. The
+          panel's SD card backups can bring settings back afterwards (Archive).</div></div>
     </div>`;
   }
 
@@ -652,6 +657,10 @@ class TankSite extends HTMLElement {
     };
     this.$("s_restart").onclick = () => confirm("Restart the controller?") && this.act(E.restart, "press");
     this.$("s_reset").onclick = () => confirm("Discard everything the controller has learned about this tank?") && this.act(E.reset, "press");
+    this.$("s_factory").onclick = () =>
+      confirm("Factory reset: wipe ALL settings, calibrations, history and water tests on this controller?") &&
+      confirm("Really? This cannot be undone here. The controller restarts on its defaults.") &&
+      this.act(E.factory, "press");
   }
 
   draw_settings() {
@@ -686,6 +695,7 @@ class TankSite extends HTMLElement {
     this.$("s_caltds").disabled = !(this.ids[E.calTds] && !isNaN(this.n(E.calStd)));
     this.$("s_restart").disabled = !this.ids[E.restart];
     this.$("s_reset").disabled = !this.ids[E.reset];
+    this.$("s_factory").disabled = !this.ids[E.factory];
   }
 
   // ---------------------------------------------------------- page: archive
