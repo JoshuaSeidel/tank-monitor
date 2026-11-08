@@ -35,19 +35,22 @@ display:
           const float c = id(water_temp).state;
           id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
                             id(chem_stamp), id(controller_link).state);
-          id(controls).draw(it, 0, 3, id(panel_page_count), id(panel_dirty));
+          id(controls).draw(*id(canvas), 0, 3, id(panel_page_count), id(panel_dirty));
+          id(canvas).blit(it);
       - id: page_calibrate
         lambda: |-
           const float c = id(water_temp).state;
           id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
                             id(chem_stamp), id(controller_link).state);
-          id(controls).draw(it, 1, 4, id(panel_page_count), id(panel_dirty));
+          id(controls).draw(*id(canvas), 1, 4, id(panel_page_count), id(panel_dirty));
+          id(canvas).blit(it);
       - id: page_test
         lambda: |-
           const float c = id(water_temp).state;
           id(controls).live(std::isnan(c) ? NAN : c * 9.0f / 5.0f + 32.0f, id(tds).state, id(water_ph).state,
                             id(chem_stamp), id(controller_link).state);
-          id(controls).draw(it, 2, 5, id(panel_page_count), id(panel_dirty));
+          id(controls).draw(*id(canvas), 2, 5, id(panel_page_count), id(panel_dirty));
+          id(canvas).blit(it);
 
 esphome:
   on_boot:

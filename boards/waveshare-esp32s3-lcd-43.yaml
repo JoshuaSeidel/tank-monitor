@@ -80,6 +80,23 @@ psram:
   mode: octal
   speed: 80MHz
 
+# Every page draws into this off-screen copy of the screen and then blits
+# the changed rows in one go: the RGB panel shows its framebuffer live, so
+# drawing on it directly is seen -- cards blink empty, page changes flash
+# black. 768 KB of PSRAM.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/JoshuaSeidel/tank-monitor
+      ref: main
+    components: [panel_canvas]
+    refresh: 0s
+
+panel_canvas:
+  id: canvas
+  width: 800
+  height: 480
+
 # See boards/xiao-esp32s3.yaml for the full story: ESPHome's default
 # "legacy" unique_id generator omits the device name, so this panel's
 # entities would collide with another board's in Home Assistant --
@@ -162,9 +179,13 @@ display:
       # ===========================================================
       - id: page_main
         lambda: |-
+          // Everything below draws into the off-screen canvas (components/
+          // panel_canvas); the blit at the end puts the finished frame on the
+          // glass in one copy, so no clear or half-drawn card is ever visible.
+          auto &cv = *id(canvas);
           float *SLOTS = id(p1_last);
           enum { SLOT_CLOCK = 0, SLOT_T, SLOT_SP, SLOT_STATE, SLOT_TB, SLOT_G, SLOT_PH, SLOT_TDS,
-                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE, SLOT_AUX, SLOT_CO2, SLOT_AIR };
+                 SLOT_HEAT, SLOT_FAN, SLOT_LINK, SLOT_BLE, SLOT_AUX, SLOT_CO2, SLOT_AIR, SLOT_TDS_NOW };
           const Color BG(7, 11, 15), CARD(26, 32, 40), HAIR(42, 50, 60);
           const Color INK(255, 255, 255), INK2(185, 194, 204), MUTED(111, 123, 136);
           const Color BLUE(57, 135, 229), ORANGE(217, 89, 38), HEAT(255, 138, 92);
@@ -172,7 +193,7 @@ display:
 
           // ---- bulk fill ----
           // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
-          // call per pixel, and every base-class primitive is built on it.
+          // call per pixel, and every base-class primitive is built on cv.
           // A full screen is 384,000 driver calls (~2.4s). This writes one
           // prepared row per call: a card is ~124 calls, a clear 480.
           auto frect = [&](int x, int y, int w, int h, Color c) {
@@ -182,17 +203,17 @@ display:
             const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
             for (int i = 0; i < w; i++) row[i] = px;
             for (int j = 0; j < h; j++)
-              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+              cv.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
                                 display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
                                 true, 0, 0, 0);
           };
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
             frect(x + r, y, w - 2 * r, h, c);
             frect(x, y + r, w, h - 2 * r, c);
-            it.filled_circle(x + r, y + r, r, c);
-            it.filled_circle(x + w - r - 1, y + r, r, c);
-            it.filled_circle(x + r, y + h - r - 1, r, c);
-            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+            cv.filled_circle(x + r, y + r, r, c);
+            cv.filled_circle(x + w - r - 1, y + r, r, c);
+            cv.filled_circle(x + r, y + h - r - 1, r, c);
+            cv.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
           };
 
           // ---- change detection ----
@@ -201,7 +222,7 @@ display:
           // it compares, and if equal, does nothing. `full` (first frame or
           // a page change) overrides every slot. The RGB peripheral streams
           // the framebuffer to the glass continuously, so any repaint is
-          // visible as a blip -- the only way to not see it is not to do it.
+          // visible as a blip -- the only way to not see it is not to do cv.
           const bool full = id(panel_dirty);
           if (full) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
           // Quantise to display precision so 74.104 -> 74.101 is not a change.
@@ -219,31 +240,31 @@ display:
             if (changed(SLOTS, SLOT_CLOCK, mkey)) {
               frect(700, 6, 90, 30, BG);
               if (now.is_valid())
-                it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
+                cv.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
               else
-                it.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
+                cv.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
             }
           }
 
           // ---- static chrome: once per page show ----
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
-            it.print(612, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "BLE");
-            it.print(668, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LINK");
+            cv.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
+            cv.print(612, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "BLE");
+            cv.print(668, 20, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LINK");
             frect(0, 432, 800, 1, HAIR);
             // Page dots: one per page, this one a bar. The count is a global so
             // a package that adds pages (packages/panel_controls.yaml) adds dots.
             for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
               if (k == 0) frect(x - 9, 454, 18, 6, BLUE);
-              else it.filled_circle(x, 457, 3, TRACK);
+              else cv.filled_circle(x, 457, 3, TRACK);
             }
           }
           // Two status dots, each its own slot. Chips moved left so the
           // clock at 782 no longer lands on "LINK".
           if (changed(SLOTS, SLOT_BLE, id(ble_connected).state ? 1.0f : 0.0f))
-            it.filled_circle(600, 20, 4, id(ble_connected).state ? GOOD : BAD);
+            cv.filled_circle(600, 20, 4, id(ble_connected).state ? GOOD : BAD);
           if (changed(SLOTS, SLOT_LINK, id(controller_link).state ? 1.0f : 0.0f))
-            it.filled_circle(656, 20, 4, id(controller_link).state ? GOOD : BAD);
+            cv.filled_circle(656, 20, 4, id(controller_link).state ? GOOD : BAD);
 
           // ---- values ----
           const float sp_c = id(r_setpoint_c);
@@ -266,7 +287,7 @@ display:
               const float hi = std::isnan(sp_f) ? 76.0f : sp_f + 2.0f;
               const int CX = 166, CY = 222, R_IN = 86, R_OUT = 102;
               for (int a = 135; a <= 405; a++)
-                it.line_at_angle(CX, CY, a, R_IN, R_OUT, TRACK);
+                cv.line_at_angle(CX, CY, a, R_IN, R_OUT, TRACK);
               if (!std::isnan(t_f)) {
                 float frac = (t_f - lo) / (hi - lo);
                 if (frac < 0.0f) frac = 0.0f;
@@ -280,19 +301,19 @@ display:
                     : Color((int) (127 + (217 - 127) * (p - 0.5f) * 2),
                             (int) (139 + (89 - 139) * (p - 0.5f) * 2),
                             (int) (150 + (38 - 150) * (p - 0.5f) * 2));
-                  it.line_at_angle(CX, CY, a, R_IN, R_OUT, seg);
+                  cv.line_at_angle(CX, CY, a, R_IN, R_OUT, seg);
                 }
               }
-              it.line_at_angle(CX, CY, 270, R_OUT + 2, R_OUT + 12, INK);
-              if (std::isnan(t_f)) it.print(CX, CY - 6, id(f_hero), MUTED, TextAlign::CENTER, "--.-");
-              else it.printf(CX, CY - 6, id(f_hero), INK, TextAlign::CENTER, "%.1f", t_f);
-              it.print(CX + 92, CY - 24, id(f_small), MUTED, TextAlign::CENTER, "F");
-              if (state == 3)      it.print(CX, CY + 52, id(f_micro), BAD, TextAlign::CENTER, "SAFETY TRIPPED");
-              else if (state == 1) it.print(CX, CY + 52, id(f_micro), HEAT, TextAlign::CENTER, "HEATING");
-              else if (state == 2) it.print(CX, CY + 52, id(f_micro), BLUE, TextAlign::CENTER, "COOLING");
-              else                 it.print(CX, CY + 52, id(f_micro), MUTED, TextAlign::CENTER, "IDLE");
-              if (std::isnan(sp_f)) it.print(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint --");
-              else it.printf(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint %.1f", sp_f);
+              cv.line_at_angle(CX, CY, 270, R_OUT + 2, R_OUT + 12, INK);
+              if (std::isnan(t_f)) cv.print(CX, CY - 6, id(f_hero), MUTED, TextAlign::CENTER, "--.-");
+              else cv.printf(CX, CY - 6, id(f_hero), INK, TextAlign::CENTER, "%.1f", t_f);
+              cv.print(CX + 92, CY - 24, id(f_small), MUTED, TextAlign::CENTER, "F");
+              if (state == 3)      cv.print(CX, CY + 52, id(f_micro), BAD, TextAlign::CENTER, "SAFETY TRIPPED");
+              else if (state == 1) cv.print(CX, CY + 52, id(f_micro), HEAT, TextAlign::CENTER, "HEATING");
+              else if (state == 2) cv.print(CX, CY + 52, id(f_micro), BLUE, TextAlign::CENTER, "COOLING");
+              else                 cv.print(CX, CY + 52, id(f_micro), MUTED, TextAlign::CENTER, "IDLE");
+              if (std::isnan(sp_f)) cv.print(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint --");
+              else cv.printf(CX, CY + 78, id(f_small), MUTED, TextAlign::CENTER, "Setpoint %.1f", sp_f);
             }
           }
 
@@ -301,12 +322,12 @@ display:
                           float v, const char *fmt, const char *unit, Color vc) {
             if (!changed(SLOTS, slot, q(v, m))) return;
             rr(x, y, w, h, 15, CARD);
-            it.print(x + 16, y + 22, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
+            cv.print(x + 16, y + 22, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
             if (std::isnan(v)) {
-              it.print(x + 16, y + h / 2 + 8, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              cv.print(x + 16, y + h / 2 + 8, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
             } else {
-              it.printf(x + 16, y + h / 2 + 8, id(f_big), vc, TextAlign::CENTER_LEFT, fmt, v);
-              it.print(x + 16 + 96, y + h / 2 + 14, id(f_small), MUTED, TextAlign::CENTER_LEFT, unit);
+              cv.printf(x + 16, y + h / 2 + 8, id(f_big), vc, TextAlign::CENTER_LEFT, fmt, v);
+              cv.print(x + 16 + 96, y + h / 2 + 14, id(f_small), MUTED, TextAlign::CENTER_LEFT, unit);
             }
           };
           if (!${dual_system}) {
@@ -326,21 +347,21 @@ display:
             if (full || last_left != k) {
               last_left = k;
               rr(326, 46, 224, 124, 15, CARD);
-              it.print(342, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LEFT HALF");
-              if (std::isnan(t_f)) it.print(342, 116, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-              else { it.printf(342, 116, id(f_big), INK, TextAlign::CENTER_LEFT, "%.1f", t_f);
-                     it.print(438, 122, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F"); }
+              cv.print(342, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LEFT HALF");
+              if (std::isnan(t_f)) cv.print(342, 116, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              else { cv.printf(342, 116, id(f_big), INK, TextAlign::CENTER_LEFT, "%.1f", t_f);
+                     cv.print(438, 122, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F"); }
             }
           }
 
           if (changed(SLOTS, SLOT_G, q(g, 100))) {
             rr(326, 178, 456, 124, 15, CARD);
-            it.print(342, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
+            cv.print(342, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
             if (std::isnan(g)) {
-              it.print(342, 248, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              cv.print(342, 248, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
             } else {
-              it.printf(342, 248, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT, "%+.2f", g);
-              it.print(450, 254, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F");
+              cv.printf(342, 248, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT, "%+.2f", g);
+              cv.print(450, 254, id(f_small), MUTED, TextAlign::CENTER_LEFT, "F");
               const int bx = 342, by = 278, bw = 424;
               frect(bx, by, bw, 5, TRACK);
               float gc = g; if (gc > 1.0f) gc = 1.0f; if (gc < -1.0f) gc = -1.0f;
@@ -352,14 +373,36 @@ display:
           }
           }
           tile(SLOT_PH,  100, 326, 310, 224, 116, "PH",  id(water_ph).state, "%.2f", "", INK);
-          tile(SLOT_TDS,   1, 558, 310, 224, 116, "TDS", id(tds_mean).state, "%.0f", "ppm", INK);
+          // TDS: the hour average, which is the number to act on (single
+          // readings off this probe swing tens of ppm), with the reading
+          // right now beside it -- the Calibrate page and the web page show
+          // "now", and two unlabelled numbers that disagree look like a bug.
+          // After the probe has been out of the water the average lags the
+          // reading for up to an hour; that is the average doing its job.
+          {
+            const float tm = id(tds_mean).state, tr = id(tds).state;
+            const bool c1 = changed(SLOTS, SLOT_TDS, q(tm, 1));
+            const bool c2 = changed(SLOTS, SLOT_TDS_NOW, q(tr, 1));
+            if (c1 || c2) {
+              rr(558, 310, 224, 116, 15, CARD);
+              cv.print(574, 332, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "TDS  HOUR AVG");
+              if (std::isnan(tr)) cv.print(766, 332, id(f_micro), MUTED, TextAlign::CENTER_RIGHT, "NOW --");
+              else cv.printf(766, 332, id(f_micro), INK2, TextAlign::CENTER_RIGHT, "NOW %.0f", tr);
+              if (std::isnan(tm)) {
+                cv.print(574, 376, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              } else {
+                cv.printf(574, 376, id(f_big), INK, TextAlign::CENTER_LEFT, "%.0f", tm);
+                cv.print(686, 382, id(f_small), MUTED, TextAlign::CENTER_LEFT, "ppm");
+              }
+            }
+          }
 
           // ---- relay pills ----
           auto pill = [&](int slot, int x, const char *txt, bool on, Color c) {
             if (!changed(SLOTS, slot, on ? 1.0f : 0.0f)) return;
             rr(x, 444, 108, 26, 13, on ? Color(52, 30, 20) : CARD);
-            it.filled_circle(x + 14, 457, 4, on ? c : MUTED);
-            it.print(x + 26, 457, id(f_micro), on ? c : MUTED, TextAlign::CENTER_LEFT, txt);
+            cv.filled_circle(x + 14, 457, 4, on ? c : MUTED);
+            cv.print(x + 26, 457, id(f_micro), on ? c : MUTED, TextAlign::CENTER_LEFT, txt);
           };
           pill(SLOT_HEAT, 18,  "HEATER", id(r_heat_on), HEAT);
           pill(SLOT_FAN,  134, ${dual_system} ? "FANS" : "FAN", id(r_fan_on), BLUE);
@@ -367,6 +410,7 @@ display:
           // r_air >= 0); one without draws no pill for them.
           if (id(r_co2) >= 0) pill(SLOT_CO2, 250, "CO2", id(r_co2) == 1, AQUA);
           if (id(r_air) >= 0) pill(SLOT_AIR, 366, "AIR", id(r_air) == 1, BLUE);
+          cv.blit(it);
 
       # ===========================================================
       # PAGE 2 -- VESSEL. One-point perspective interior.
@@ -378,6 +422,10 @@ display:
       # state changes (the glow); the readouts and rail cards each own a slot.
       - id: page_vessel
         lambda: |-
+          // Everything below draws into the off-screen canvas (components/
+          // panel_canvas); the blit at the end puts the finished frame on the
+          // glass in one copy, so no clear or half-drawn card is ever visible.
+          auto &cv = *id(canvas);
           float *SLOTS = id(p2_last);
           enum { SLOT_CLOCK = 0, SLOT_TA, SLOT_TB, SLOT_G, SLOT_GH, SLOT_GI, SLOT_HEAT, SLOT_FAN,
                  SLOT_FAN_ON };
@@ -388,7 +436,7 @@ display:
 
           // ---- bulk fill ----
           // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
-          // call per pixel, and every base-class primitive is built on it.
+          // call per pixel, and every base-class primitive is built on cv.
           // A full screen is 384,000 driver calls (~2.4s). This writes one
           // prepared row per call: a card is ~124 calls, a clear 480.
           auto frect = [&](int x, int y, int w, int h, Color c) {
@@ -398,17 +446,17 @@ display:
             const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
             for (int i = 0; i < w; i++) row[i] = px;
             for (int j = 0; j < h; j++)
-              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+              cv.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
                                 display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
                                 true, 0, 0, 0);
           };
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
             frect(x + r, y, w - 2 * r, h, c);
             frect(x, y + r, w, h - 2 * r, c);
-            it.filled_circle(x + r, y + r, r, c);
-            it.filled_circle(x + w - r - 1, y + r, r, c);
-            it.filled_circle(x + r, y + h - r - 1, r, c);
-            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+            cv.filled_circle(x + r, y + r, r, c);
+            cv.filled_circle(x + w - r - 1, y + r, r, c);
+            cv.filled_circle(x + r, y + h - r - 1, r, c);
+            cv.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
           };
 
           // ---- change detection ----
@@ -417,7 +465,7 @@ display:
           // it compares, and if equal, does nothing. `full` (first frame or
           // a page change) overrides every slot. The RGB peripheral streams
           // the framebuffer to the glass continuously, so any repaint is
-          // visible as a blip -- the only way to not see it is not to do it.
+          // visible as a blip -- the only way to not see it is not to do cv.
           const bool full = id(panel_dirty);
           if (full) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
           // Quantise to display precision so 74.104 -> 74.101 is not a change.
@@ -435,9 +483,9 @@ display:
             if (changed(SLOTS, SLOT_CLOCK, mkey)) {
               frect(700, 6, 90, 30, BG);
               if (now.is_valid())
-                it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
+                cv.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
               else
-                it.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
+                cv.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
             }
           }
           auto mix = [](Color a, Color b, float t) {
@@ -446,7 +494,7 @@ display:
           };
 
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
+            cv.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             // Labels sit under the hardware they name, so they are placed
             // from the same inch->pixel mapping the tank uses (see below).
             {
@@ -455,24 +503,24 @@ display:
               const int hx_b = 446 - (int) (${heater_inset_in} * ppi);
               const int ix   = 130 + (int) (${intake_from_left_in} * ppi);
               if (${dual_system}) {
-                it.print(ix,   418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
-                it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
-                it.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES  |  SPRAY BAR");
-                it.print(hx_b, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
+                cv.print(ix,   418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
+                cv.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR L");
+                cv.print(288,  404, id(f_micro), MUTED, TextAlign::CENTER, "PROBES  |  SPRAY BAR");
+                cv.print(hx_b, 404, id(f_micro), MUTED, TextAlign::CENTER, "HTR R");
               } else {
                 // Two rows, alternating, so neighbours on a narrow tank do
                 // not print over each other.
                 const int px = 130 + (int) (${probe_from_left_in} * ppi);
                 const int fx = 130 + (int) (${fan_from_left_in} * ppi);
-                it.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HEATER");
-                it.print(px,   418, id(f_micro), MUTED, TextAlign::CENTER, "PROBE");
-                it.print(fx,   404, id(f_micro), MUTED, TextAlign::CENTER, "FAN");
+                cv.print(hx_a, 404, id(f_micro), MUTED, TextAlign::CENTER, "HEATER");
+                cv.print(px,   418, id(f_micro), MUTED, TextAlign::CENTER, "PROBE");
+                cv.print(fx,   404, id(f_micro), MUTED, TextAlign::CENTER, "FAN");
                 if (${sponge_filters}) {
-                  it.print(130 + (int) (${sponge_from_left_in} * ppi), 404, id(f_micro), MUTED,
+                  cv.print(130 + (int) (${sponge_from_left_in} * ppi), 404, id(f_micro), MUTED,
                            TextAlign::CENTER, "SPONGE FILTER");
                 } else {
-                  it.print(ix,  418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
-                  it.print(288, 404, id(f_micro), MUTED, TextAlign::CENTER, "SPRAY BAR");
+                  cv.print(ix,  418, id(f_micro), MUTED, TextAlign::CENTER, "INTAKE");
+                  cv.print(288, 404, id(f_micro), MUTED, TextAlign::CENTER, "SPRAY BAR");
                 }
               }
             }
@@ -481,7 +529,7 @@ display:
             // a package that adds pages (packages/panel_controls.yaml) adds dots.
             for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
               if (k == 1) frect(x - 9, 454, 18, 6, BLUE);
-              else it.filled_circle(x, 457, 3, TRACK);
+              else cv.filled_circle(x, 457, 3, TRACK);
             }
           }
 
@@ -494,7 +542,7 @@ display:
           // ---- the tank: only when the glow needs to change ----
           // Both evaluated every frame: || would skip the fan's slot update
           // whenever the heater had already changed. The fan is only drawn
-          // on a single-system tank, so the 75 never repaints for it.
+          // on a single-system tank, so the 75 never repaints for cv.
           const bool heat_changed = changed(SLOTS, SLOT_HEAT, id(r_heat_on) ? 1.0f : 0.0f);
           const bool fan_changed = !${dual_system} &&
                                    changed(SLOTS, SLOT_FAN_ON, id(r_fan_on) ? 1.0f : 0.0f);
@@ -588,7 +636,7 @@ display:
               frect(cxm - 4, BY0, 8, vy(118) - BY0, HOSE);
               frect(cxm - half, vy(118), 2 * half, 8, Color(23, 67, 90));
               for (int x = cxm - half + 8; x <= cxm + half - 8; x += 14)
-                it.filled_circle(x, vy(128), 2, Color(58, 125, 153));
+                cv.filled_circle(x, vy(128), 2, Color(58, 125, 153));
             }
 
             // Intake, ${intake_from_left_in} in from the LEFT end: a tube from
@@ -603,7 +651,7 @@ display:
               frect(ix - 8, vy(226), 16, vy(260) - vy(226), Color(24, 58, 74));
               for (int y = vy(231); y < vy(258); y += 5)
                 frect(ix - 6, y, 12, 1, Color(58, 125, 153));
-              it.filled_circle(ix, vy(260), 8, Color(24, 58, 74));
+              cv.filled_circle(ix, vy(260), 8, Color(24, 58, 74));
             }
 
             // Heaters: vertical, one near each end.
@@ -638,7 +686,7 @@ display:
             // Probes: mirrored inboard, lateral to each heater.
             auto probe = [&](int cx) {
               frect(cx - 4, vy(172), 8, vy(238) - vy(172), Color(38, 54, 63));
-              it.filled_circle(cx, vy(242), 6, Color(74, 163, 240));
+              cv.filled_circle(cx, vy(242), 6, Color(74, 163, 240));
             };
             if (${dual_system}) { probe(250); probe(326); }
             else probe(BX0 + (int) (${probe_from_left_in} * ppi));
@@ -657,7 +705,7 @@ display:
               frect(cx - 4, lift, 8, tee - lift, TUBE);                        // lift tube
               frect(cx - 3, lift, 1, tee - lift, SHINE);
               for (int y = lift + 8; y < tee - 4; y += 12)                     // bubbles
-                it.filled_circle(cx, y, 2, Color(190, 225, 240));
+                cv.filled_circle(cx, y, 2, Color(190, 225, 240));
               frect(cx - off - 4, tee, 2 * off + 8, 7, TUBE);                  // the T
               frect(cx - off - 4, tee, 2 * off + 8, 1, SHINE);
               for (int sx : {cx - off, cx + off}) {
@@ -679,35 +727,35 @@ display:
               const Color BODY(40, 52, 60);
               frect(fx - 3, BY0 - 4, 6, 18, BODY);          // clip over the glass
               frect(fx - 2, fy + 10, 4, BY0 - 4 - fy - 10, BODY);   // arm
-              it.filled_circle(fx, fy, 15, BODY);
-              it.filled_circle(fx, fy, 12, id(r_fan_on) ? Color(57, 135, 229) : Color(70, 86, 96));
+              cv.filled_circle(fx, fy, 15, BODY);
+              cv.filled_circle(fx, fy, 12, id(r_fan_on) ? Color(57, 135, 229) : Color(70, 86, 96));
               for (int a = 45; a < 405; a += 90)
-                it.line_at_angle(fx, fy, a, 3, 11, BODY);
-              it.filled_circle(fx, fy, 3, BODY);
+                cv.line_at_angle(fx, fy, a, 3, 11, BODY);
+              cv.filled_circle(fx, fy, 3, BODY);
             }
 
             // Rimless glass: thin bright edges, no plastic chrome.
             const Color EDGE(143, 196, 220);
-            it.rectangle(FX0, FY0, FX1 - FX0, FY1 - FY0, EDGE);
-            it.line(FX1, FY0, BX1, BY0, EDGE);
-            it.line(BX1, BY0, BX1, BY1, EDGE);
-            it.line(BX1, BY1, FX1, FY1, EDGE);
-            it.line(FX0, FY0, BX0, BY0, EDGE);
-            it.line(BX0, BY0, BX0, BY1, EDGE);
-            it.line(BX0, BY1, FX0, FY1, EDGE);
-            it.line(BX0, BY0, BX1, BY0, EDGE);
+            cv.rectangle(FX0, FY0, FX1 - FX0, FY1 - FY0, EDGE);
+            cv.line(FX1, FY0, BX1, BY0, EDGE);
+            cv.line(BX1, BY0, BX1, BY1, EDGE);
+            cv.line(BX1, BY1, FX1, FY1, EDGE);
+            cv.line(FX0, FY0, BX0, BY0, EDGE);
+            cv.line(BX0, BY0, BX0, BY1, EDGE);
+            cv.line(BX0, BY1, FX0, FY1, EDGE);
+            cv.line(BX0, BY0, BX1, BY0, EDGE);
             frect(282, FY0, 13, BY0 - FY0, Color(168, 216, 236));
 
           }
 
-          // Callouts sit on the glass, so a tank repaint takes them with it.
+          // Callouts sit on the glass, so a tank repaint takes them with cv.
           auto callout = [&](int slot, int x, int y, float v) {
             const bool mine = changed(SLOTS, slot, q(v, 10));
             if (!mine && !tank_redraw) return;
             rr(x, y, 84, 32, 8, Color(6, 10, 14));
-            it.rectangle(x, y, 84, 32, HAIR);
-            if (std::isnan(v)) it.print(x + 42, y + 16, id(f_med), MUTED, TextAlign::CENTER, "--");
-            else it.printf(x + 42, y + 16, id(f_med), INK, TextAlign::CENTER, "%.1f", v);
+            cv.rectangle(x, y, 84, 32, HAIR);
+            if (std::isnan(v)) cv.print(x + 42, y + 16, id(f_med), MUTED, TextAlign::CENTER, "--");
+            else cv.printf(x + 42, y + 16, id(f_med), INK, TextAlign::CENTER, "%.1f", v);
           };
           // Single-system: the one readout sits over the one probe.
           callout(SLOT_TA, ${dual_system} ? 176
@@ -725,10 +773,10 @@ display:
             if (full || last_rail != k) {
               last_rail = k;
               rr(568, 56, 214, 112, 15, CARD);
-              it.print(584, 78, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "WATER TEMPERATURE");
-              if (std::isnan(ta_f)) it.print(584, 124, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--.-");
-              else it.printf(584, 124, id(f_big), INK, TextAlign::CENTER_LEFT, "%.1f", ta_f);
-              it.print(584, 152, id(f_micro), id(r_heat_on) ? HEAT : MUTED,
+              cv.print(584, 78, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "WATER TEMPERATURE");
+              if (std::isnan(ta_f)) cv.print(584, 124, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--.-");
+              else cv.printf(584, 124, id(f_big), INK, TextAlign::CENTER_LEFT, "%.1f", ta_f);
+              cv.print(584, 152, id(f_micro), id(r_heat_on) ? HEAT : MUTED,
                        TextAlign::CENTER_LEFT, id(r_heat_on) ? "HEATING" : "IDLE");
             }
           }
@@ -736,42 +784,47 @@ display:
             // No gradient on one probe: the two lower cards are the relays.
             if (changed(SLOTS, SLOT_G, q(id(r_heat), 1))) {
               rr(568, 178, 214, 96, 15, CARD);
-              it.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATER DUTY");
-              if (std::isnan(id(r_heat))) it.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-              else it.printf(584, 240, id(f_big), HEAT, TextAlign::CENTER_LEFT, "%.0f%%", id(r_heat));
+              cv.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATER DUTY");
+              if (std::isnan(id(r_heat))) cv.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              else cv.printf(584, 240, id(f_big), HEAT, TextAlign::CENTER_LEFT, "%.0f%%", id(r_heat));
             }
             if (changed(SLOTS, SLOT_FAN, q(id(r_fan), 1))) {
               rr(568, 284, 214, 102, 15, CARD);
-              it.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "FAN DUTY");
-              if (std::isnan(id(r_fan))) it.print(584, 352, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-              else it.printf(584, 352, id(f_big), BLUE, TextAlign::CENTER_LEFT, "%.0f%%", id(r_fan));
+              cv.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "FAN DUTY");
+              if (std::isnan(id(r_fan))) cv.print(584, 352, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+              else cv.printf(584, 352, id(f_big), BLUE, TextAlign::CENTER_LEFT, "%.0f%%", id(r_fan));
             }
           } else {
           if (changed(SLOTS, SLOT_G, q(g, 100))) {
             rr(568, 178, 214, 96, 15, CARD);
-            it.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
-            if (std::isnan(g)) it.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-            else it.printf(584, 240, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT, "%+.2f", g);
+            cv.print(584, 200, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "GRADIENT  L - R");
+            if (std::isnan(g)) cv.print(584, 240, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            else cv.printf(584, 240, id(f_big), g >= 0 ? HEAT : BLUE, TextAlign::CENTER_LEFT, "%+.2f", g);
           }
           {
             const bool c1 = changed(SLOTS, SLOT_GH, q(gh, 100));
             const bool c2 = changed(SLOTS, SLOT_GI, q(gi, 100));
             if (c1 || c2) {
               rr(568, 284, 214, 102, 15, CARD);
-              it.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATING / IDLE");
-              if (std::isnan(gh)) it.print(584, 340, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
-              else it.printf(584, 340, id(f_med), INK2, TextAlign::CENTER_LEFT, "%+.2f", gh);
-              if (std::isnan(gi)) it.print(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
-              else it.printf(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "%+.2f", gi);
+              cv.print(584, 306, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "HEATING / IDLE");
+              if (std::isnan(gh)) cv.print(584, 340, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
+              else cv.printf(584, 340, id(f_med), INK2, TextAlign::CENTER_LEFT, "%+.2f", gh);
+              if (std::isnan(gi)) cv.print(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "--");
+              else cv.printf(584, 368, id(f_med), MUTED, TextAlign::CENTER_LEFT, "%+.2f", gi);
             }
           }
           }
+          cv.blit(it);
 
       # ===========================================================
       # PAGE 3 -- CHEMISTRY. Native graph component.
       # ===========================================================
       - id: page_chem
         lambda: |-
+          // Everything below draws into the off-screen canvas (components/
+          // panel_canvas); the blit at the end puts the finished frame on the
+          // glass in one copy, so no clear or half-drawn card is ever visible.
+          auto &cv = *id(canvas);
           float *SLOTS = id(p3_last);
           enum { SLOT_CLOCK = 0, SLOT_PH, SLOT_TM, SLOT_TDS, SLOT_LUX, SLOT_SWING, SLOT_CONF,
                  SLOT_GH, SLOT_KH, SLOT_AGE, SLOT_LINK };
@@ -782,7 +835,7 @@ display:
 
           // ---- bulk fill ----
           // rpi_dpi_rgb::draw_pixel_at issues one esp_lcd_panel_draw_bitmap
-          // call per pixel, and every base-class primitive is built on it.
+          // call per pixel, and every base-class primitive is built on cv.
           // A full screen is 384,000 driver calls (~2.4s). This writes one
           // prepared row per call: a card is ~124 calls, a clear 480.
           auto frect = [&](int x, int y, int w, int h, Color c) {
@@ -792,17 +845,17 @@ display:
             const uint16_t px = convert_big_endian(display::ColorUtil::color_to_565(c));
             for (int i = 0; i < w; i++) row[i] = px;
             for (int j = 0; j < h; j++)
-              it.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
+              cv.draw_pixels_at(x, y + j, w, 1, (const uint8_t *) row,
                                 display::COLOR_ORDER_RGB, display::COLOR_BITNESS_565,
                                 true, 0, 0, 0);
           };
           auto rr = [&](int x, int y, int w, int h, int r, Color c) {
             frect(x + r, y, w - 2 * r, h, c);
             frect(x, y + r, w, h - 2 * r, c);
-            it.filled_circle(x + r, y + r, r, c);
-            it.filled_circle(x + w - r - 1, y + r, r, c);
-            it.filled_circle(x + r, y + h - r - 1, r, c);
-            it.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
+            cv.filled_circle(x + r, y + r, r, c);
+            cv.filled_circle(x + w - r - 1, y + r, r, c);
+            cv.filled_circle(x + r, y + h - r - 1, r, c);
+            cv.filled_circle(x + w - r - 1, y + h - r - 1, r, c);
           };
 
           // ---- change detection ----
@@ -811,7 +864,7 @@ display:
           // it compares, and if equal, does nothing. `full` (first frame or
           // a page change) overrides every slot. The RGB peripheral streams
           // the framebuffer to the glass continuously, so any repaint is
-          // visible as a blip -- the only way to not see it is not to do it.
+          // visible as a blip -- the only way to not see it is not to do cv.
           const bool full = id(panel_dirty);
           if (full) { frect(0, 0, 800, 480, BG); id(panel_dirty) = false; }
           // Quantise to display precision so 74.104 -> 74.101 is not a change.
@@ -829,20 +882,20 @@ display:
             if (changed(SLOTS, SLOT_CLOCK, mkey)) {
               frect(700, 6, 90, 30, BG);
               if (now.is_valid())
-                it.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
+                cv.strftime(782, 20, id(f_small), INK2, TextAlign::CENTER_RIGHT, "%H:%M", now);
               else
-                it.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
+                cv.print(782, 20, id(f_small), MUTED, TextAlign::CENTER_RIGHT, "--:--");
             }
           }
 
           if (full) {
-            it.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
+            cv.print(20, 20, id(f_small), INK2, TextAlign::CENTER_LEFT, "${tank_title}");
             frect(0, 432, 800, 1, HAIR);
             // Page dots: one per page, this one a bar. The count is a global so
             // a package that adds pages (packages/panel_controls.yaml) adds dots.
             for (int k = 0, n = id(panel_page_count), x = 776 - (n - 1) * 18; k < n; k++, x += 18) {
               if (k == 2) frect(x - 9, 454, 18, 6, BLUE);
-              else it.filled_circle(x, 457, 3, TRACK);
+              else cv.filled_circle(x, 457, 3, TRACK);
             }
           }
 
@@ -854,12 +907,12 @@ display:
           if (!${dual_system} && std::isnan(ph)) {
             if (changed(SLOTS, SLOT_PH, -1000.0f - (float) (id(chem_stamp) % 1000003u))) {
               rr(18, 46, 380, 250, 15, CARD);
-              it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LAST WATER TEST");
+              cv.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "LAST WATER TEST");
               auto row = [&](int y, const char *label, float v, const char *fmt, const char *unit) {
-                it.print(36, y, id(f_small), INK2, TextAlign::CENTER_LEFT, label);
-                if (std::isnan(v)) it.print(250, y, id(f_med), MUTED, TextAlign::CENTER_RIGHT, "--");
-                else it.printf(250, y, id(f_med), INK, TextAlign::CENTER_RIGHT, fmt, v);
-                it.print(262, y, id(f_micro), MUTED, TextAlign::CENTER_LEFT, unit);
+                cv.print(36, y, id(f_small), INK2, TextAlign::CENTER_LEFT, label);
+                if (std::isnan(v)) cv.print(250, y, id(f_med), MUTED, TextAlign::CENTER_RIGHT, "--");
+                else cv.printf(250, y, id(f_med), INK, TextAlign::CENTER_RIGHT, fmt, v);
+                cv.print(262, y, id(f_micro), MUTED, TextAlign::CENTER_LEFT, unit);
               };
               row(112, "pH",      id(chem_ph),  "%.1f", "");
               row(158, "Ammonia", id(chem_nh3), "%.2f", "ppm");
@@ -869,23 +922,23 @@ display:
           } else
           if (changed(SLOTS, SLOT_PH, q(ph, 100))) {
             rr(18, 46, 380, 250, 15, CARD);
-            it.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH  24 HOURS");
-            if (std::isnan(ph)) it.print(36, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-            else it.printf(36, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.2f", ph);
-            it.graph(36, 140, id(ph_graph), BLUE);
-            it.print(36, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH");
+            cv.print(36, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH  24 HOURS");
+            if (std::isnan(ph)) cv.print(36, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            else cv.printf(36, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.2f", ph);
+            cv.graph(36, 140, id(ph_graph), BLUE);
+            cv.print(36, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "PH");
           }
 
           // ---- TDS card ----
           const float tm = id(tds_mean).state;
           if (changed(SLOTS, SLOT_TM, q(tm, 1))) {
             rr(410, 46, 372, 250, 15, CARD);
-            it.print(428, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "TDS  24 HOURS");
-            if (std::isnan(tm)) it.print(428, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-            else it.printf(428, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.0f", tm);
-            it.print(516, 116, id(f_small), MUTED, TextAlign::CENTER_LEFT, "ppm");
-            it.graph(428, 140, id(tds_graph), BLUE);
-            it.print(428, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "MEAN VS RAW");
+            cv.print(428, 68, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "TDS  24 HOURS");
+            if (std::isnan(tm)) cv.print(428, 110, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            else cv.printf(428, 110, id(f_big), INK, TextAlign::CENTER_LEFT, "%.0f", tm);
+            cv.print(516, 116, id(f_small), MUTED, TextAlign::CENTER_LEFT, "ppm");
+            cv.graph(428, 140, id(tds_graph), BLUE);
+            cv.print(428, 276, id(f_micro), MUTED, TextAlign::CENTER_LEFT, "MEAN VS RAW");
           }
 
           // ---- strip ----
@@ -915,11 +968,11 @@ display:
             const bool mine = changed(SLOTS, slot, q(v, m));
             if (!mine && !(sub != nullptr && age_changed)) return;
             rr(x, 306, 120, 118, 15, CARD);
-            it.print(x + 14, 328, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
-            if (std::isnan(v)) it.print(x + 14, 372, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
-            else it.printf(x + 14, 372, id(f_big), c, TextAlign::CENTER_LEFT, fmt, v);
+            cv.print(x + 14, 328, id(f_micro), MUTED, TextAlign::CENTER_LEFT, label);
+            if (std::isnan(v)) cv.print(x + 14, 372, id(f_big), MUTED, TextAlign::CENTER_LEFT, "--");
+            else cv.printf(x + 14, 372, id(f_big), c, TextAlign::CENTER_LEFT, fmt, v);
             if (sub != nullptr)
-              it.print(x + 14, 404, id(f_micro), chem_stale ? BAD : MUTED, TextAlign::CENTER_LEFT, sub);
+              cv.print(x + 14, 404, id(f_micro), chem_stale ? BAD : MUTED, TextAlign::CENTER_LEFT, sub);
           };
           const Color CHEM = chem_stale ? MUTED : INK2;
           small(SLOT_GH,    1, 18,  "GH PPM",     id(chem_gh), "%.0f", CHEM, agebuf);
@@ -933,8 +986,9 @@ display:
           // Link age text at bottom-left: keyed on its 30s bucket.
           if (changed(SLOTS, SLOT_LINK, (float) (id(r_stamp_ms) / 30000))) {
             frect(18, 446, 300, 22, BG);
-            it.print(20, 457, id(f_micro), MUTED, TextAlign::CENTER_LEFT, id(link_age).state.c_str());
+            cv.print(20, 457, id(f_micro), MUTED, TextAlign::CENTER_LEFT, id(link_age).state.c_str());
           }
+          cv.blit(it);
 
 globals:
   # True until the first frame has painted, and set again on every page
@@ -968,7 +1022,7 @@ globals:
   # Last-drawn value per element, per page. Not restored: the framebuffer
   # is garbage after a reboot and panel_dirty forces a full paint anyway.
   - id: p1_last
-    type: float[15]
+    type: float[16]
     restore_value: false
   - id: p2_last
     type: float[9]
