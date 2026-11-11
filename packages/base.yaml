@@ -117,6 +117,20 @@ mqtt:
   discovery: true
   discovery_prefix: homeassistant
   topic_prefix: ${device_name}
+  # A sensor's NaN MUST REACH HOME ASSISTANT AS "unknown". Off (ESPHome's
+  # default) a NaN state is published as the text "nan"; Home Assistant
+  # refuses a non-finite value for any sensor with a unit or state_class
+  # (sensor/entity.py raises "non-finite value") and KEEPS THE LAST STATE.
+  # 2026-11-09/10: the 75 gal's pH front-end read 0.000 V for ~29 h, the
+  # board correctly published NaN every 30 s, and Home Assistant showed
+  # Water pH 7.34 for 23.6 h -- the CO2 schedule ran gas for 7 h against
+  # that number with the pH-floor cutoff blind. On, NaN goes out as "None",
+  # which HA's MQTT sensor takes as unknown. Every sensor on every board
+  # here returns NAN on purpose to mean "no reading", so this is not a pH
+  # fix; it is what makes all of them mean what they say. The one consumer
+  # of these topics on a board, mqtt_subscribe (panel_p4_feeds.yaml), turns
+  # "None" into NaN just as it did "nan".
+  publish_nan_as_none: true
   birth_message:
     topic: ${device_name}/status
     payload: online

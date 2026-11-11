@@ -80,9 +80,9 @@ sensor:
     accuracy_decimals: 3
     entity_category: diagnostic
     update_interval: 10s
-    lambda: |-
-      if (std::isnan(id(ph_voltage).state)) return {};
-      return id(ph_voltage).state;
+    # NAN, not {}, when there is no reading: {} publishes nothing and the
+    # last voltage stays on the dashboard as if it were current.
+    lambda: "return id(ph_voltage).state;"
 
   - platform: template
     name: "Water pH"
@@ -96,6 +96,16 @@ sensor:
       # The electrode is a ~100 MOhm source sitting in water with a mains
       # heater and two pumps. Median rejects the switching spikes that
       # couple in without lagging a value that moves over hours anyway.
+      #
+      # What it does with NaN, read from ESPHome 2026.10.1's own source
+      # (sensor/filter.cpp, SortedWindowFilter + MedianFilter): every sample
+      # goes into the window, NaN included; the median is taken over the
+      # non-NaN ones; a window with NO numbers in it outputs NaN, and that
+      # NaN is published like any value. So one or two bad samples are
+      # outvoted quietly, and five in a row -- 2 to 2.5 minutes at 30 s --
+      # publish NaN, then keep publishing it every 30 s. The device side of
+      # "unknown on a lost probe" was always working; see the incident below
+      # for where it was lost.
       - median:
           window_size: 5
           send_every: 1
@@ -104,10 +114,57 @@ sensor:
       // rejected sample that publishes nothing leaves the LAST ACCEPTED
       // value on the dashboard indefinitely: an unplugged electrode showed
       // pH 13.84 for an hour because its floating input had once wandered
-      // through 0.3 V. The median filter below skips NaN, so one bad
+      // through 0.3 V. The median filter above skips NaN, so one bad
       // sample is still rejected quietly; five in a row go unknown.
+      //
+      // 2026-11-09/10, 75 gal: the probe voltage read 0.000 V for ~29 h and
+      // this sensor DID go NaN -- but over MQTT ESPHome sends NaN as the
+      // text "nan", and Home Assistant rejects a non-finite value for a
+      // sensor with a state_class ("non-finite value" ValueError) and keeps
+      // the PREVIOUS state. Water pH sat at 7.34 for 23.6 h and the CO2
+      // schedule ran gas for 7 h against it with the pH-floor cutoff blind.
+      // The transport half of the fix is publish_nan_as_none in
+      // packages/base.yaml ("None" is HA's "unknown"). This half makes the
+      // device's own verdict stricter, so a dead front-end cannot pass as a
+      // reading by any route:
+      //
+      //   - Signal band, before any maths. The DFRobot front-end sits at
+      //     about 1.2-1.7 V at tank pH, and pH 0-14 spans roughly
+      //     0.4-2.8 V. Under 0.05 V is a dead or unpowered board or an
+      //     open wire (the incident's 0.000 V); over 3.0 V is the ADC's
+      //     12 dB ceiling -- a pin pulled to the rail.
+      //     Either is "no signal", not an extreme pH. The 3-11 clamp below
+      //     already caught 0 V through a sane calibration; this does not
+      //     depend on the calibration being sane.
+      //   - Freshness. If ph_voltage has not published a value inside the
+      //     band for 5 minutes, its .state is a leftover, not a reading.
+      //     Board files that receive the volts from elsewhere already blank
+      //     a stale value; this holds for every board, including one whose
+      //     source just stops publishing.
+      //
+      // ph_signal_ok() is copied verbatim into tools/ph_signal_test.cpp,
+      // which checks the two still match and runs the cases.
+      auto ph_signal_ok = [](float v, uint32_t age_ms) -> bool {
+        if (std::isnan(v)) return false;
+        if (v < 0.05f || v > 3.0f) return false;   // front-end dead or railed
+        if (age_ms > 300000) return false;         // no in-band sample for 5 min
+        return true;
+      };
+      // Stamp every in-band voltage as it arrives, not when this runs: the
+      // question is how old ph_voltage's value is, which this 30 s poll
+      // cannot see by itself. Hooked on the first run; nothing else here
+      // is stateful.
+      static uint32_t last_ok_ms = 0;
+      static bool hooked = false;
+      if (!hooked) {
+        hooked = true;
+        last_ok_ms = millis();   // boot: give the source its first 5 min
+        id(ph_voltage).add_on_state_callback([ph_signal_ok](float x) {
+          if (ph_signal_ok(x, 0)) last_ok_ms = millis();
+        });
+      }
       const float v = id(ph_voltage).state;
-      if (std::isnan(v))
+      if (!ph_signal_ok(v, millis() - last_ok_ms))
         return NAN;
 
       // Two-point fit. Slope is NEGATIVE on this board: more volts, lower pH.
