@@ -1,14 +1,16 @@
 // Feeder funnel for the 75 gal: guides food from the MA-Feeder into the tank.
-// v4 (2026-11-11): a straight 19 mm tube with the top 6 mm flared out to
-// 25 mm, 19 mm tall overall. (v3 was a plain 19->25 mm cone, v2 15/13/20,
+// v5 (2026-11-11): a straight 19 mm tube with the top 6 mm flared out to
+// 35 mm, 19 mm tall overall. (v4 flared to 25 mm, v3 plain 19->25 cone, v2 15/13/20,
 // v1 11/9.5/16.) All diameters are OUTSIDE.
 //
-// Print in PETG as modelled, narrow end on the bed. The flare leans about
-// 27 degrees off vertical, well inside what prints without supports.
+// Print in PETG UPSIDE DOWN: flip it so the 35 mm rim sits on the bed. The
+// flare leans about 53 degrees off vertical - too far to print outward
+// without supports, but printed rim-down every layer is smaller than the
+// one below it, so it needs no supports and the rim gets a flat, clean edge.
 // 0.2 mm layers, 3+ walls so the 1.2 mm wall prints solid.
 
 tube_od  = 19.0;   // outside diameter of the straight tube (tank end)
-flare_od = 25.0;   // outside diameter at the top of the flare (feeder end)
+flare_od = 35.0;   // outside diameter at the top of the flare (feeder end)
 height   = 19.0;   // overall height
 flare_h  = 6.0;    // height of the flared section at the top
 wall     = 1.2;    // 3 x 0.4 mm perimeters
