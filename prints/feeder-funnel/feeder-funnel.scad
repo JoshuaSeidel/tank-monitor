@@ -20,14 +20,17 @@ tube_h = height - flare_h;
 r_tube  = tube_od / 2;
 r_flare = flare_od / 2;
 
-// Half cross-section, revolved: the wall follows the outside profile at a
-// constant horizontal thickness, so the bore keeps the same shape.
+// Half cross-section, revolved. On the steep flare a 1.2 mm HORIZONTAL wall
+// would only be ~0.7 mm thick across the slope, so the flare's horizontal
+// offset is widened to keep it 1.2 mm thick measured square to the wall.
+flare_angle = atan((r_flare - r_tube) / flare_h);   // off vertical
+wall_flare  = wall / cos(flare_angle);
 rotate_extrude()
     polygon([
         [r_tube - wall,  0],
         [r_tube,         0],
         [r_tube,         tube_h],
         [r_flare,        height],
-        [r_flare - wall, height],
+        [r_flare - wall_flare, height],
         [r_tube - wall,  tube_h],
     ]);
