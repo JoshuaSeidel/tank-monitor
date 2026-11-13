@@ -12,6 +12,9 @@ globals:
   type: int
   restore_value: false
   initial_value: '0'
+- id: alert_top_tag
+  type: std::string
+  restore_value: false
 - id: redraw_charts
   type: bool
   restore_value: false
@@ -2612,7 +2615,7 @@ lvgl:
             id: w_alert_title
             x: 62
             y: 9
-            width: 740
+            width: 600
             text: ''
             text_font: f15
             text_color: 0xF8FAFC
@@ -2621,11 +2624,40 @@ lvgl:
             id: w_alert_msg
             x: 62
             y: 31
-            width: 740
+            width: 600
             text: ''
             text_font: f12
             text_color: 0xCBD5E1
             long_mode: DOT
+        - button:
+            id: w_alert_clr
+            align: RIGHT_MID
+            x: -180
+            y: 0
+            width: 120
+            height: 42
+            bg_color: 0x1E293B
+            bg_opa: COVER
+            border_color: 0x334155
+            border_width: 1
+            radius: 8
+            shadow_width: 0
+            pad_all: 0
+            widgets:
+            - label:
+                id: w_alert_clr_l
+                align: CENTER
+                text: CLEAR
+                text_font: f13
+                text_color: 0xF8FAFC
+            pressed:
+              bg_color: 0x212E3D
+            on_click:
+            - mqtt.publish:
+                topic: tank-monitor-panel/ack
+                payload: !lambda |-
+                  return id(alert_top_tag);
+            - lambda: id(alerts).erase(id(alert_top_tag));
         - button:
             id: w_alert_btn
             align: RIGHT_MID
@@ -6765,7 +6797,7 @@ interval:
 
           // ------------------------------------------------------------ alerts
           int n_crit = 0, n_warn = 0;
-          std::string top_title, top_msg;
+          std::string top_title, top_msg, top_tag;
           bool top_is_crit = false;
           for (auto &kv : id(alerts)) {
             // "level|title|message"
@@ -6778,8 +6810,10 @@ interval:
               top_title = v.substr(a + 1, b - a - 1);
               top_msg = v.substr(b + 1);
               top_is_crit = crit;
+              top_tag = kv.first;
             }
           }
+          id(alert_top_tag) = top_tag;
           const int n_alerts = n_crit + n_warn;
           // Link-down warnings are the panel's own; they count with HA's warnings.
           const int n_links_down = (int) !l75 + (int) !l16;

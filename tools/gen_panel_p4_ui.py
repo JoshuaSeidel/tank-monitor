@@ -260,8 +260,19 @@ def alert_banner():
                    box("w_alert_disc", 16, 0, 32, 32, bg="red", border="red", radius=16,
                        bw=0, align="LEFT_MID",
                        kids=[label(None, "!", "f18", "text", align="CENTER")]),
-                   label("w_alert_title", "", "f15", x=62, y=9, w=740, long_mode="DOT"),
-                   label("w_alert_msg", "", "f12", "text2", x=62, y=31, w=740, long_mode="DOT"),
+                   label("w_alert_title", "", "f15", x=62, y=9, w=600, long_mode="DOT"),
+                   label("w_alert_msg", "", "f12", "text2", x=62, y=31, w=600, long_mode="DOT"),
+                   # CLEAR: tells Home Assistant the alert is dealt with
+                   # (automation "Aquarium -- panel alert cleared" sends the
+                   # all-clear through script.aquarium_alert, which drops it
+                   # from the latch, the phones and every panel), and drops it
+                   # here at once so the tap feels instant. The next alert, if
+                   # any, takes its place.
+                   button("w_alert_clr", -180, 0, 120, 42, align="RIGHT_MID", bg="btn",
+                          border="border_act", kids=[
+                              label("w_alert_clr_l", "CLEAR", "f13", align="CENTER")],
+                          on_click=[publish("tank-monitor-panel/ack", "@ACKPAYLOAD@"),
+                                    {"lambda": "id(alerts).erase(id(alert_top_tag));"}]),
                    button("w_alert_btn", -8, 0, 162, 42, align="RIGHT_MID", bg="red",
                           border="red", kids=[row(None, 0, 0, align="CENTER", gap=8, h=24, kids=[
                               label(None, "→", "f15"),
@@ -838,7 +849,7 @@ const bool l16 = id(t16_stamp_ms) != 0 && now_ms - id(t16_stamp_ms) < 45000;
 
 // ------------------------------------------------------------ alerts
 int n_crit = 0, n_warn = 0;
-std::string top_title, top_msg;
+std::string top_title, top_msg, top_tag;
 bool top_is_crit = false;
 for (auto &kv : id(alerts)) {
   // "level|title|message"
@@ -851,8 +862,10 @@ for (auto &kv : id(alerts)) {
     top_title = v.substr(a + 1, b - a - 1);
     top_msg = v.substr(b + 1);
     top_is_crit = crit;
+    top_tag = kv.first;
   }
 }
+id(alert_top_tag) = top_tag;
 const int n_alerts = n_crit + n_warn;
 // Link-down warnings are the panel's own; they count with HA's warnings.
 const int n_links_down = (int) !l75 + (int) !l16;
@@ -1608,6 +1621,8 @@ def build():
         "globals": [
             {"id": "night_on", "type": "bool", "restore_value": False, "initial_value": "false"},
             {"id": "alert_target", "type": "int", "restore_value": False, "initial_value": "0"},
+            # Tag of the alert the banner shows, for its CLEAR button.
+            {"id": "alert_top_tag", "type": "std::string", "restore_value": False},
             {"id": "redraw_charts", "type": "bool", "restore_value": False, "initial_value": "true"},
             {"id": "ro_target_pending", "type": "float", "restore_value": False, "initial_value": "NAN"},
         ] + [{"id": f"{T['t']}_chart_mode", "type": "int", "restore_value": False,
@@ -1693,7 +1708,16 @@ def build():
         "payload: !lambda |-\n"
         "            char b[12]; snprintf(b, sizeof(b), \"%.1f\", id(ro_target_pending));\n"
         "            return std::string(b);")
+    # The CLEAR button's payload is the banner's alert tag. Matched with its
+    # indentation: the button sits deeper in the widget tree than the RO
+    # script, and a block scalar must be indented past its key.
+    text = re.sub(r"^( *)payload: '@ACKPAYLOAD@'$",
+                  lambda m: (f"{m.group(1)}payload: !lambda |-\n"
+                             f"{m.group(1)}  return id(alert_top_tag);"),
+                  text, flags=re.M)
     if PREVIEW:
+        text = text.replace("- logger.log: 'preview: would publish @ACKPAYLOAD@ to",
+                            "- logger.log: 'preview: would publish the alert tag to")
         text = text.replace("- logger.log: 'preview: would publish @ROPAYLOAD@ to",
                             "- logger.log: 'preview: would publish target to")
     return HEADER + text
