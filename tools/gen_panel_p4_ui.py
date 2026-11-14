@@ -93,7 +93,7 @@ TANKS = [
     # 330-390, above 390 = a change is due, alert at 410. pH from the
     # calibrated probe (2026-10-24..29): 6.97-7.32; 7.0 is the emerald dwarf
     # danios' floor, 7.4 sits just above anything the probe has seen.
-    dict(t="t75", name="75 GALLON", tag="COMMUNITY", dual=True,
+    dict(t="t75", name="75 GALLON", tag="COMMUNITY", dual=True, feeder=True,
          water="~62 GAL", ph_title="WATER PH LEVEL", ph_tile="WATER PH",
          tds_lo=200, tds_hi=225, tds_alert=260, tds_max=300, tds_scale=(150, 320),
          ph_lo=7.0, ph_hi=7.5, ph_scale=(6.8, 7.8), card_x=14),
@@ -334,6 +334,14 @@ def tank_card(T):
                        label(f"{w}_title", T["name"], "f18"),
                        pill(f"{w}_tag", [label(None, T["tag"], "f11", "label")],
                             bg="card2", border="border_act", h=20, radius=4, pad=8),
+                       # The 75's feeder (MA-Feeder via Home Assistant): when
+                       # it last fed; tap for the feeding page.
+                       *([button(f"{w}_feedchip", None, None, 112, 26, radius=6, bg="card2",
+                                 on_click=show_page("w_page_feed75"),
+                                 kids=[row(None, 0, 0, align="CENTER", gap=4, h=20, kids=[
+                                     icon(f"{w}_feedchip_i", "fish", 18, "cyan"),
+                                     label(f"{w}_feedchip_l", "FED --", "f11", "text2")])])]
+                         if T.get("feeder") else []),
                    ]),
                    row(f"{w}_link", -16, L["head"] + 4, align="TOP_RIGHT", h=28, gap=6, kids=[
                        dot(f"{w}_link_dot", "cyan"),
@@ -729,6 +737,61 @@ def wc_page():
         ]),
     ]}
 
+# ------------------------------------------------------- 75 feeding page
+
+
+def feed_page():
+    """The 75 gal's feeding: the MA-Feeder's last/next feed and status, and
+    the live-food log (input_datetime.aquarium_75_last_live_food). Data comes
+    from Home Assistant on tank-monitor-panel/ha/feed_*_t75 and live_food_t75
+    (automation "Aquarium -- publish panel state to MQTT"); the two buttons
+    publish to tank-monitor-panel/cmd/*_t75 (automation "Aquarium -- panel
+    feeder commands"). Hold-to-press, like the other panel actions that
+    change something, so a brush against the screen does nothing."""
+    stat = lambda x, y, cap, vid, sid, vfont="f26": [  # noqa: E731
+        label(None, cap, "f11", "label", x=x, y=y),
+        label(vid, "--", vfont, x=x, y=y + 18),
+        label(sid, "", "f12", "muted", x=x, y=y + (62 if vfont == "f42" else 52))]
+    hold = lambda i, x, wd, ic, color, text, topic: button(  # noqa: E731
+        i, x, 460, wd, 128, bg="card1", border="cyan_deep", radius=14,
+        on_long_press=[publish(topic, "PRESS"),
+                       {"lambda": f"id({i[2:]}_ms) = millis();"}],
+        kids=[row(None, 0, -10, align="CENTER", gap=10, h=32, kids=[
+                  icon(None, ic, 24, color), label(f"{i}_l", text, "f18", color)]),
+              label(f"{i}_s", "Hold to send", "f12", "muted", align="CENTER", y=24)])
+    return {"id": "w_page_feed75", "bg_color": COL["canvas"], "scrollable": False, "widgets": [
+        back_button(),
+        row(None, 122, 10, h=44, gap=14, kids=[
+            label(None, "75 GALLON FEEDING", "f18"),
+            pill("w_fd_sched", [dot("w_fd_sched_dot", "cyan"),
+                                label("w_fd_sched_l", "SCHEDULE --", "f12", "cyan")],
+                 bg="card1", border="border_act", h=30, pad=12),
+        ]),
+        box(None, 14, 66, 496, 384, bg="card1", border="border", radius=14, kids=[
+            icon(None, "fish", 18, "cyan", x=18, y=18),
+            label(None, "AUTO FEEDER", "f15", x=46, y=19),
+            *stat(18, 60, "LAST FED", "w_fd_last", "w_fd_last_s", "f42"),
+            *stat(18, 168, "NEXT FEED", "w_fd_next", "w_fd_next_s"),
+            *stat(300, 168, "FEEDS TODAY", "w_fd_today", "w_fd_today_s"),
+            box(None, 18, 268, 460, 98, bg="card3", border="border", radius=10, kids=[
+                label(None, "FEEDER STATUS", "f11", "label", x=14, y=10),
+                label("w_fd_status", "--", "f12", "text2", x=14, y=30, w=432, long_mode="WRAP"),
+            ]),
+        ]),
+        box(None, 522, 66, 488, 384, bg="card1", border="border", radius=14, kids=[
+            icon(None, "water", 18, "amber", x=18, y=18),
+            label(None, "LIVE FOOD", "f15", x=46, y=19),
+            *stat(18, 60, "LAST LIVE FOOD FEEDING", "w_fd_live", "w_fd_live_s", "f42"),
+            label(None, "Baby brine shrimp and other live food go in by hand.", "f12", "muted",
+                  x=18, y=168, w=452, long_mode="WRAP"),
+            label(None, "Hold LOG LIVE FOOD after a feeding to record it in Home Assistant.",
+                  "f12", "muted", x=18, y=192, w=452, long_mode="WRAP"),
+        ]),
+        hold("w_fd_feed", 14, 496, "fish", "cyan", "FEED NOW", "tank-monitor-panel/cmd/feed_now_t75"),
+        hold("w_fd_logl", 522, 488, "plus_circle", "amber", "LOG LIVE FOOD",
+             "tank-monitor-panel/cmd/live_food_t75"),
+    ]}
+
 # ------------------------------------------------------------ update lambda
 
 UPDATE_COMMON = r"""
@@ -885,6 +948,65 @@ if (compact) {
   show(id(w_alert_btn), is75 || is16);
   fill(id(w_alert_btn), top_is_crit ? 0xEF4444 : 0xD97706);
   txt(id(w_alert_btn_l), is75 ? "OPEN 75 GALLON" : "OPEN NANO");
+}
+
+// ------------------------------------------------------- 75 feeding
+{
+  // Epochs from Home Assistant; <= 0 = unknown.
+  auto when = [&](int ts, char *o, size_t n) {
+    if (ts <= 0) { snprintf(o, n, "--"); return; }
+    ESPTime t = ESPTime::from_epoch_local((time_t) ts);
+    char h[16]; hm(t, h, sizeof(h), 0);
+    if (tnow.is_valid() && t.day_of_year == tnow.day_of_year && t.year == tnow.year) snprintf(o, n, "%s", h);
+    else { char d[16]; md(t, d, sizeof(d)); snprintf(o, n, "%s, %s", d, h); }
+  };
+  auto rel = [&](int ts, bool past, char *o, size_t n) {
+    if (ts <= 0 || !tnow.is_valid()) { snprintf(o, n, " "); return; }
+    long s = past ? (long) tnow.timestamp - ts : (long) ts - (long) tnow.timestamp;
+    if (s < 0) s = 0;
+    if (s < 3600) snprintf(o, n, past ? "%ld min ago" : "in %ld min", s / 60);
+    else if (s < 86400) snprintf(o, n, past ? "%ldh %ldm ago" : "in %ldh %ldm", s / 3600, s / 60 % 60);
+    else snprintf(o, n, past ? "%ldd %ldh ago" : "in %ldd %ldh", s / 86400, s / 3600 % 24);
+  };
+  char fa[40], fb[40];
+  const int last = id(ha_fed_last_t75), next = id(ha_fed_next_t75), live = id(ha_live_food_t75);
+  const bool sched_off = id(ha_fed_sched_t75) == 0;
+  const bool fed_recent = last > 0 && tnow.is_valid() && (long) tnow.timestamp - last < 26L * 3600;
+
+  // Home card chip: "FED 1:02 PM"; amber when the schedule is off or nothing
+  // in 26 h.
+  if (last > 0 && tnow.is_valid()) {
+    ESPTime t = ESPTime::from_epoch_local((time_t) last);
+    if (t.day_of_year == tnow.day_of_year && t.year == tnow.year) { hm(t, fa, sizeof(fa), 0); txt(id(w_t75_feedchip_l), "FED %s", fa); }
+    else { md(t, fa, sizeof(fa)); txt(id(w_t75_feedchip_l), "FED %s", fa); }
+  } else txt(id(w_t75_feedchip_l), "FED --");
+  const bool chip_warn = sched_off || (last > 0 && !fed_recent);
+  col(id(w_t75_feedchip_l), chip_warn ? 0xFBBF24 : 0xCBD5E1);
+  col(id(w_t75_feedchip_i), chip_warn ? 0xFBBF24 : 0x38BDF8);
+
+  // Feeding page.
+  when(last, fa, sizeof(fa)); txt(id(w_fd_last), "%s", fa);
+  rel(last, true, fa, sizeof(fa));
+  if (!id(ha_fed_src_t75).empty() && last > 0) txt(id(w_fd_last_s), "%s • %s", fa, id(ha_fed_src_t75).c_str());
+  else txt(id(w_fd_last_s), "%s", fa);
+  when(next, fb, sizeof(fb)); txt(id(w_fd_next), "%s", fb);
+  rel(next, false, fb, sizeof(fb)); txt(id(w_fd_next_s), "%s", next > 0 ? fb : (sched_off ? "schedule is off" : " "));
+  if (id(ha_fed_today_t75) >= 0) txt(id(w_fd_today), "%d", id(ha_fed_today_t75)); else txt(id(w_fd_today), "--");
+  txt(id(w_fd_today_s), "since midnight");
+  txt(id(w_fd_status), "%s", id(ha_fed_status_t75).empty() ? "--" : id(ha_fed_status_t75).c_str());
+  when(live, fa, sizeof(fa)); txt(id(w_fd_live), "%s", fa);
+  rel(live, true, fa, sizeof(fa)); txt(id(w_fd_live_s), "%s", live > 0 ? fa : "nothing logged yet");
+
+  const int sc = id(ha_fed_sched_t75);
+  txt(id(w_fd_sched_l), sc == 1 ? "SCHEDULE ON" : (sc == 0 ? "SCHEDULE OFF" : "SCHEDULE --"));
+  const uint32_t sccol = sc == 1 ? 0x10B981 : (sc == 0 ? 0xFBBF24 : 0x38BDF8);
+  col(id(w_fd_sched_l), sccol); fill(id(w_fd_sched_dot), sccol);
+
+  // "Sent" for 5 s after a hold, so the press is acknowledged.
+  const bool fsent = id(fd_feed_ms) != 0 && now_ms - id(fd_feed_ms) < 5000;
+  const bool lsent = id(fd_logl_ms) != 0 && now_ms - id(fd_logl_ms) < 5000;
+  txt(id(w_fd_feed_s), fsent ? "Sent to the feeder" : (mqtt_ok ? "Hold to feed one portion" : "Offline - MQTT down"));
+  txt(id(w_fd_logl_s), lsent ? "Logged" : (mqtt_ok ? "Hold to log a live food feeding" : "Offline - MQTT down"));
 }
 
 // ----------------------------------------------------------- top bar
@@ -1615,7 +1737,7 @@ def build():
     """The generated YAML as text."""
     home = {"id": "w_page_home", "bg_color": COL["canvas"], "scrollable": False,
             "widgets": top_bar() + [tank_card(T) for T in TANKS] + strip() + [alert_banner()]}
-    pages = [home] + [detail_page(T) for T in TANKS] + [wc_page()]
+    pages = [home] + [detail_page(T) for T in TANKS] + [wc_page(), feed_page()]
 
     doc = {
         "globals": [
@@ -1623,6 +1745,9 @@ def build():
             {"id": "alert_target", "type": "int", "restore_value": False, "initial_value": "0"},
             # Tag of the alert the banner shows, for its CLEAR button.
             {"id": "alert_top_tag", "type": "std::string", "restore_value": False},
+            # millis() of the feeding page's last FEED NOW / LOG LIVE FOOD hold.
+            {"id": "fd_feed_ms", "type": "uint32_t", "restore_value": False, "initial_value": "0"},
+            {"id": "fd_logl_ms", "type": "uint32_t", "restore_value": False, "initial_value": "0"},
             {"id": "redraw_charts", "type": "bool", "restore_value": False, "initial_value": "true"},
             {"id": "ro_target_pending", "type": "float", "restore_value": False, "initial_value": "NAN"},
         ] + [{"id": f"{T['t']}_chart_mode", "type": "int", "restore_value": False,

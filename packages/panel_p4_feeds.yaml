@@ -15,6 +15,11 @@
 #                                          livestock days
 #                                          (automation "Aquarium -- publish
 #                                          panel state to MQTT")
+#   tank-monitor-panel/ha/feed_*_t75,      the 75's feeder (last/next feed,
+#   tank-monitor-panel/ha/live_food_t75    count, schedule, status) and the
+#                                          live-food log; the feeding page
+#                                          sends tank-monitor-panel/cmd/
+#                                          feed_now_t75 / live_food_t75
 #   tank-monitor-panel/alert/<tag>         one retained message per active
 #                                          alert, "tag|level|title|message",
 #                                          written by script.aquarium_alert;
@@ -153,6 +158,34 @@ globals:
     type: float
     restore_value: false
     initial_value: 'NAN'
+  # The 75's feeder (MA-Feeder) and live-food log, from Home Assistant.
+  # Times are epoch seconds (UTC), -1 = unknown / none.
+  - id: ha_fed_last_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_fed_next_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_fed_today_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'
+  - id: ha_fed_sched_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'   # -1 unknown, 0 off, 1 on
+  - id: ha_fed_src_t75
+    type: std::string
+    restore_value: false
+  - id: ha_fed_status_t75
+    type: std::string
+    restore_value: false
+  - id: ha_live_food_t75
+    type: int
+    restore_value: false
+    initial_value: '-1'
   # tag -> "level|title|message". std::map keeps them sorted by tag, which is
   # stable, so the banner does not reshuffle while you read it.
   - id: alerts
@@ -272,6 +305,20 @@ mqtt:
       then: [lambda: 'id(ha_co2_note_t16) = x;']
     - topic: tank-monitor-panel/ha/bubbler_note_t16
       then: [lambda: 'id(ha_bubbler_note_t16) = x;']
+    - topic: tank-monitor-panel/ha/feed_last_t75
+      then: [lambda: 'id(ha_fed_last_t75) = atoi(x.c_str());']
+    - topic: tank-monitor-panel/ha/feed_next_t75
+      then: [lambda: 'id(ha_fed_next_t75) = atoi(x.c_str());']
+    - topic: tank-monitor-panel/ha/feed_today_t75
+      then: [lambda: 'id(ha_fed_today_t75) = atoi(x.c_str());']
+    - topic: tank-monitor-panel/ha/feed_sched_t75
+      then: [lambda: 'id(ha_fed_sched_t75) = x == "on" ? 1 : (x == "off" ? 0 : -1);']
+    - topic: tank-monitor-panel/ha/feed_src_t75
+      then: [lambda: 'id(ha_fed_src_t75) = x;']
+    - topic: tank-monitor-panel/ha/feed_status_t75
+      then: [lambda: 'id(ha_fed_status_t75) = x;']
+    - topic: tank-monitor-panel/ha/live_food_t75
+      then: [lambda: 'id(ha_live_food_t75) = atoi(x.c_str());']
     - topic: tank-monitor-panel/alert/+
       then:
         - lambda: |-
