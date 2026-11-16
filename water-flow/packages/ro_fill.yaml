@@ -98,6 +98,27 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # The RO's running speed, in pulses per minute so a recalibration restates
+  # it like Fill Volume. Learned from the meter itself: once water has run
+  # steadily for 3 minutes (past the start-up surge), the 30 s interval below
+  # blends the live rate into ro_run_live; when the run ends, that is stored
+  # here (one flash write per fill, not one per tick). Seeded with the
+  # 2026-11-14 measurement (0.137 gal/min at 7731 pulses/L); replaced by the
+  # first real run. "Running Flow Rate" publishes it -- Home Assistant's
+  # fill-by-volume script sizes the plug's failsafe timer from it instead of
+  # a hard-coded speed.
+  - id: ro_run_ppm
+    type: float
+    restore_value: true
+    initial_value: '4010.0'
+  - id: ro_run_live
+    type: float
+    restore_value: false
+    initial_value: '0.0'
+  - id: ro_run_since
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
 
 esphome:
   on_boot:
@@ -155,6 +176,22 @@ sensor:
     lambda: "return (float) id(ro_total_gal);"
     filters:
       - delta: 0.005
+
+  # How fast the RO makes water when it is running (see ro_run_ppm). Not the
+  # live rate -- that is Flow Rate, and it reads 0 whenever the water is off.
+  - platform: template
+    name: "Running Flow Rate"
+    id: ro_run_rate
+    icon: "mdi:speedometer"
+    device_class: volume_flow_rate
+    unit_of_measurement: "gal/min"
+    state_class: measurement
+    accuracy_decimals: 3
+    update_interval: 30s
+    lambda: |-
+      const float ppm = id(ro_run_live) > 0.0f ? id(ro_run_live) : id(ro_run_ppm);
+      if (ppm <= 0.0f || id(ro_k) <= 0.0f) return NAN;
+      return ppm / id(ro_k) / 3.785411784f;
 
   # The raw count behind Fill Volume -- what a calibration divides by.
   - platform: template
@@ -278,3 +315,25 @@ button:
       - component.update: ro_k_num
       - component.update: ro_fill_volume
       - script.execute: flow_save_now
+
+interval:
+  # Learn the running speed (ro_run_ppm above).
+  - interval: 30s
+    then:
+      - lambda: |-
+          const float ppm = id(flow_meter).state;
+          const uint32_t now = millis();
+          if (std::isnan(ppm) || ppm <= 0.0f) {
+            // Run over: keep what it learned, once.
+            if (id(ro_run_live) > 0.0f) {
+              id(ro_run_ppm) = id(ro_run_live);
+              ESP_LOGI("ro", "running rate stored: %.0f pulses/min (%.3f gal/min)", id(ro_run_ppm),
+                       id(ro_k) > 0.0f ? id(ro_run_ppm) / id(ro_k) / 3.785411784f : 0.0f);
+              id(ro_run_live) = 0.0f;
+            }
+            id(ro_run_since) = 0;
+            return;
+          }
+          if (id(ro_run_since) == 0) { id(ro_run_since) = now == 0 ? 1 : now; return; }
+          if (now - id(ro_run_since) < 180000) return;  // start-up surge / air
+          id(ro_run_live) = id(ro_run_live) > 0.0f ? id(ro_run_live) * 0.7f + ppm * 0.3f : ppm;
