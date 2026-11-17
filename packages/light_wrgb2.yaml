@@ -1560,6 +1560,38 @@ interval:
               ESP_LOGE("light", "lamp lit / brighter than the schedule for 5 min");
             id(light_over) = true;
             if (id(lp_curve)) {
+              // Ask the lamp before suspending anything. On 2026-11-17 the
+              // sensor read dark at 15:52 (the lamp verified it held the
+              // curve), then 1.5x bright from 16:20 with the spectrum and
+              // falling NIR unchanged: the view moved, not the lamp. The
+              // suspension sent the tank dark at sunset, 30 min before
+              // civil dusk. A lamp that holds the curve keeps it; the
+              // level is relearned instead.
+              if (id(light_verify) == 0) {
+                ESP_LOGI("light", "brighter than the curve for 5 min; asking the lamp what it stores before suspending");
+                id(light_verify) = 1;
+                id(light_verify_ms) = millis();
+                id(light_query).execute();
+                return;
+              }
+              if (id(light_verify) == 1) {
+                if (millis() - id(light_verify_ms) < 20000UL) return;
+                ESP_LOGW("light", "the lamp did not answer the status query in 20 s");
+                id(light_verify) = 3;
+              }
+              if (id(light_verify) == 2) {
+                ESP_LOGW("light", "the lamp holds the curve the board sent, but the sensor reads %.0f lx against "
+                         "%.0f expected: the sensor's view changed. Keeping the curve; relearning the light level",
+                         lux, learned * frac);
+                learned = 0.0f;
+                id(light_view_nir) = NAN;
+                id(light_view_full) = NAN;
+                id(light_over) = false;
+                id(light_mismatch_min) = 0;
+                id(light_verify) = 0;
+                return;
+              }
+              id(light_verify) = 0;              // 3: differs or no answer
               // Re-pushing the same curve would not help if the lamp holds
               // points it should not; the scene is the lamp's proven path.
               ESP_LOGE("light", "daylight curve suspended until midnight; pushing the single scene instead");
