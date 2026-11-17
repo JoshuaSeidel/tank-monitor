@@ -625,18 +625,20 @@ select:
         # At setup this runs before the globals load, so the stored backup
         # overwrites it; light_validate_settings compares the two.
         - lambda: id(light_phase_saved) = (int) i;
-        - script.execute: light_select_phase
         - lambda: |-
             // New phase, new brightness: what "lit" looked like before no
             // longer applies. Detection falls back to the 20 lx floor for
             // "should be lit" and stays off for "should be dark" until the
-            // next plateau relearns it.
+            // next plateau relearns it. Cleared BEFORE light_select_phase:
+            // after it, a re-pick still computed the suspended day's scene
+            // and pushed it (2026-11-17).
             id(light_learned_lux) = 0.0f;
             id(light_mismatch_min) = 0;
             id(light_fix_attempts) = 0;
             id(light_not_responding) = false;
             id(light_over) = false;
             id(light_curve_off_day) = -1;
+        - script.execute: light_select_phase
         - script.execute: light_refresh_controls
         - script.execute: light_push
 
