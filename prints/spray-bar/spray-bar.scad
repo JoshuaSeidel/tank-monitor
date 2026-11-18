@@ -39,7 +39,7 @@ inlet_plug_od   = 12.4;  // old bar's plug end, calipers (user, 2026-11-18)
 inlet_plug_id   = 9.0;
 inlet_plug_len  = 13.3;  // old bar's plug length, calipers (user, 2026-11-18)
 inlet_stub      = 8.0;   // straight 16 mm run between the elbow and the plug
-fit_clear       = -0.30; // bar joints: socket bore = spigot_od + this (set from fittest)
+fit_clear       = -0.70; // bar joints: socket bore = spigot_od + this. PETG fit test (user, 2026-11-18): only -0.6 held, wanted slightly tighter
 // ---- drop tee ----------------------------------------------------------
 drop            = 60.0;  // plug centreline to bar centreline, mm (how much lower)
 riser_od        = 16.0;
