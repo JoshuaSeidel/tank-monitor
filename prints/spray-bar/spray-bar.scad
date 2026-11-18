@@ -193,23 +193,38 @@ module clip() {
     }
 }
 
+// Labelled tab joined to a ring of outer diameter od: a flat tab off one
+// side with the number raised on it, so the label stays with the ring.
+module label_tab(od, label) {
+    tl = 17; tw = 9; tt = 1.6;     // tab: 17 mm out from the ring, 9 mm wide
+    translate([od / 2 - 1, -tw / 2, 0]) {
+        cube([tl + 1, tw, tt]);
+        translate([1 + tl / 2, tw / 2, tt - eps]) linear_extrude(0.8)
+            text(label, size = 4.2, halign = "center", valign = "center");
+    }
+}
+// "9" -> "9.0", "12.5" stays: every label has one decimal so 6/9 and 1/7
+// cannot be mistaken and the labels line up.
+function mm(d) = d == floor(d) ? str(d, ".0") : str(d);
+
 // Test rings: slide over the dry locked pipe; the one that goes on with a
-// firm push and stays put is inlet_bore. Labelled by bore in mm.
+// firm push and stays put is inlet_bore. Each ring carries its bore (mm)
+// on a tab.
 gauge_sizes = [8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5, 12.0, 12.5, 13.0, 13.5, 14.0, 14.5, 15.0];
 module gauge() {
     for (k = [0 : len(gauge_sizes) - 1]) {
         d = gauge_sizes[k];
-        translate([(k % 5) * 30, floor(k / 5) * 34, 0]) {
+        translate([(k % 5) * 44, floor(k / 5) * 26, 0]) {
             tube(d + 5, d, 5);
-            translate([0, -(d / 2 + 6), 0]) linear_extrude(1.2)
-                text(str(d), size = 4, halign = "center", valign = "center");
+            label_tab(d + 5, mm(d));
         }
     }
 }
 
 // Joint fit test: one tapered spigot and three short sockets at fit_clear
-// 0.0 / 0.1 / 0.2. The socket that pushes on firmly and holds when you
-// shake it is the fit_clear to use. Print standing, like the segments.
+// 0.0 / 0.1 / 0.2, each socket carrying its number on a tab. The socket that
+// pushes on firmly and holds when you shake it is the fit_clear to use.
+// Print standing, like the segments.
 fit_tests = [0.0, 0.1, 0.2];
 module fittest() {
     difference() {
@@ -217,13 +232,12 @@ module fittest() {
         translate([0, 0, -eps]) cylinder(d = spigot_id, h = spigot_len + 2 * eps);
     }
     for (k = [0 : len(fit_tests) - 1])
-        translate([(k + 1) * (bar_od + 8), 0, 0]) {
+        translate([0, (k + 1) * (bar_od + 8), 0]) {
             difference() {
                 cylinder(d = bar_od, h = spigot_len + 2);
                 translate([0, 0, -eps]) cylinder(d = spigot_od + fit_tests[k], h = spigot_len + 3);
             }
-            translate([0, -(bar_od / 2 + 5), 0]) linear_extrude(1.2)
-                text(str(fit_tests[k]), size = 4, halign = "center", valign = "center");
+            label_tab(bar_od, mm(fit_tests[k]));
         }
 }
 
