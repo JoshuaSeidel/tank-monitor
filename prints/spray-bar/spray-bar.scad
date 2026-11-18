@@ -4,7 +4,7 @@
 // locked outlet pipe); that fitting stays.
 //
 // v3 (2026-11-18). PETG on the Creality K2 Plus (350 x 350 x 350 mm).
-//   v3: CENTRE FEED. A drop tee plugs into the old fitting (12.5 mm plug),
+//   v3: CENTRE FEED. A drop tee plugs into the old fitting (12.4 mm plug),
 //       S-bends down by `drop`, and tees into a left and a right arm, each
 //       capped -- so the bar runs both ways from the inlet, under the fitting.
 //   v2: friction slip fits, nozzles standing out, gauge 8-15 mm.
@@ -12,14 +12,14 @@
 //
 // SIZES
 // Vevor publishes no pipe sizes (manual, product page, listings checked
-// 2026-11-18). The old bar's plug end takes the 12.5 mm gauge ring (PLA) --
-// confirm with calipers on the dry bar and set inlet_plug_od. Bar joints use
+// 2026-11-18). Old bar, calipers (user): plug 12.4 x 13.3 mm, tube 15.9 mm,
+// nozzles 11 mm apart. The old Vevor suction-cup clips fit this 16 mm bar. Bar joints use
 // fit_clear from `part = "fittest"` (PLA round: 0.0-0.2 all loose).
 //
 // LAYOUT (in the tank, x along the back glass, z up)
 //   droptee  -- plug pointing at the fitting (-x), elbow, riser down `drop`,
 //               tee whose run has a tapered spigot on each side
-//   tubes 16 / 12 mm; every joint is the old bar's 12.5 / 9 mm plug
+//   tubes 16 / 12 mm; every joint is the old bar's 12.4 mm plug (9 mm bore)
 //   L1.. / R1..  -- arm segments: socket at the tee end, spigot onward, the
 //               last one capped. Nozzles stand out nozzle_len, aimed
 //               hole_aim up; bores grow away from the tee.
@@ -35,9 +35,9 @@
 part = "assembly";   // assembly | droptee | L1 | L2 | L3 | R1 | R2 | R3 | clip | gauge | fittest
 
 // ---- fit (set from the gauge / fit test) ----------------------------------
-inlet_plug_od   = 12.5;  // old bar's plug end OD (gauge ring 12.5, PLA): caliper it
+inlet_plug_od   = 12.4;  // old bar's plug end, calipers (user, 2026-11-18)
 inlet_plug_id   = 9.0;
-inlet_plug_len  = 15.0;  // how far the plug goes into the old fitting (old bar's narrow end ~15 mm, from the photo; 22 was too long -- user)
+inlet_plug_len  = 13.3;  // old bar's plug length, calipers (user, 2026-11-18)
 inlet_stub      = 8.0;   // straight 16 mm run between the elbow and the plug
 fit_clear       = -0.30; // bar joints: socket bore = spigot_od + this (set from fittest)
 // ---- drop tee ----------------------------------------------------------
@@ -55,14 +55,16 @@ seg_max         = 320.0; // longest segment body (K2 Plus 350 incl. spigot)
 bar_od          = 16.0;  // user: tubes no thicker than 16-17 mm
 bar_id          = 12.0;
 spigot_len      = 25.0;
-spigot_od       = 12.5;  // same as the old bar's plug: one fit for every joint
+spigot_od       = 12.4;  // same as the old bar's plug: one fit for every joint
 spigot_id       = 9.0;
 spigot_lead     = 0.4;   // tip is this much smaller: starts easily, tightens as it seats
 cap_t           = 3.0;   // end cap thickness on the last segment
 // ---- nozzles -----------------------------------------------------------
-hole_pitch      = 30.0;  // mm between nozzles
-hole_d_near     = 2.3;   // bore nearest the feed
-hole_d_far      = 2.9;   // bore farthest from the feed
+hole_pitch      = 11.0;  // mm between nozzles: the old bar's spacing, calipers (user)
+hole_d_near     = 1.6;   // bore nearest the feed. Small because there are many: each arm's
+                         // total nozzle area stays under the 12 mm bore's 113 mm2, so the far
+                         // nozzles are not starved. Drill out with a 1.6 mm bit if any print shut.
+hole_d_far      = 2.0;   // bore farthest from the feed
 nozzle_len      = 6.0;   // how far a nozzle stands out of the bar
 nozzle_wall     = 1.2;   // 3 perimeters
 hole_margin     = 15.0;  // keep nozzles this far from any joint
