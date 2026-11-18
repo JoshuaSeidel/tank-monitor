@@ -41,7 +41,7 @@ part = "assembly";   // assembly | seg1 | seg2 | seg3 | inlet | clip | gauge | f
 // ---- fit (set from the gauge / fit test) ----------------------------------
 inlet_bore      = 12.0;  // sleeve bore over the locked pipe = snug gauge ring
 inlet_sleeve    = 30.0;  // how far the sleeve slides over the pipe
-fit_clear       = 0.10;  // bar joints: socket bore = spigot_od + this
+fit_clear       = -0.30; // bar joints: socket bore = spigot_od + this (negative: K2 Plus prints holes oversize; set from fittest)
 // ---- bar ---------------------------------------------------------------
 bar_od          = 24.0;
 bar_id          = 19.0;
@@ -221,18 +221,20 @@ module gauge() {
     }
 }
 
-// Joint fit test: one tapered spigot and three short sockets at fit_clear
-// 0.0 / 0.1 / 0.2, each socket carrying its number on a tab. The socket that
+// Joint fit test: one tapered spigot and short sockets at the fit_clear
+// values below, each socket carrying its number on a tab. The socket that
 // pushes on firmly and holds when you shake it is the fit_clear to use.
 // Print standing, like the segments.
-fit_tests = [0.0, 0.1, 0.2];
+// Round 1 (0.0 / 0.1 / 0.2) were ALL loose on the K2 Plus in PETG
+// (2026-11-18): it prints holes oversize, so round 2 goes negative.
+fit_tests = [-0.1, -0.2, -0.3, -0.4, -0.5, -0.6];
 module fittest() {
     difference() {
         cylinder(d1 = spigot_od, d2 = spigot_od - spigot_lead, h = spigot_len);
         translate([0, 0, -eps]) cylinder(d = spigot_id, h = spigot_len + 2 * eps);
     }
     for (k = [0 : len(fit_tests) - 1])
-        translate([0, (k + 1) * (bar_od + 8), 0]) {
+        translate([(k % 2) * (bar_od + 26), (floor(k / 2) + 1) * (bar_od + 6), 0]) {
             difference() {
                 cylinder(d = bar_od, h = spigot_len + 2);
                 translate([0, 0, -eps]) cylinder(d = spigot_od + fit_tests[k], h = spigot_len + 3);
