@@ -22,7 +22,7 @@
 //   L1.. / R1..  -- arm segments: socket at the tee end, spigot onward, the
 //               last one capped. Nozzles stand out nozzle_len, aimed
 //               hole_aim up; bores grow away from the tee.
-// With equal arms, L and R segments are identical: print each twice.
+// Arms as set below: left 20 in = L1 + L2, right 6 in = R1 (one capped piece).
 //
 // PRINTING
 // Segments stand upright, socket end down, exactly as exported; nozzles and
@@ -43,8 +43,12 @@ fit_clear       = -0.30; // bar joints: socket bore = spigot_od + this (set from
 drop            = 60.0;  // plug centreline to bar centreline, mm (how much lower)
 riser_od        = 18.0;
 riser_id        = 12.0;
-arm_left        = 540.0; // tee centre to the left cap, mm
-arm_right       = 540.0; // tee centre to the right cap, mm
+arm_left        = 508.0; // tee centre to the left cap: 20 in (user, 2026-11-18)
+arm_right       = 152.4; // tee centre to the right cap: 6 in (user, 2026-11-18)
+// Which way the plug points, facing the tank: +1 = right, -1 = left. The old
+// bar ran toward the long (left) side, so its fitting opens left and the
+// plug points RIGHT into it. Flip if the old bar ran right.
+plug_dir        = 1;
 seg_max         = 320.0; // longest segment body (K2 Plus 350 incl. spigot)
 // ---- bar ---------------------------------------------------------------
 bar_od          = 24.0;
@@ -78,8 +82,11 @@ tee_half = riser_od / 2 + 4 + spigot_len;   // tee centre to a spigot tip
 // Each arm is split into equal segments no longer than seg_max.
 function n_segs(arm) = ceil((arm - tee_half + spigot_len) / seg_max);
 function seg_len(arm) = (arm - tee_half + spigot_len) / n_segs(arm);
-// Bore grows with distance from the tee (x in mm from the tee centre).
-function hole_d(x, arm) = hole_d_near + (hole_d_far - hole_d_near) * x / arm;
+// Bore grows with distance from the tee (x in mm from the tee centre),
+// scaled to the LONGER arm so both arms use the same size at the same
+// distance and the short arm does not get the far-end bores.
+arm_max = max(arm_left, arm_right);
+function hole_d(x, arm) = hole_d_near + (hole_d_far - hole_d_near) * x / arm_max;
 function skipped(x, sk) = len([for (s = sk) if (x >= s[0] && x <= s[1]) 1]) > 0;
 
 // A horizontal hole along +y, for a part printed upright (+z up): a teardrop
@@ -166,17 +173,17 @@ module droptee() {
             spigot_x(1); spigot_x(-1);
             cylinder(d = riser_od, h = drop);                         // riser
             translate([0, 0, drop]) sphere(d = riser_od);             // elbow
-            translate([0, 0, drop]) rotate([0, -90, 0])
+            translate([0, 0, drop]) rotate([0, plug_dir * 90, 0])
                 cylinder(d = riser_od, h = inlet_stub);               // stub toward the fitting
-            translate([-inlet_stub + eps, 0, drop]) rotate([0, -90, 0])
+            translate([plug_dir * (inlet_stub - eps), 0, drop]) rotate([0, plug_dir * 90, 0])
                 cylinder(d = inlet_plug_od, h = inlet_plug_len);      // plug
         }
         rotate([0, 90, 0]) cylinder(d = bar_id, h = 2 * body + 2, center = true);
         cylinder(d = riser_id, h = drop);
         translate([0, 0, drop]) sphere(d = riser_id);
-        translate([0, 0, drop]) rotate([0, -90, 0]) cylinder(d = inlet_plug_id, h = inlet_stub + inlet_plug_len + 1);
+        translate([0, 0, drop]) rotate([0, plug_dir * 90, 0]) cylinder(d = inlet_plug_id, h = inlet_stub + inlet_plug_len + 1);
         // lead-in chamfer on the plug tip
-        translate([-inlet_stub - inlet_plug_len - eps, 0, drop]) rotate([0, 90, 0])
+        translate([plug_dir * (inlet_stub + inlet_plug_len + eps), 0, drop]) rotate([0, -plug_dir * 90, 0])
             difference() {
                 cylinder(d = inlet_plug_od + 2, h = 1);
                 cylinder(d1 = inlet_plug_od - 1, d2 = inlet_plug_od, h = 1);
