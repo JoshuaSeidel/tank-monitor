@@ -50,17 +50,22 @@
 #
 #   * During the plateau of a lit phase, while the reading looks lit, the
 #     plateau lux is tracked as an average ("Light Learned Lux").
-#   * Plateau and reading below max(20 lx, a quarter of the learned level)
-#     for 5 minutes = the lamp is dark when it should be lit. Re-push.
+#   * Plateau and reading below max(floor, a quarter of the learned level)
+#     for 5 minutes = the lamp is dark when it should be lit. Re-push. The
+#     floor is 15% of the learned level, at most 20 lx (10 lx before anything
+#     is learned) -- floors in plain lux broke when the sensor moved to the
+#     side glass and full dropped from ~88 to ~38 lx (2026-11-18).
 #   * Outside the photoperiod and reading above 5% of the learned level
-#     (floor 10 lx; 15 lx before anything is learned) for 5 minutes = lit
+#     (floor 10 lx or a quarter of the learned level, whichever is lower;
+#     15 lx before anything is learned) for 5 minutes = lit
 #     when it should be dark (lights left on overnight is the algae case):
 #     "Light Brighter Than Schedule", and a re-push. Waits for the daylight
 #     reference (cal_nir_ref) or the sun below -6 deg: tank_lux passes
 #     sunlight through as lamp light until the reference is learned. (Was
 #     HALF the learned level, which a lamp creeping back on at 1 lx/min
 #     after sunset on 2026-10-19 never reached.)
-#   * On the daylight curve, well above the curve (1.5x + 5%) for 5 minutes also
+#   * On the daylight curve, well above the curve (1.5x + max(5%, min(15 lx,
+#     30%))) for 5 minutes also
 #     counts, and suspends the curve until midnight: the single scene is
 #     pushed instead, which darkens / corrects the lamp at once.
 #   * No more than one fix per 15 minutes; after 3 fixes that did not take,
@@ -1478,7 +1483,12 @@ interval:
 
           bool dark = false, over = false;
           if (expect == 4) {
-            const float dark_below = std::max(20.0f, 0.25f * learned * frac);
+            // Floors scale with what this view sees at full: the sensor moved
+            // from beside the lamp (~88 lx at full) to the side glass looking
+            // into the water (~38 lx) on 2026-11-18, and a fixed 20 lx floor
+            // read every lit minute below half the peak as "dark".
+            const float dark_floor = learned > 0.0f ? std::min(20.0f, 0.15f * learned) : 10.0f;
+            const float dark_below = std::max(dark_floor, 0.25f * learned * frac);
             const bool learn = id(lp_curve) ? rel >= 0.7f
                                             : (m >= on + ramp + 5 && m < off - ramp - 5);
             if (lux < dark_below) {
@@ -1499,12 +1509,12 @@ interval:
             // the evening before this check was written read 0 throughout.
             const bool daylight_ok = id(cal_nir_ref) > 0.0f ||
                 chihiros::daylight::elevation(now.timestamp, ${light_latitude}, ${light_longitude}) < -6.0;
-            const float limit = learned > 0.0f ? std::max(10.0f, 0.05f * learned) : 15.0f;
+            const float limit = learned > 0.0f ? std::max(std::min(10.0f, 0.25f * learned), 0.05f * learned) : 15.0f;
             if (daylight_ok && lux > limit) over = true;
           } else if (id(lp_curve) && learned > 0.0f && !dark) {
             // On the curve the level is known all day: well above it is a
             // point the lamp holds that the board did not write.
-            if (lux > 1.5f * learned * frac + std::max(15.0f, 0.05f * learned)) over = true;
+            if (lux > 1.5f * learned * frac + std::max(std::min(15.0f, 0.3f * learned), 0.05f * learned)) over = true;
             // ...unless NIR jumped with it: the sensor was uncovered after a
             // level learned while it was blocked. That is a new view, not a
             // brighter lamp: relearn, and never suspend the curve for it.
