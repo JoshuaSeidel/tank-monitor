@@ -19,6 +19,7 @@
 // LAYOUT (in the tank, x along the back glass, z up)
 //   droptee  -- plug pointing at the fitting (-x), elbow, riser down `drop`,
 //               tee whose run has a tapered spigot on each side
+//   tubes 16 / 12 mm; every joint is the old bar's 12.5 / 9 mm plug
 //   L1.. / R1..  -- arm segments: socket at the tee end, spigot onward, the
 //               last one capped. Nozzles stand out nozzle_len, aimed
 //               hole_aim up; bores grow away from the tee.
@@ -36,13 +37,13 @@ part = "assembly";   // assembly | droptee | L1 | L2 | L3 | R1 | R2 | R3 | clip 
 // ---- fit (set from the gauge / fit test) ----------------------------------
 inlet_plug_od   = 12.5;  // old bar's plug end OD (gauge ring 12.5, PLA): caliper it
 inlet_plug_id   = 9.0;
-inlet_plug_len  = 22.0;  // how far the plug goes into the old fitting
-inlet_stub      = 12.0;  // straight run before the elbow, clear of the fitting
+inlet_plug_len  = 15.0;  // how far the plug goes into the old fitting (old bar's narrow end ~15 mm, from the photo; 22 was too long -- user)
+inlet_stub      = 8.0;   // straight 16 mm run between the elbow and the plug
 fit_clear       = -0.30; // bar joints: socket bore = spigot_od + this (set from fittest)
 // ---- drop tee ----------------------------------------------------------
 drop            = 60.0;  // plug centreline to bar centreline, mm (how much lower)
-riser_od        = 18.0;
-riser_id        = 12.0;
+riser_od        = 16.0;
+riser_id        = 11.0;
 arm_left        = 508.0; // tee centre to the left cap: 20 in (user, 2026-11-18)
 arm_right       = 152.4; // tee centre to the right cap: 6 in (user, 2026-11-18)
 // Which way the plug points, facing the tank: +1 = right, -1 = left. The old
@@ -51,11 +52,11 @@ arm_right       = 152.4; // tee centre to the right cap: 6 in (user, 2026-11-18)
 plug_dir        = 1;
 seg_max         = 320.0; // longest segment body (K2 Plus 350 incl. spigot)
 // ---- bar ---------------------------------------------------------------
-bar_od          = 24.0;
-bar_id          = 19.0;
+bar_od          = 16.0;  // user: tubes no thicker than 16-17 mm
+bar_id          = 12.0;
 spigot_len      = 25.0;
-spigot_od       = 21.0;
-spigot_id       = 17.0;
+spigot_od       = 12.5;  // same as the old bar's plug: one fit for every joint
+spigot_id       = 9.0;
 spigot_lead     = 0.4;   // tip is this much smaller: starts easily, tightens as it seats
 cap_t           = 3.0;   // end cap thickness on the last segment
 // ---- nozzles -----------------------------------------------------------
