@@ -152,7 +152,12 @@ module segment(arm, sk, i) {
         for (z = zs) if (!skipped(x0 + z, sk))
             nozzle_at(z) translate([0, bar_id / 4, 0])
                 teardrop_y_from0(hole_d(x0 + z, arm), bar_od / 2 + nozzle_len + 1);
-        translate([0, 0, spigot_len]) cylinder(d = bar_id, h = L);
+        // main bore, socket to the top of THIS segment only (it used to run on
+        // through the spigot and leave it a 0.2 mm skin the slicer dropped);
+        // starts 2 mm above the socket so a narrower lip stops the next
+        // segment's spigot at full depth instead of letting it slide in
+        translate([0, 0, spigot_len + 2]) cylinder(d = bar_id, h = L - spigot_len - 2 + eps);
+        translate([0, 0, spigot_len]) cylinder(d = spigot_id + 1, h = 2 + eps);
     }
     if (last)   // closed far end
         translate([0, 0, L - cap_t]) cylinder(d = bar_od, h = cap_t);
@@ -181,7 +186,8 @@ module droptee() {
             translate([plug_dir * (inlet_stub - eps), 0, drop]) rotate([0, plug_dir * 90, 0])
                 cylinder(d = inlet_plug_od, h = inlet_plug_len);      // plug
         }
-        rotate([0, 90, 0]) cylinder(d = bar_id, h = 2 * body + 2, center = true);
+        rotate([0, 90, 0]) cylinder(d = bar_id, h = 2 * body - 4, center = true);   // stops 2 mm short each side so the spigot roots stay full wall
+        rotate([0, 90, 0]) cylinder(d = spigot_id, h = 2 * tee_half + 2, center = true);  // open through to the spigots
         cylinder(d = riser_id, h = drop);
         translate([0, 0, drop]) sphere(d = riser_id);
         translate([0, 0, drop]) rotate([0, plug_dir * 90, 0]) cylinder(d = inlet_plug_id, h = inlet_stub + inlet_plug_len + 1);
