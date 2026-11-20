@@ -213,8 +213,11 @@ module droptee() {
             rotate([0, 90, 0]) cylinder(d = bar_od, h = 2 * body, center = true);
             spigot_x(1); spigot_x(-1);
             // nozzles on the tee itself: centre and one pitch each side, so
-            // the middle of the bar sprays (2026-11-19: "big gap in the middle")
-            for (x = tee_nozzles()) translate([x, 0, 0]) rotate([hole_aim, 0, 0])
+            // the middle of the bar sprays (2026-11-19: "big gap in the middle").
+            // They face -y: with the plug pointing right (+x) into the fitting
+            // and z up, -y is toward the FRONT glass (2026-11-20: were facing
+            // the back glass)
+            for (x = tee_nozzles()) translate([x, 0, 0]) rotate([0, 0, 180]) rotate([hole_aim, 0, 0])
                 translate([0, bar_id / 2, 0])
                     teardrop_stub(hole_d(abs(x), 0) + 2 * nozzle_wall, (bar_od - bar_id) / 2 + nozzle_len);
             cylinder(d = riser_od, h = drop);                         // riser
@@ -226,7 +229,7 @@ module droptee() {
         }
         rotate([0, 90, 0]) cylinder(d = bar_id, h = 2 * body - 4, center = true);   // stops 2 mm short each side so the spigot roots stay full wall
         rotate([0, 90, 0]) cylinder(d = spigot_id, h = 2 * tee_half + 2, center = true);  // open through to the spigots
-        for (x = tee_nozzles()) translate([x, 0, 0]) rotate([hole_aim, 0, 0])
+        for (x = tee_nozzles()) translate([x, 0, 0]) rotate([0, 0, 180]) rotate([hole_aim, 0, 0])
             translate([0, bar_id / 4, 0]) teardrop_y_from0(hole_d(abs(x), 0), bar_od / 2 + nozzle_len + 1);
         cylinder(d = riser_id, h = drop);
         translate([0, 0, drop]) sphere(d = riser_id);
