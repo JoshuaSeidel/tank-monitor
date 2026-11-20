@@ -38,9 +38,11 @@ part = "assembly";   // assembly | droptee | L1 | L2 | L3 | R1 | R2 | R3 | clip 
 inlet_plug_od   = 12.4;  // old bar's plug end, calipers (user, 2026-11-18)
 inlet_plug_id   = 9.0;
 inlet_plug_len  = 13.3;  // old bar's plug length, calipers (user, 2026-11-18)
-inlet_stub      = 8.0;   // straight 16 mm run between the elbow and the plug
-fit_clear       = -0.50; // bar joints: socket bore = spigot_od + this. Fit test said -0.6, but -0.7 on the real
-                         // bar had to be sanded a lot (the spigot tops a tall tower and prints fat): -0.5
+inlet_stub      = 23.0;  // straight run from the elbow to the plug: 8 mm clearance + ~15 mm that goes
+                         // into the fitting like the old bar's 16 mm tube (user, 2026-11-20)
+stub_od         = 15.7;  // that run's OD: old tube 15.9, less 0.2 because it prints lying (fat)
+fit_clear       = -0.20; // bar joints: socket bore = spigot_od + this. -0.5 and -0.7 both had to be
+                         // sanded (spigots on tall towers print fat); user prefers loose + PTFE tape
 // ---- drop tee ----------------------------------------------------------
 drop            = 25.0;  // plug centreline to bar centreline, mm (how much lower). User 2026-11-18: 60 -> 15 -> 25
 riser_od        = 16.0;
@@ -59,18 +61,20 @@ spigot_len      = 14.0;  // joint depth. 25 -> 14 (2026-11-19): shorter lever, l
 spigot_od       = 12.4;  // same as the old bar's plug: one fit for every joint
 spigot_id       = 8.0;   // 9 -> 8: 2.2 mm wall instead of 1.7 (L1's spigot snapped)
 spigot_lead     = 0.4;   // tip is this much smaller: starts easily, tightens as it seats
-tee_spigot_trim = 0.3;   // tee spigots print LYING (bed side squashed wide, layer steps) and came out
-                         // tight in the segment sockets: 0.3 mm smaller than the segments' spigots.
-                         // Loose is fixed with PTFE tape; tight needs sanding (user, 2026-11-20).
+tee_spigot_trim = 0.20;  // tee spigots print LYING (bed side squashed wide): this much smaller than
+                         // the segments' spigots so they do not need sanding
 root_fillet     = 2.5;   // cone at the spigot root (16 -> spigot_od): no sharp corner for the layers to
                          // snap at; the socket mouth is coned to match so the joint closes flush
 cap_t           = 3.0;   // end cap thickness on the last segment
 // ---- nozzles -----------------------------------------------------------
-hole_pitch      = 11.0;  // mm between nozzles: the old bar's spacing, calipers (user)
-hole_d_near     = 1.6;   // bore nearest the feed. Small because there are many: each arm's
-                         // total nozzle area stays under the 12 mm bore's 113 mm2, so the far
-                         // nozzles are not starved. Drill out with a 1.6 mm bit if any print shut.
-hole_d_far      = 1.9;   // bore farthest from the feed (L2 is fed through the 8 mm spigot bore)
+hole_pitch      = 22.0;  // mm between nozzles. 11 -> 22 (2026-11-20): at 11 the nozzles had ~2x the
+                         // inlet's area, no pressure built and R1 + the tee took nearly all the flow
+grid_offset     = 11.0;  // nozzles sit at +/-11, +/-33, ... from the tee centre: two on the tee, then
+                         // every 22 mm, the same spacing straight through the tee
+hole_d_near     = 1.3;   // bores grow from 1.3 at the tee to 1.7 at the far left cap. Total area ~50 mm2,
+                         // under the 9 mm inlet bore's 64 mm2, left arm ~83% of it. Drill with a
+                         // 1.3-1.5 mm bit if any print partly shut.
+hole_d_far      = 1.7;
 nozzle_len      = 6.0;   // how far a nozzle stands out of the bar
 nozzle_wall     = 1.2;   // 3 perimeters
 hole_margin     = 2.4;   // keep nozzles this far from a joint. Nozzles sit on ONE pitch from the tee
@@ -89,7 +93,7 @@ $fn = 96;
 
 eps = 0.01;
 // Tee body wide enough to carry nozzles at 0 and +/- one pitch (stub + margin).
-tee_body = max(riser_od / 2 + 4, hole_pitch + hole_margin + 0.6);
+tee_body = max(riser_od / 2 + 4, grid_offset + hole_margin + 0.6);
 tee_half = tee_body + root_fillet + spigot_len;      // tee centre to a spigot tip
 // Each arm is split into equal segments no longer than seg_max.
 function n_segs(arm) = ceil((arm - tee_body) / seg_max);
@@ -97,11 +101,16 @@ function n_segs(arm) = ceil((arm - tee_body) / seg_max);
 // joint's dead zone (hole_margin + fillet + socket + hole_margin = 21.3 mm,
 // under two pitches) is centred on one nozzle position, so each joint costs
 // exactly that one nozzle and the spacing either side stays 11 mm.
+// joint_gap = a joint's dead zone (margin + fillet + socket + margin). When it
+// fits between two nozzles (22 mm pitch: 21.3 mm) the joint is placed there
+// and costs no nozzle; otherwise it is centred on one and costs that one.
+joint_dead = spigot_len + root_fillet + 2 * hole_margin;
+joint_off  = joint_dead < hole_pitch ? (hole_pitch - (spigot_len + root_fillet)) / 2
+                                     : -(spigot_len + root_fillet) / 2;
 function joint(arm, k) =
     k == 0 ? tee_body :
     k >= n_segs(arm) ? arm :
-    hole_pitch * round((tee_body + k * (arm - tee_body) / n_segs(arm) + (spigot_len + root_fillet) / 2) / hole_pitch)
-        - (spigot_len + root_fillet) / 2;
+    grid_offset + joint_off + hole_pitch * round((tee_body + k * (arm - tee_body) / n_segs(arm) - grid_offset - joint_off) / hole_pitch);
 function seg_len(arm, i = 0) = joint(arm, i + 1) - joint(arm, i);
 // Bore grows with distance from the tee (x in mm from the tee centre),
 // scaled to the LONGER arm so both arms use the same size at the same
@@ -156,7 +165,7 @@ module segment(arm, sk, i) {
     // joint are left out.
     zlo = spigot_len + root_fillet + hole_margin;
     zhi = L - hole_margin - (last ? cap_t : 0);
-    zs = [for (k = [ceil((x0 + zlo) / hole_pitch) : floor((x0 + zhi) / hole_pitch)]) k * hole_pitch - x0];
+    zs = [for (k = [ceil((x0 + zlo - grid_offset) / hole_pitch) : floor((x0 + zhi - grid_offset) / hole_pitch)]) grid_offset + k * hole_pitch - x0];
     difference() {
         union() {
             tube(bar_od, bar_id, L);
@@ -192,7 +201,7 @@ module segment(arm, sk, i) {
         translate([0, 0, L - cap_t]) cylinder(d = bar_od, h = cap_t);
 }
 
-function tee_nozzles() = [for (x = [-hole_pitch, 0, hole_pitch])
+function tee_nozzles() = [for (x = [-grid_offset, grid_offset])
     if (!skipped(abs(x), x < 0 ? skip_left : skip_right)) x];
 
 // Drop tee, in tank orientation: tee run along x at z = 0, riser up to
@@ -227,7 +236,7 @@ module droptee() {
             cylinder(d = riser_od, h = drop);                         // riser
             translate([0, 0, drop]) sphere(d = riser_od);             // elbow
             translate([0, 0, drop]) rotate([0, plug_dir * 90, 0])
-                cylinder(d = riser_od, h = inlet_stub);               // stub toward the fitting
+                cylinder(d = stub_od, h = inlet_stub);                // stub toward (and into) the fitting
             translate([plug_dir * (inlet_stub - eps), 0, drop]) rotate([0, plug_dir * 90, 0])
                 cylinder(d = inlet_plug_od, h = inlet_plug_len);      // plug
         }
