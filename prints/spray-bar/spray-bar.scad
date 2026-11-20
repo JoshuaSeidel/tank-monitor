@@ -59,6 +59,9 @@ spigot_len      = 14.0;  // joint depth. 25 -> 14 (2026-11-19): shorter lever, l
 spigot_od       = 12.4;  // same as the old bar's plug: one fit for every joint
 spigot_id       = 8.0;   // 9 -> 8: 2.2 mm wall instead of 1.7 (L1's spigot snapped)
 spigot_lead     = 0.4;   // tip is this much smaller: starts easily, tightens as it seats
+tee_spigot_trim = 0.3;   // tee spigots print LYING (bed side squashed wide, layer steps) and came out
+                         // tight in the segment sockets: 0.3 mm smaller than the segments' spigots.
+                         // Loose is fixed with PTFE tape; tight needs sanding (user, 2026-11-20).
 root_fillet     = 2.5;   // cone at the spigot root (16 -> spigot_od): no sharp corner for the layers to
                          // snap at; the socket mouth is coned to match so the joint closes flush
 cap_t           = 3.0;   // end cap thickness on the last segment
@@ -196,11 +199,12 @@ function tee_nozzles() = [for (x = [-hole_pitch, 0, hole_pitch])
 // z = drop, elbow, plug pointing -x into the old fitting. Exported as is:
 // tee run on the bed, tree supports under the plug arm.
 module spigot_x(dir) {   // filleted root + tapered spigot from the tee body along +/-x
+    sod = spigot_od - tee_spigot_trim;
     rotate([0, dir * 90, 0]) translate([0, 0, tee_body - eps]) difference() {
         union() {
-            cylinder(d1 = bar_od, d2 = spigot_od, h = root_fillet + eps);
+            cylinder(d1 = bar_od, d2 = sod, h = root_fillet + eps);
             translate([0, 0, root_fillet])
-                cylinder(d1 = spigot_od, d2 = spigot_od - spigot_lead, h = spigot_len);
+                cylinder(d1 = sod, d2 = sod - spigot_lead, h = spigot_len);
         }
         translate([0, 0, -eps]) cylinder(d = spigot_id, h = root_fillet + spigot_len + 3 * eps);
     }
